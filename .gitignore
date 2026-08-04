@@ -1,0 +1,23 @@
+# SCF キャッシュ (モデルを変えたら手で消すこと — キーに処方が入っていない)
+atom_cache_*.jls
+atom_cache_*.pkl
+
+# 生成テーブル・ビルド成果物
+prod*/
+build/
+*.log
+
+# Julia
+Manifest.toml
+/docs/build/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# エディタ・OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
