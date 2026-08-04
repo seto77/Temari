@@ -10,6 +10,8 @@ ionization.jl の物理で、ReciPro に同梱するテーブル 1 式 (チャ�
      メッシュ ppw 25→30 / dt_log 2e-3→1.0e-3)
   3. E0 グリッドを約 2 倍に密化 (v2 の出荷誤差の主因はテーブルの E0 補間
      ~2e-4 で、計算そのものの収束 2e-6 より 2 桁大きかった)
+  4. s グリッドを s≤4 (81 点) → s≤8 (161 点) へ延長 (260805Cl。理由は
+     S_GRID の定義コメント)
 
 使い方 (レーン分割で複数プロセス並行可。出力先が同じでも resume 安全)。
 ⚠ --gcthreads=1 を必ず付ける: Julia 1.12/Windows の並列 GC は高負荷の
@@ -30,7 +32,16 @@ include(joinpath(@__DIR__, "ionization.jl"))
 const OUT_DEFAULT = joinpath(@__DIR__, "prod_v3_jl")
 
 # ---- 出荷グリッド (v2 と同じ s、E0 は密化) ----
-const S_GRID = collect(0.0:0.05:4.0)           # 81 点 [Å⁻¹] (C# 側の契約)
+# 260805Cl 変更: s 上限 4.0 → 8.0 Å⁻¹ (81 → 161 点)。
+# 理由: 正典の SrTiO₃ fixture (a=0.3905nm, 125 beams, 200kV) が実際に要求する
+# s は max|q+g_i−g_j|/2 = 5.56 Å⁻¹ で、全行列要素の 5.5 % が s>4 に落ちていた。
+# 設計書 §5.9 の「s_max ≥ 1.2·max|q+g_i−g_j|/2」を 4.0 は満たしていない。
+# v2 までは指数 tail 外挿がそれを埋めていたが、v3 は SRC で L1 (2s、動径ノードあり)
+# の高 s が押し下げられ窓内でゼロ交差するため tail が張れず、外挿要求が例外になる。
+# s 方向の刻みを粗くして上限を伸ばす案は補間誤差 2-4e-2 (E0 補間誤差の 100 倍) で不可。
+# ノード追加のコストは実測 +48 % (L1 Z=38 QUICK: 2.77s → 4.11s)。
+const S_GRID = collect(0.0:0.05:8.0)           # 161 点 [Å⁻¹] (C# 側の契約)
+# const S_GRID = collect(0.0:0.05:4.0)         # 260804Cl まで: 81 点 (s≤4)
 # E0 絶対ノード: v2 の 13 点 → 22 点 (中間点を挿入)
 const E0_ABS_KEV = [30.0, 35.0, 40.0, 45.0, 50.0, 60.0, 70.0, 80.0, 90.0,
                     100.0, 110.0, 120.0, 135.0, 150.0, 170.0, 200.0, 225.0,
@@ -100,8 +111,12 @@ function e0_grid(z::Int, tag::String)
     return out, eth
 end
 
-"""s=4 の外側への指数外挿 F ≈ a·exp(−b·s) (Python 版 tail_fit と同一の規則)。
-末尾 6 点が正・単調減少・b>0 の全てを満たすときだけ有効、a は F(4) を厳密に通す。"""
+"""s_max (= S_GRID[end]) の外側への指数外挿 F ≈ a·exp(−b·s)
+(Python 版 tail_fit と同一の規則)。末尾 6 点が正・単調減少・b>0 の全てを満たす
+ときだけ有効で、a は F(s_max) を厳密に通す。
+⚠ L1 (2s) の中程度 Z は高 s で符号反転するため、この規則では tail を張れない
+(v3 で新たに発生。260805Cl に s_max を 8 へ伸ばしたのは、外挿に頼らず実データで
+実用域を覆うため)。tail=null の行を挟む s>s_max 要求は C# 側で明示エラーになる。"""
 function tail_fit(s::AbstractVector, F::AbstractVector)
     ts = s[end-5:end]
     tF = F[end-5:end]
@@ -160,8 +175,9 @@ function run_channel(z::Int, tag::String, outdir::String;
                 "mres" => d["max_match_resid"], "badL" => d["bad_significant_l"],
                 "rtail" => d["r_tail_max"], "ortho_c" => d["max_ortho_c"],
                 "retried" => retried)))
-        @printf("  Z=%d %s @%7.1fkV (u=%7.2f) done %d/%d  F(4)=%+.3e  s/B=%.3f [%.1fmin]\n",
-                z, tag, e0, e0 / eth, i, length(e0s), F[end],
+        # 260805Cl: 表示する F は末尾ノード = S_GRID[end] (s_max。4.0 決め打ちをやめた)
+        @printf("  Z=%d %s @%7.1fkV (u=%7.2f) done %d/%d  F(%.0f)=%+.3e  s/B=%.3f [%.1fmin]\n",
+                z, tag, e0, e0 / eth, i, length(e0s), S_GRID[end], F[end],
                 o["sigma_own_nm2"] / max(o["sigma_bote_nm2"], 1e-300),
                 (time() - t0) / 60.0)
         flush(stdout)                          # 260804Cl 追加: ログ redirect 時の mtime 監視用
