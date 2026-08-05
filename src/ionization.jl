@@ -426,6 +426,12 @@ const _T8 = NTuple{8,Float64}
 @inline _scale8(X::_T8, j0::_T8) = ntuple(j -> (sin(X[j]) / X[j]) / j0[j], Val(8))
 @inline _j0_8(X::_T8) = ntuple(j -> sin(X[j]) / X[j], Val(8))
 @inline _j1_8(X::_T8) = ntuple(j -> sin(X[j]) / X[j]^2 - cos(X[j]) / X[j], Val(8))
+# 260805Cl 修正: 8 点グループの構築も引数渡しヘルパ経由にする。従来の
+# `X = ntuple(j -> xb[i+j-1], Val(8))` は while ループ内で再代入される i を
+# 閉包が捕捉して Core.Box 化し (上の注意書きの罠そのもの。ただし核内ではなく
+# ディスパッチ側)、グループごとに動的参照 + 実測 ~3.5 KB/call の割り当てを
+# 生んでいた。値はビット同一のまま (同一のロード列)。
+@inline _x8of(xb::Vector{Float64}, i::Int) = ntuple(j -> xb[i+j-1], Val(8))
 
 """Miller 下方漸化の 8 点同時版。tab は転置テーブル (i 内側 × λ 外側) で、
 tab[off + j + l*tile] = j_l(X[j])。演算列はスカラー版 sph_jl_all! と同一。"""
@@ -509,8 +515,7 @@ function sph_jl_tile!(tab::Vector{Float64}, tile::Int, m::Int, lmax::Int,
             _jl_scalar_scatter!(tab, tile, i, lmax, xb[i], tmp)
             i += 1
         else
-            X = ntuple(j -> xb[i+j-1], Val(8))
-            _jl8_miller!(tab, tile, i - 1, lmax, X)
+            _jl8_miller!(tab, tile, i - 1, lmax, _x8of(xb, i))
             i += 8
         end
     end
@@ -519,8 +524,7 @@ function sph_jl_tile!(tab::Vector{Float64}, tile::Int, m::Int, lmax::Int,
         i += 1
     end
     @inbounds while i + 7 <= m                 # 上方域: 8 点グループ
-        X = ntuple(j -> xb[i+j-1], Val(8))
-        _jl8_upward!(tab, tile, i - 1, lmax, X)
+        _jl8_upward!(tab, tile, i - 1, lmax, _x8of(xb, i))
         i += 8
     end
     @inbounds while i <= m                     # 上方端数
