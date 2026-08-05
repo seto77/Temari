@@ -130,6 +130,60 @@ function tail_fit(s::AbstractVector, F::AbstractVector)
     return Dict{String,Any}("a" => a, "b" => b)
 end
 
+"""260805Cl 追加: E0 行単位のチェックポイント。
+Julia の GC は高割り当てで落ちる (Windows で実測) ので、チャネル単位の原子性だけだと
+1 回のクラッシュで最大 30 分ぶんの行計算を捨てることになる。行を 1 本計算するたびに
+JSON Lines へ追記しておき、再起動時に読み戻して未計算の E0 だけを回す。
+
+- 各行は独立に計算されるので、途中再開しても結果はビット同一
+- クラッシュで最終行が書きかけになりうるので、パースできない行は捨てる
+- 同じチャネルを 2 レーンが同時に掴んだ場合 (稀) も、e0 で重複排除して吸収する
+"""
+partial_path(outdir, tag, z) = joinpath(outdir, "F_$(tag)_Z$(z).partial.jsonl")
+
+"区切り行 (write_json は整形出力なので 1 行 1 レコードにはできない。この行で区切る)"
+const PARTIAL_SEP = "#--row--"
+
+function load_partial(outdir, tag, z)
+    p = partial_path(outdir, tag, z)
+    done = Dict{Float64,Dict{String,Any}}()
+    isfile(p) || return done
+    buf = IOBuffer()
+    for line in eachline(p)
+        if strip(line) == PARTIAL_SEP
+            try
+                d = _json_value(take!(buf), 1)[1]
+                if d isa Dict && haskey(d, "e0_keV")
+                    # JSON の数値は全て Float64 で戻るので、整数フィールドを復元する
+                    # (これをしないと再開したチャネルだけ "badL": 0.0 と書かれてしまう)
+                    dg = d["diag"]
+                    for k in ("badL", "retried")
+                        haskey(dg, k) && (dg[k] = round(Int, dg[k]))
+                    end
+                    d["F"] = Float64[x for x in d["F"]]      # Any[] → Float64[]
+                    done[Float64(d["e0_keV"])] = d
+                end
+            catch
+                take!(buf)   # 壊れたレコードは捨てる (その E0 は計算し直す)
+            end
+        else
+            println(buf, line)
+        end
+    end
+    # 区切りが来ていない末尾 = クラッシュで書きかけ。捨てる
+    return done
+end
+
+"1 レコードを追記して即 flush (次のクラッシュで確実に残す)"
+function append_partial(outdir, tag, z, row)
+    open(partial_path(outdir, tag, z), "a") do io
+        write_json(io, row)
+        println(io)
+        println(io, PARTIAL_SEP)
+        flush(io)
+    end
+end
+
 "1 チャネル (Z, tag) の全 E0 行を計算して JSON に書く"
 function run_channel(z::Int, tag::String, outdir::String;
                      settings=HIGH_SETTINGS, rel::Bool=true)
@@ -142,8 +196,18 @@ function run_channel(z::Int, tag::String, outdir::String;
     t0 = time()
     rows = Vector{Dict{String,Any}}()
     failures = Vector{Dict{String,Any}}()
+    mkpath(outdir)
+    resumed = load_partial(outdir, tag, z)      # 260805Cl: 途中再開
+    if !isempty(resumed)
+        @printf("  [resume] Z=%d %s: %d/%d 行を再利用\n",
+                z, tag, length(resumed), length(e0s))
+    end
     for (i, e0) in enumerate(e0s)
         e0 <= eth && continue                  # 端以下 (念のため)
+        if haskey(resumed, e0)                 # 260805Cl: 計算済みの行はそのまま使う
+            push!(rows, resumed[e0])
+            continue
+        end
         o = compute_channel(z, tag, e0; settings=settings, s_nodes=S_GRID,
                             verbose=false, rel_continuum=rel)
         retried = 0
@@ -166,7 +230,7 @@ function run_channel(z::Int, tag::String, outdir::String;
             end
         end
         F = o["F"]
-        push!(rows, Dict{String,Any}(
+        row = Dict{String,Any}(
             "e0_keV" => e0, "u" => e0 / eth, "F" => F, "N0" => o["N0"],
             "sigma_own_nm2" => o["sigma_own_nm2"],
             "sigma_bote_nm2" => o["sigma_bote_nm2"],
@@ -174,7 +238,9 @@ function run_channel(z::Int, tag::String, outdir::String;
             "diag" => Dict{String,Any}(
                 "mres" => d["max_match_resid"], "badL" => d["bad_significant_l"],
                 "rtail" => d["r_tail_max"], "ortho_c" => d["max_ortho_c"],
-                "retried" => retried)))
+                "retried" => retried))
+        push!(rows, row)
+        append_partial(outdir, tag, z, row)    # 260805Cl: 行単位チェックポイント
         # 260805Cl: 表示する F は末尾ノード = S_GRID[end] (s_max。4.0 決め打ちをやめた)
         @printf("  Z=%d %s @%7.1fkV (u=%7.2f) done %d/%d  F(%.0f)=%+.3e  s/B=%.3f [%.1fmin]\n",
                 z, tag, e0, e0 / eth, i, length(e0s), S_GRID[end], F[end],
@@ -182,6 +248,7 @@ function run_channel(z::Int, tag::String, outdir::String;
                 (time() - t0) / 60.0)
         flush(stdout)                          # 260804Cl 追加: ログ redirect 時の mtime 監視用
     end
+    sort!(rows, by = r -> r["e0_keV"])          # 260805Cl: resume 分と新規分の順序を保証
     shell, j_lower, occ_init, subshell = CHANNELS[tag]
     doc = Dict{String,Any}(
         "provenance" => "DHFS-KS23-DiracB-SRC-jsplit-fullrange-sym",
@@ -227,6 +294,7 @@ function run_channel(z::Int, tag::String, outdir::String;
         println(io)
     end
     mv(tmp, path; force=true)                  # 原子的に確定 (resume の単位)
+    rm(partial_path(outdir, tag, z); force=true)   # 260805Cl: チェックポイントは役目終了
     @printf("wrote %s  (%d rows, %d failures, %.1f min)\n\n", path, length(rows),
             length(failures), (time() - t0) / 60.0)
     flush(stdout)                              # 260804Cl 追加
