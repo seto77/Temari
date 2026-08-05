@@ -433,6 +433,28 @@ const _T8 = NTuple{8,Float64}
 # 生んでいた。値はビット同一のまま (同一のロード列)。
 @inline _x8of(xb::Vector{Float64}, i::Int) = ntuple(j -> xb[i+j-1], Val(8))
 
+# ---- 260805Cl 追加 (E5): R 累算の q レーン化用ヘルパ -----------------------
+# 8 レーンに「同一 r × 相異なる 8 本の q」を載せる。_jl8_miller! の反復回数 M は
+# lmax のみで決まり (x 非依存)、リスケールもレーン別マスク (非該当レーン ×1.0 =
+# 恒等) なので、各レーンの値は同乗レーンの x に依存せずスカラー版とビット同一。
+# レーンの意味を r→q に変えてもこの性質はそのまま成立する。
+@inline _xq8(q::Vector{Float64}, iq0::Int, r::Float64) =
+    ntuple(k -> q[iq0+k-1] * r, Val(8))
+@inline _acc8(a::_T8, g::Float64, v::_T8) =
+    ntuple(k -> a[k] + g * v[k], Val(8))       # 乗算→加算の 2 命令 (muladd/fma 不可)
+@inline _min8(X::_T8) = min(min(min(X[1], X[2]), min(X[3], X[4])),
+                            min(min(X[5], X[6]), min(X[7], X[8])))
+@inline _max8(X::_T8) = max(max(max(X[1], X[2]), max(X[3], X[4])),
+                            max(max(X[5], X[6]), max(X[7], X[8])))
+@inline _ldrow8(R::Matrix{Float64}, ic::Int, iq0::Int) =
+    ntuple(k -> R[ic, iq0+k-1], Val(8))
+@inline function _strow8!(R::Matrix{Float64}, ic::Int, iq0::Int, v::_T8)
+    @inbounds for k in 1:8
+        R[ic, iq0+k-1] = v[k]
+    end
+    return nothing
+end
+
 """Miller 下方漸化の 8 点同時版。tab は転置テーブル (i 内側 × λ 外側) で、
 tab[off + j + l*tile] = j_l(X[j])。演算列はスカラー版 sph_jl_all! と同一。"""
 function _jl8_miller!(tab::Vector{Float64}, tile::Int, off::Int, lmax::Int, X::_T8)
@@ -1786,16 +1808,73 @@ function RlTable(cont::ContinuumSet, r_b, u_b, q_lo::Float64, q_hi::Float64,
     # しており、16 プロセスでの帯域天井 (8→16 で 1.16 倍しか伸びない) の主犯だった。
     # 入れ替えで gw のタイル片 (~60 KB) が L1/L2 に留まったまま全 q を回れる。
     # ★各 (ic, iq) の累算器にタイルを昇順で足す順序は不変なので**ビット同一**。
+    # 260805Cl 変更 (E5): SIMD レーンを r 軸から q 軸へ載せ替える。
+    # P2-1 構造では 1 本の q につき r 方向の逐次 FP 加算連鎖 1 本 (レイテンシ
+    # ~3-4 cyc/要素。ビット同一契約が再結合を禁じるため縮約 SIMD 不可) だった。
+    # q を 8 本まとめて NTuple{8} レーンに載せると、各レーンはスカラー版と同一の
+    # 演算列を同一順序で実行しつつ、8 本の独立連鎖が 1 命令の vaddpd に畳まれる。
+    # ★ビット同一の根拠:
+    #   - _jl8_miller! の M は lmax のみ依存・リスケールはレーン別マスクなので、
+    #     レーン値は同乗レーンの x に依存しない (ヘルパ群のコメント参照)
+    #   - 分岐 (Miller/上方/スカラー) は _min8/_max8 で全レーン同域を保証できる
+    #     ブロックだけ SIMD、混在境界はスカラー sph_jl_all! (= 参照実装そのもの)
+    #   - 各 (ic, iq) への加算はタイル昇順・j 昇順のままで演算列不変
+    #   - q 端数 (n_q % 8) は従来経路そのまま
+    # jchunk = j サブチャンク幅。λ スラブが jchunk*8 double になるので、テーブル
+    # footprint と _jl8_miller! の store ストライドを従来水準 (≲155 KB / 1.5 KB)
+    # に保つ (128 のままだと最大 ~830 KB・8 KB ストライドで L2/TLB を溢れ、
+    # Bessel 側が最大 5 倍減速する — 実測)。24 は 2 冪ストライド共鳴 (jchunk=16 が
+    # lam_max~100 で踏む) も避ける。チャンク昇順 × j 昇順なので累算順序は不変。
     tile = 128
-    jl_tab = zeros(tile * (lam_max + 1))
+    jchunk = 24
+    jc8 = jchunk * 8
+    jl_tab = zeros(tile * (lam_max + 1))       # q 端数 (従来経路) 用
+    jl_tab8 = zeros(jc8 * (lam_max + 1))       # E5: tab[λ*jc8 + (jj-1)*8 + k]
     xb = zeros(tile)
     tmpj = zeros(lam_max + 1)
     nch = length(channels)
     fill!(R, 0.0)                              # R を累算行列として使う
+    thr = lam_max + 10.0                       # スカラー版と同じ Miller/上方境界
+    nq8 = n_q - n_q % 8                        # 8 レーンで回せる q 本数
     for i0 in 1:tile:n_int
         i1 = min(i0 + tile - 1, n_int)
         m = i1 - i0 + 1
-        for (iq, qv) in enumerate(q)
+        for iq0 in 1:8:nq8
+            for j0 in 1:jchunk:m
+                mc = min(j0 + jchunk - 1, m) - j0 + 1
+                for jj in 1:mc                 # j_λ(q_k·r_j) を 8 q レーンで評価
+                    X = _xq8(q, iq0, cont.r_int[i0+j0+jj-2])
+                    xlo = _min8(X)
+                    xhi = _max8(X)
+                    if xlo >= 1e-12 && xhi <= thr
+                        _jl8_miller!(jl_tab8, jc8, (jj - 1) * 8, lam_max, X)
+                    elseif xlo > thr
+                        _jl8_upward!(jl_tab8, jc8, (jj - 1) * 8, lam_max, X)
+                    else                       # 混在境界・δ 域: レーン別スカラー
+                        for k in 1:8
+                            sph_jl_all!(view(tmpj, 1:lam_max+1), lam_max, X[k])
+                            @inbounds for l in 0:lam_max
+                                jl_tab8[l*jc8+(jj-1)*8+k] = tmpj[l+1]
+                            end
+                        end
+                    end
+                end
+                GC.@preserve jl_tab8 begin
+                    p00 = pointer(jl_tab8)
+                    @inbounds for (ic, (lp, lam, _)) in enumerate(channels)
+                        acc = _ldrow8(R, ic, iq0)   # 8 q 分の累算器 = 1 zmm
+                        p = p00 + lam * jc8 * 8
+                        for jj in 1:mc         # R = ∫u_εl'·j_λ(Qr)·u_b dr (Simpson)
+                            acc = _acc8(acc, gw[lp+1, i0+j0+jj-2], _ld8(p))
+                            p += 64
+                        end
+                        _strow8!(R, ic, iq0, acc)
+                    end
+                end
+            end
+        end
+        for iq in nq8+1:n_q                    # q 端数: 従来経路 (順序・演算列不変)
+            qv = q[iq]
             @inbounds for j in 1:m
                 xb[j] = qv * cont.r_int[i0+j-1]
             end
@@ -1803,13 +1882,32 @@ function RlTable(cont::ContinuumSet, r_b, u_b, q_lo::Float64, q_hi::Float64,
             @inbounds for (ic, (lp, lam, _)) in enumerate(channels)
                 s = R[ic, iq]
                 base = lam * tile
-                for j in 1:m                   # R = ∫u_εl'·j_λ(Qr)·u_b dr (Simpson)
+                for j in 1:m
                     s += gw[lp+1, i0+j-1] * jl_tab[base+j]
                 end
                 R[ic, iq] = s
             end
         end
     end
+    # 260805Cl 旧 (P2-1: r タイル最外・q 内側・r レーン SIMD。値はビット同一):
+    # for i0 in 1:tile:n_int
+    #     i1 = min(i0 + tile - 1, n_int)
+    #     m = i1 - i0 + 1
+    #     for (iq, qv) in enumerate(q)
+    #         @inbounds for j in 1:m
+    #             xb[j] = qv * cont.r_int[i0+j-1]
+    #         end
+    #         sph_jl_tile!(jl_tab, tile, m, lam_max, xb, tmpj)
+    #         @inbounds for (ic, (lp, lam, _)) in enumerate(channels)
+    #             s = R[ic, iq]
+    #             base = lam * tile
+    #             for j in 1:m
+    #                 s += gw[lp+1, i0+j-1] * jl_tab[base+j]
+    #             end
+    #             R[ic, iq] = s
+    #         end
+    #     end
+    # end
     # 260805Cl 旧 (q 最外。値はビット同一):
     # for (iq, qv) in enumerate(q)
     #     fill!(acc, 0.0)
