@@ -42,6 +42,10 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
 - Windows Julia の GC クラッシュ・wedged・監視の詳細 = `src/IMPORT.md`「既知の運用上の注意」
 - **プロセス並列 > スレッド並列** (8P×4T が 4P×8T の 2.26 倍)。長時間バッチの運用ノウハウは
   ReciPro 側メモリ `feedback_julia_batch_parallelism` と指示書 §3 に蓄積
+- **言語は Julia 続投で確定** (2026-08-05 議論決着。移植利得 1.0–1.2 倍・GPU 不採用維持・
+  ReciPro 内オンデマンド計算は「無し」と作者決定)。Julia 処理系バージョンは世代ごとに
+  MANIFEST でピン留め (v3 = 1.11.9)。GUI はエンジンと別プロセスの薄いシェルに限る
+  (界面 = サブコマンド + JSON/CSV、in-process 結合禁止。計画書 §3-6)
 - コミットメッセージは英語。取り込み時は `src/IMPORT.md` の来歴表を更新する
 - **公開リポ予定**: Oxley–Allen 2000 の論文表・µSTEM データ・その数値をコピーしない
   (ライセンス。比較検証は ReciPro 側ローカルでのみ行う)
