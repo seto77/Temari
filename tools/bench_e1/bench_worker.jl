@@ -146,11 +146,19 @@ function do_job(job::Dict, mode::String)
                         rel_continuum=true)         # 本番と同じ SRC (rel=true)
     t1 = time()
     F = o["F"]::Vector{Float64}
+    d = o["diag"]
     return Dict{String,Any}(
         "id" => job["id"], "z" => z, "tag" => tag, "e0_keV" => e0,
         "wall_s" => t1 - t0, "t_start" => t0, "t_end" => t1,
         "F_sha256" => bytes2hex(sha256(collect(reinterpret(UInt8, F)))),
         "F_first" => F[1], "F_last" => F[end],
+        # 260806Cl 追加: 不一致の事後解剖用に全ノードを 16 進で保存 (E1 で
+        # sha 不一致が実測されたため。~4 KB/ジョブで安い保険)
+        "F_hex" => [string(reinterpret(UInt64, x), base=16, pad=16) for x in F],
+        "N0_hex" => string(reinterpret(UInt64, Float64(o["N0"])), base=16, pad=16),
+        "diag" => Dict{String,Any}(
+            "mres" => d["max_match_resid"], "badL" => d["bad_significant_l"],
+            "rtail" => d["r_tail_max"], "ortho_c" => d["max_ortho_c"]),
         "sigma_bote_nm2" => o["sigma_bote_nm2"])
 end
 

@@ -27,6 +27,10 @@ param(
     [int]$ConfigTimeoutMin = 180,      # 1 構成の上限 (GC wedge 対策の watchdog)
     [int]$StartupTimeoutMin = 20,      # 全ワーカが ready になるまでの上限
     [int]$CooldownSec = 45,            # 構成間の休止 (熱の持ち越し軽減)
+    [switch]$Reverse,                  # 構成を逆順 (c4→c1) で実行 (熱・順序バイアスの対照)
+    [int]$Passes = 1,                  # 各構成の実行回数。2 以上で sha チェックは
+                                       # 「構成内パス間の自己一致」に切り替わる
+                                       # (エンジンに実行順依存がある場合の運用モード)
     [string]$OutRoot = ""
 )
 
@@ -121,6 +125,7 @@ if ($Smoke) {
         [pscustomobject]@{ name = "c4_8p4t_gc1"; procs = 8;  threads = 4;  gcthreads = 1 }
     )
 }
+if ($Reverse) { [array]::Reverse($Configs); Write-Host "構成は逆順で実行 ($(($Configs | ForEach-Object name) -join ' -> '))" }
 
 # 実行メタデータ
 $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1
@@ -142,10 +147,10 @@ function Format-CliArg([string]$a) {
     if ($a -match '[\s"]') { '"' + ($a -replace '"', '\"') + '"' } else { $a }
 }
 
-function Invoke-BenchConfig($cfg) {
-    $cfgDir = Join-Path $RunDir "configs\$($cfg.name)"
+function Invoke-BenchConfig($cfg, [string]$cfgName) {
+    $cfgDir = Join-Path $RunDir "configs\$cfgName"
     New-Item -ItemType Directory -Force (Join-Path $cfgDir "logs") | Out-Null
-    Write-Host "`n=== config $($cfg.name): $($cfg.procs) proc x $($cfg.threads) threads" `
+    Write-Host "`n=== config ${cfgName}: $($cfg.procs) proc x $($cfg.threads) threads" `
         ($null -ne $cfg.gcthreads ? "--gcthreads=$($cfg.gcthreads)" : "(gcthreads 既定)") "==="
 
     $procs = @()
@@ -174,11 +179,11 @@ function Invoke-BenchConfig($cfg) {
         if ($dead.Count -gt 0) {
             $procs | Where-Object { -not $_.HasExited } |
                 ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
-            throw "config $($cfg.name): ワーカがバリア前に死亡 (exit=$($dead[0].ExitCode))。logs\ を参照"
+            throw "config ${cfgName}: ワーカがバリア前に死亡 (exit=$($dead[0].ExitCode))。logs\ を参照"
         }
         if ((Get-Date) -gt $deadline) {
             $procs | ForEach-Object { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue }
-            throw "config $($cfg.name): 起動タイムアウト ($StartupTimeoutMin min)"
+            throw "config ${cfgName}: 起動タイムアウト ($StartupTimeoutMin min)"
         }
         Start-Sleep -Milliseconds 500
     }
@@ -227,7 +232,8 @@ function Invoke-BenchConfig($cfg) {
     $ok = (-not $timedOut) -and ($jobResults.Count -eq $nJobs)
 
     $result = [ordered]@{
-        config = $cfg.name; procs = $cfg.procs; threads = $cfg.threads
+        config = $cfgName; base_config = $cfg.name
+        procs = $cfg.procs; threads = $cfg.threads
         gcthreads = $cfg.gcthreads
         ok = $ok; timed_out = $timedOut
         wall_s = [math]::Round($wallS, 3)          # go.flag → 最後のワーカ終了 (主指標)
@@ -237,21 +243,27 @@ function Invoke-BenchConfig($cfg) {
         n_jobs_done = $jobResults.Count; n_jobs_expected = $nJobs
         jobs = $jobResults; workers = $workerStats
     }
-    $result | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $RunDir "config_$($cfg.name).json")
-    Write-Host ("  {0}: wall={1:n1} s  jobs={2}/{3}  {4}" -f $cfg.name, $wallS,
+    $result | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $RunDir "config_$cfgName.json")
+    Write-Host ("  {0}: wall={1:n1} s  jobs={2}/{3}  {4}" -f $cfgName, $wallS,
         $jobResults.Count, $nJobs, ($ok ? "OK" : "FAILED")) `
         -ForegroundColor ($ok ? "Green" : "Red")
     return $ok
 }
 
 $allOk = $true
+$totalRuns = $Configs.Count * $Passes
+$runIdx = 0
 for ($ci = 0; $ci -lt $Configs.Count; $ci++) {
-    $ok = Invoke-BenchConfig $Configs[$ci]
-    if (-not $ok) { $allOk = $false }
-    if ($ci -lt $Configs.Count - 1) {
-        $cool = $Smoke ? 3 : $CooldownSec
-        Write-Host "  (cooldown $cool s)"
-        Start-Sleep -Seconds $cool
+    for ($pass = 1; $pass -le $Passes; $pass++) {
+        $runIdx++
+        $cfgName = ($Passes -gt 1) ? "$($Configs[$ci].name)_p$pass" : $Configs[$ci].name
+        $ok = Invoke-BenchConfig $Configs[$ci] $cfgName
+        if (-not $ok) { $allOk = $false }
+        if ($runIdx -lt $totalRuns) {
+            $cool = $Smoke ? 3 : $CooldownSec
+            Write-Host "  (cooldown $cool s)"
+            Start-Sleep -Seconds $cool
+        }
     }
 }
 
@@ -260,7 +272,8 @@ for ($ci = 0; $ci -lt $Configs.Count; $ci++) {
 # --------------------------------------------------------------------
 $cfgFiles = @(Get-ChildItem (Join-Path $RunDir "config_*.json") | Sort-Object Name)
 $results  = @($cfgFiles | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json })
-$baseline = $results | Where-Object { $_.config -in @("c1_8p4t", "smokeA_2p2t") } | Select-Object -First 1
+$baseline = $results | Where-Object { $_.base_config -in @("c1_8p4t", "smokeA_2p2t") } |
+            Sort-Object config | Select-Object -First 1
 
 $md = [System.Collections.Generic.List[string]]::new()
 $md.Add("# E1 benchmark summary ($stamp)$($Smoke ? ' — SMOKE (数字は無意味、配管検証のみ)' : '')")
@@ -280,8 +293,10 @@ foreach ($r in $results) {
 }
 $md.Add("")
 
-# ビット同一性: 同じジョブの F の sha256 が全構成で一致するか (スレッド/プロセス数
-# に結果が依存しないことの機械的確認。ionization.jl の設計保証の追試)
+# ビット同一性: 同じジョブの F の sha256 比較。
+# Passes==1: 構成間クロスチェック (不一致 = exit 3)。
+# Passes>=2: 主チェックは「構成内のパス間自己一致」に切り替え (エンジンに実行順
+#            依存の非決定性がある場合の運用モード)。クロスは参考情報として残す。
 $hashByJob = @{}
 foreach ($r in $results) {
     foreach ($j in $r.jobs) {
@@ -292,16 +307,39 @@ foreach ($r in $results) {
 $mismatch = @($hashByJob.Keys | Where-Object {
     @($hashByJob[$_].Values | Sort-Object -Unique).Count -gt 1 })
 if ($mismatch.Count -eq 0) {
-    $md.Add("F の sha256 クロスチェック: 全 $($hashByJob.Count) ジョブが全構成でビット同一 — OK")
+    $md.Add("F の sha256 クロスチェック: 全 $($hashByJob.Count) ジョブが全構成 (全パス) でビット同一 — OK")
 } else {
-    $md.Add("**⚠ F の sha256 不一致: $($mismatch.Count) ジョブ** — $($mismatch -join ', ')")
+    $tagx = ($Passes -ge 2) ? " (参考情報。Passes>=2 では自己一致が主チェック)" : ""
+    $md.Add("**⚠ F の sha256 構成間不一致: $($mismatch.Count) ジョブ**$tagx — $($mismatch -join ', ')")
+}
+if ($Passes -ge 2) {
+    $md.Add("")
+    $md.Add("構成内自己一致 (パス間):")
+    foreach ($grp in ($results | Group-Object base_config)) {
+        $byJob = @{}
+        foreach ($r in $grp.Group) {
+            foreach ($j in $r.jobs) {
+                if (-not $byJob.ContainsKey($j.id)) { $byJob[$j.id] = @() }
+                $byJob[$j.id] += $j.F_sha256
+            }
+        }
+        $bad = @($byJob.Keys | Where-Object {
+            @($byJob[$_] | Sort-Object -Unique).Count -gt 1 })
+        if ($bad.Count -eq 0) {
+            $md.Add("- $($grp.Name): $($byJob.Count) ジョブ自己一致 OK")
+        } else {
+            $md.Add("- **$($grp.Name): $($bad.Count) ジョブが自己不一致** — $($bad -join ', ')")
+        }
+    }
 }
 $md.Add("")
-$md.Add("注意: 構成は直列実行 (順序 = 表の順)。熱・電力状態の持ち越しは cooldown $CooldownSec s で軽減しているが完全ではない。結論を出す前に順序を変えた再実行を 1 回推奨。")
+$md.Add("注意: 構成は直列実行 (順序 = 表の順$($Reverse ? '、-Reverse 指定で逆順' : ''))。熱・電力状態の持ち越しは cooldown $CooldownSec s で軽減しているが完全ではない。結論を出す前に順序を変えた再実行を 1 回推奨。")
 $md -join "`n" | Set-Content (Join-Path $RunDir "summary.md")
 
 Write-Host ""
 Write-Banner "完了: $RunDir`n  summary.md / config_*.json を参照"
 Get-Content (Join-Path $RunDir "summary.md") | Write-Host
-if ($mismatch.Count -gt 0) { Write-Host "⚠ ビット同一性の不一致あり" -ForegroundColor Red; exit 3 }
+if ($mismatch.Count -gt 0 -and $Passes -lt 2) {
+    Write-Host "⚠ ビット同一性の不一致あり" -ForegroundColor Red; exit 3
+}
 exit ($allOk ? 0 : 1)
