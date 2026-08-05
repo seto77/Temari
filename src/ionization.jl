@@ -65,6 +65,7 @@ Python 版との実装差 (数値に効き得るのはこの 3 つだけ):
 using LinearAlgebra
 using Serialization
 using Printf
+using SHA                      # 260806Cl E8 休眠計装のみが使用 (標準ライブラリ)
 
 # ====================================================================
 # 第 1 章  物理定数 (CODATA 2018。Python 版 第 1 章と同値)
@@ -2270,6 +2271,60 @@ function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
     return row, mres, (c_ortho, resid_ortho), l_max, bad_count, r_tail
 end
 
+# ==== 260806Cl 追加 (E8): 負荷時 1-2 ULP フリップの待ち伏せ計装 (休眠) =======
+# フリート E1 測定で「負荷時のみ稀 (~0.5%/実行) に F の一部が 1-2 ULP ずれる」
+# 事象を検出済み (N0 は一致、単発実行は t1-t32 で完全決定論)。切り分けのため、
+# compute_NK の ε ループ完了直後に
+#   (a) 各 ε ノードの部分結果スライス dNde[ie, :] の SHA-256 (ie ごと)
+#   (b) 縮約後 N = dNde' * we の全要素 raw hex
+# をサイドカー JSON へ書く。環境変数 E8_SIDECAR (出力ディレクトリ) が非空の
+# ときだけ動作し、物理計算経路には一切触れない (配列を読むだけ)。未設定なら
+# 即 return する休眠計装で、配備コードに残しても無害。
+# 注: _E8_SEQ はプロセス内通し番号。compute_NK は @threads ループの外 (呼び出し
+# 元スレッド) から 1 回呼ぶだけなので競合しない (compute_channel をアプリ側で
+# 多重スレッド呼びする場合のみ要注意)。
+const _E8_SEQ = Ref(0)
+
+_e8_sha(v::Vector{Float64}) = bytes2hex(SHA.sha256(collect(reinterpret(UInt8, v))))
+
+function _e8_hex(v::AbstractVector{<:Real})
+    io = IOBuffer()
+    for (i, x) in enumerate(v)
+        i > 1 && print(io, ",")
+        print(io, string(reinterpret(UInt64, Float64(x)), base=16, pad=16))
+    end
+    return String(take!(io))
+end
+
+function _e8_sidecar(dNde::Matrix{Float64}, N::AbstractVector{<:Real},
+                     we::Vector{Float64}, eps::Vector{Float64})
+    dir = get(ENV, "E8_SIDECAR", "")
+    isempty(dir) && return nothing
+    _E8_SEQ[] += 1
+    ne, nK = size(dNde)
+    path = joinpath(dir, "e8_pid$(getpid())_seq$(lpad(string(_E8_SEQ[]), 3, '0')).json")
+    open(path, "w") do io
+        println(io, "{")
+        println(io, "  \"pid\": ", getpid(), ",")
+        println(io, "  \"seq\": ", _E8_SEQ[], ",")
+        println(io, "  \"julia_threads\": ", Threads.nthreads(), ",")
+        println(io, "  \"blas_threads\": ", BLAS.get_num_threads(), ",")
+        println(io, "  \"ne\": ", ne, ",")
+        println(io, "  \"nK\": ", nK, ",")
+        println(io, "  \"eps_sha\": \"", _e8_sha(eps), "\",")
+        println(io, "  \"we_sha\": \"", _e8_sha(we), "\",")
+        println(io, "  \"slice_sha\": [")
+        for ie in 1:ne
+            print(io, "    \"", _e8_sha(dNde[ie, :]), "\"")
+            println(io, ie < ne ? "," : "")
+        end
+        println(io, "  ],")
+        println(io, "  \"N_hex\": \"", _e8_hex(N), "\"")
+        println(io, "}")
+    end
+    return nothing
+end
+
 """N(K) = ∫dε (k_f/k_i) ∫dΩ_f S/(Q₊²Q₋²) (Python 版 compute_NK)。
 ε 全域を direct のみで積分 (= 半域 |D|²+|X|²、干渉項 −Re(DX*) は含まず)。
 ε ノードは独立なので Threads.@threads で並列 (結果はスレッド数に依らない)。"""
@@ -2315,7 +2370,8 @@ function compute_NK(pot_ion, r_b, u_b, E_th::Float64, T0::Float64,
         progress && print("\r  eps $d/$ne   ")
     end
     progress && println()
-    N = dNde' * we                             # N(K) = Σ_ε w_ε dN/dε
+    N = dNde' * we                             # N(K) = Σ_ε w_ε dN/dε (BLAS gemv 'T')
+    _e8_sidecar(dNde, N, we, eps)              # E8: E8_SIDECAR 設定時のみ (休眠)
     diag = (eps=eps, w=we, r_core=r_core, match_resid=match_resid, ortho=ortho,
             l_used=l_used, bad_significant_l=sum(bad), r_tail_max=maximum(rtail),
             dNde=dNde)
