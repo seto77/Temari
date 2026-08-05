@@ -71,6 +71,11 @@ function Compare-Sidecars([string]$refPass, [string]$badPass) {
         $jr = Get-Content $sr[$k].FullName -Raw | ConvertFrom-Json
         $jb = Get-Content $sb[$k].FullName -Raw | ConvertFrom-Json
         "--- sidecar[$k]: ne=$($jr.ne) nK=$($jr.nK) jt=$($jr.julia_threads)/$($jb.julia_threads) bt=$($jr.blas_threads)/$($jb.blas_threads)"
+        $alignSame = ($jr.dNde_ptr_mod64 -eq $jb.dNde_ptr_mod64) -and
+                     ($jr.dNde_ptr_mod4096 -eq $jb.dNde_ptr_mod4096) -and
+                     ($jr.we_ptr_mod64 -eq $jb.we_ptr_mod64) -and
+                     ($jr.N_ptr_mod64 -eq $jb.N_ptr_mod64)
+        "    align ref/bad: dNde mod64 $($jr.dNde_ptr_mod64)/$($jb.dNde_ptr_mod64), mod4096 $($jr.dNde_ptr_mod4096)/$($jb.dNde_ptr_mod4096); we mod64 $($jr.we_ptr_mod64)/$($jb.we_ptr_mod64); N mod64 $($jr.N_ptr_mod64)/$($jb.N_ptr_mod64)  → $(if ($alignSame) { '同一' } else { '★相違' })"
         if ($jr.eps_sha -ne $jb.eps_sha) { "  ★eps (求積ノード) 自体が相違 → 上流 (gl01/eigvals=LAPACK stev) 起因" }
         if ($jr.we_sha -ne $jb.we_sha)   { "  ★we (求積重み) 自体が相違 → 上流 (gl01/eigvals) 起因" }
         $diffSlices = @()
@@ -89,7 +94,13 @@ function Compare-Sidecars([string]$refPass, [string]$badPass) {
         }
         elseif ($nDiff -gt 0) {
             "  判定 (b): 全 ε スライス一致・縮約後 N のみ相違 ($nDiff/$nK 点)"
-            "    → 縮約順序起因 (N = dNde' * we の BLAS gemv 'T')。index-order 固定の自前ループ化で修正可能"
+            "    → 縮約の文脈依存丸め (N = dNde' * we の BLAS gemv 'T')。index-order 固定の自前ループ化で修正可能"
+            if (-not $alignSame) {
+                "    細分 (b1): ポインタ整列も相違 → 整列依存 peeling 仮説の強い証拠 (GC 配置揺れ)"
+            }
+            else {
+                "    細分 (b2): 整列は同一なのに N 相違 → BLAS スレッド分割 (部分和結合位置) / その他"
+            }
         }
         else {
             "  判定 (c): スライスも N も一致 → 相違は N→F 後段 (F=N./N[1] は決定的なはず)"

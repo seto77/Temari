@@ -2287,6 +2287,10 @@ const _E8_SEQ = Ref(0)
 
 _e8_sha(v::Vector{Float64}) = bytes2hex(SHA.sha256(collect(reinterpret(UInt8, v))))
 
+# 整列仮説 (GC 配置揺れ → 先頭整列変化 → SIMD peeling 経路変化) の検証用。
+# pointer が取れない配列型でも計装が本体を殺さないよう 0 に落とす。
+_e8_ptr(a) = try UInt(pointer(a)) catch; UInt(0) end
+
 function _e8_hex(v::AbstractVector{<:Real})
     io = IOBuffer()
     for (i, x) in enumerate(v)
@@ -2309,6 +2313,10 @@ function _e8_sidecar(dNde::Matrix{Float64}, N::AbstractVector{<:Real},
         println(io, "  \"seq\": ", _E8_SEQ[], ",")
         println(io, "  \"julia_threads\": ", Threads.nthreads(), ",")
         println(io, "  \"blas_threads\": ", BLAS.get_num_threads(), ",")
+        println(io, "  \"dNde_ptr_mod64\": ", Int(_e8_ptr(dNde) % 64), ",")
+        println(io, "  \"dNde_ptr_mod4096\": ", Int(_e8_ptr(dNde) % 4096), ",")
+        println(io, "  \"we_ptr_mod64\": ", Int(_e8_ptr(we) % 64), ",")
+        println(io, "  \"N_ptr_mod64\": ", Int(_e8_ptr(N) % 64), ",")
         println(io, "  \"ne\": ", ne, ",")
         println(io, "  \"nK\": ", nK, ",")
         println(io, "  \"eps_sha\": \"", _e8_sha(eps), "\",")
