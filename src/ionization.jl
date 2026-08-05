@@ -1867,30 +1867,122 @@ function eval_ch(rl::RlTable, ic::Int, q::Float64)
 end
 
 """S(Qa, Qb, cosΘ) = occ Σ_ch A_ch R_ch(Qa) R_ch(Qb) P_λ(cosΘ) を格子全体で評価
-(Python 版 _legendre_sum。P_λ は Bonnet の漸化式)"""
+(Python 版 _legendre_sum。P_λ は Bonnet の漸化式)。
+
+260805Cl 追加: PCHIP 補間のチャネル非依存部 (log・節点二分探索・Hermite 基底) を
+格子点ごとに 1 回へ括り出した融合版。全チャネルの補間ノットは RlTable 構築時の
+同一 lq ベクトル (=== 同一オブジェクト) なので、探索と基底はチャネル間で共有できる。
+Legendre P_λ も点ごとに小ベクトルへ漸化する (旧 3D 配列 ~5 MB/呼を廃止)。
+
+★ビット同一性: チャネル累算は昇順 (旧実装と同順)、Hermite 式・漸化式・
+occ 乗算の結合順も旧実装と同一。q > q_max → 0 / NaN → 0 / 下側 clamp の
+ガードも旧 eval_ch と同一。"""
+function legendre_sum!(S::Matrix{Float64}, Pl::Vector{Float64}, rl::RlTable,
+                       Qa::Matrix{Float64}, Qb::Matrix{Float64},
+                       cQ::Matrix{Float64}, occ::Float64)
+    nx, np_ = size(Qa)
+    nch = length(rl.channels)
+    xk = nothing
+    for ic in 1:nch
+        sp = rl.interp[ic]
+        sp === nothing || (xk = sp.x; break)
+    end
+    if xk === nothing                          # 有効チャネル無し (実際は起きない)
+        fill!(S, 0.0)
+        return S
+    end
+    nk = length(xk)
+    qlo = rl.q[1]
+    qhi = rl.q[end]
+    lm = rl.lam_max
+    @inbounds for j in 1:np_, i in 1:nx
+        qa = Qa[i, j]
+        qb = Qb[i, j]
+        outa = qa > qhi                        # 旧 eval_ch: q > q[end] → 0
+        outb = qb > qhi
+        ia = 1; ha = 0.0; a00 = 0.0; a10 = 0.0; a01 = 0.0; a11 = 0.0
+        if !outa
+            xa = log(clamp(qa, qlo, qhi))
+            ia = clamp(searchsortedlast(xk, xa), 1, nk - 1)
+            ha = xk[ia+1] - xk[ia]
+            ta = (xa - xk[ia]) / ha
+            a00 = (1 + 2ta) * (1 - ta)^2
+            a10 = ta * (1 - ta)^2
+            a01 = ta^2 * (3 - 2ta)
+            a11 = ta^2 * (ta - 1)
+        end
+        ib = 1; hb = 0.0; b00 = 0.0; b10 = 0.0; b01 = 0.0; b11 = 0.0
+        if !outb
+            xb = log(clamp(qb, qlo, qhi))
+            ib = clamp(searchsortedlast(xk, xb), 1, nk - 1)
+            hb = xk[ib+1] - xk[ib]
+            tb = (xb - xk[ib]) / hb
+            b00 = (1 + 2tb) * (1 - tb)^2
+            b10 = tb * (1 - tb)^2
+            b01 = tb^2 * (3 - 2tb)
+            b11 = tb^2 * (tb - 1)
+        end
+        c = cQ[i, j]
+        Pl[1] = 1.0                            # P₀ = 1
+        lm >= 1 && (Pl[2] = c)                 # P₁ = cosΘ
+        for lam in 2:lm
+            Pl[lam+1] = ((2lam - 1) * c * Pl[lam] - (lam - 1) * Pl[lam-1]) / lam
+        end
+        s = 0.0
+        for ic in 1:nch                        # 昇順 = 旧実装と同じ加算順
+            sp = rl.interp[ic]
+            sp === nothing && continue
+            (lp, lam, A) = rl.channels[ic]
+            ra = 0.0
+            if !outa
+                y = sp.y; mm = sp.m
+                v = a00 * y[ia] + a10 * ha * mm[ia] + a01 * y[ia+1] + a11 * ha * mm[ia+1]
+                ra = isnan(v) ? 0.0 : v
+            end
+            rb = 0.0
+            if !outb
+                y = sp.y; mm = sp.m
+                v = b00 * y[ib] + b10 * hb * mm[ib] + b01 * y[ib+1] + b11 * hb * mm[ib+1]
+                rb = isnan(v) ? 0.0 : v
+            end
+            s += A * ra * rb * Pl[lam+1]       # A·R(Q)·R(Q')·P_λ(cosΘ)
+        end
+        S[i, j] = s
+    end
+    S .*= occ                                  # 旧実装の S .* occ と同順 (累算後に乗算)
+    return S
+end
+
 function legendre_sum(rl::RlTable, Qa::Matrix{Float64}, Qb::Matrix{Float64},
                       cQ::Matrix{Float64}, occ::Float64)
-    nx, np_ = size(Qa)
-    P = Array{Float64,3}(undef, rl.lam_max + 1, nx, np_)
-    P[1, :, :] .= 1.0                          # P₀ = 1
-    rl.lam_max >= 1 && (P[2, :, :] = cQ)       # P₁ = cosΘ
-    for lam in 2:rl.lam_max
-        @. P[lam+1, :, :] = ((2lam - 1) * cQ * P[lam, :, :] -
-                             (lam - 1) * P[lam-1, :, :]) / lam
-    end
-    S = zeros(nx, np_)
-    Ra = similar(Qa)
-    Rb = similar(Qb)
-    for (ic, (lp, lam, A)) in enumerate(rl.channels)
-        rl.interp[ic] === nothing && continue
-        @inbounds for j in 1:np_, i in 1:nx
-            Ra[i, j] = eval_ch(rl, ic, Qa[i, j])
-            Rb[i, j] = eval_ch(rl, ic, Qb[i, j])
-        end
-        @. S += A * Ra * Rb * P[lam+1, :, :]   # A·R(Q)·R(Q')·P_λ(cosΘ)
-    end
-    return S .* occ
+    S = zeros(size(Qa))
+    Pl = zeros(rl.lam_max + 1)
+    return legendre_sum!(S, Pl, rl, Qa, Qb, cQ, occ)
 end
+# 260805Cl 旧実装 (チャネル外側・3D P 配列。値はビット同一):
+# function legendre_sum(rl::RlTable, Qa::Matrix{Float64}, Qb::Matrix{Float64},
+#                       cQ::Matrix{Float64}, occ::Float64)
+#     nx, np_ = size(Qa)
+#     P = Array{Float64,3}(undef, rl.lam_max + 1, nx, np_)
+#     P[1, :, :] .= 1.0
+#     rl.lam_max >= 1 && (P[2, :, :] = cQ)
+#     for lam in 2:rl.lam_max
+#         @. P[lam+1, :, :] = ((2lam - 1) * cQ * P[lam, :, :] -
+#                              (lam - 1) * P[lam-1, :, :]) / lam
+#     end
+#     S = zeros(nx, np_)
+#     Ra = similar(Qa)
+#     Rb = similar(Qb)
+#     for (ic, (lp, lam, A)) in enumerate(rl.channels)
+#         rl.interp[ic] === nothing && continue
+#         @inbounds for j in 1:np_, i in 1:nx
+#             Ra[i, j] = eval_ch(rl, ic, Qa[i, j])
+#             Rb[i, j] = eval_ch(rl, ic, Qb[i, j])
+#         end
+#         @. S += A * Ra * Rb * P[lam+1, :, :]
+#     end
+#     return S .* occ
+# end
 
 function legendre_sum(rl::RlTable, Qa::Vector{Float64}, Qb::Vector{Float64},
                       cQ::Vector{Float64}, occ::Float64)   # K=0 の 1 次元版
@@ -1907,9 +1999,24 @@ x = ln(Q²/Q_min²) に変換してピークを平らにし、(2) 単位の分�
 w₊ = Q₋²/(Q₊²+Q₋²) で「Q₊ ピーク側のチャート」だけを求積して ±入れ替え
 対称で 2 倍する (もう片方のピークは対称で同値)。φ も反転対称で半分にし、
 合計 ×4。この対称化は球平均した副殻 (S が cosΘ のみに依存) だから成立する。
-K=0 は方位対称なので 1 次元求積に落ちる。"""
-function angular_integral(rl::RlTable, K::Float64, k_i::Float64, k_f::Float64,
-                          occ::Float64, n_x::Int, n_phi::Int)
+K=0 は方位対称なので 1 次元求積に落ちる。
+
+260805Cl 追加: K に依らない角度幾何 (x 求積・θ 変換・φ 求積) とワークスペースを
+ε ノードあたり 1 回だけ用意する入れ物。旧実装は angular_integral が K ごと
+(1 行 = 161 回) に gl01 と全配列を作り直していた。値の式は一切変えていない。"""
+struct AngWS
+    k_i::Float64; k_f::Float64
+    wx::Vector{Float64}; tt::Vector{Float64}; jac_t::Vector{Float64}
+    cth::Vector{Float64}; sth::Vector{Float64}
+    wphi::Vector{Float64}; cphi::Vector{Float64}
+    Qp2::Matrix{Float64}; Qm2::Matrix{Float64}; cQ::Matrix{Float64}
+    Qp::Matrix{Float64}; Qm::Matrix{Float64}; S::Matrix{Float64}
+    Pl::Vector{Float64}
+    Q2v::Vector{Float64}; Qv::Vector{Float64}; onev::Vector{Float64}
+    Sv::Matrix{Float64}                        # K=0 用 (nx × 1)
+end
+
+function AngWS(k_i::Float64, k_f::Float64, n_x::Int, n_phi::Int, lam_max::Int)
     dq = k_i - k_f
     a = 4.0 * k_i * k_f / (dq * dq)            # Q² = Q_min²·(1+a·t) の係数
     xmax = log1p(a)
@@ -1918,23 +2025,39 @@ function angular_integral(rl::RlTable, K::Float64, k_i::Float64, k_f::Float64,
     jac_t = exp.(x) ./ a                       # dt = e^x/a dx
     cth = 1.0 .- 2.0 .* tt                     # cosθ = 1 − 2sin²(θ/2)
     sth = 2.0 .* sqrt.(max.(tt .* (1.0 .- tt), 0.0))   # sinθ = 2√(t(1−t))
+    phi, wphi = gl01(n_phi, Float64(pi))       # φ ∈ (0, π)、反転対称で ×2
+    cphi = cos.(phi)
+    return AngWS(k_i, k_f, wx, tt, jac_t, cth, sth, wphi, cphi,
+                 zeros(n_x, n_phi), zeros(n_x, n_phi), zeros(n_x, n_phi),
+                 zeros(n_x, n_phi), zeros(n_x, n_phi), zeros(n_x, n_phi),
+                 zeros(lam_max + 1), zeros(n_x), zeros(n_x), ones(n_x),
+                 zeros(n_x, 1))
+end
+
+function angular_integral(ws::AngWS, rl::RlTable, K::Float64, occ::Float64)
+    k_i = ws.k_i; k_f = ws.k_f
+    wx = ws.wx; jac_t = ws.jac_t; cth = ws.cth; sth = ws.sth
+    nx = length(wx); np_ = length(ws.wphi)
 
     if K == 0.0
-        Q2 = @. k_i^2 + k_f^2 - 2.0 * k_i * k_f * cth   # 余弦定理
-        Q = sqrt.(Q2)
-        S = legendre_sum(rl, Q, Q, ones(length(Q)), occ)    # cosΘ=1 (対角)
-        return 2.0 * pi * sum(wx .* 2.0 .* jac_t .* S ./ Q2 .^ 2)
+        Q2 = ws.Q2v; Q = ws.Qv
+        @inbounds for i in 1:nx
+            Q2[i] = k_i^2 + k_f^2 - 2.0 * k_i * k_f * cth[i]   # 余弦定理
+            Q[i] = sqrt(Q2[i])
+        end
+        # 旧: S = legendre_sum(rl, Q, Q, ones(nx), occ) — cosΘ=1 (対角)
+        Sv = legendre_sum!(ws.Sv, ws.Pl, rl, reshape(Q, :, 1), reshape(Q, :, 1),
+                           reshape(ws.onev, :, 1), occ)
+        # ★総和は旧実装と同じ sum(broadcast) を使う。Base.sum は内部で @simd を
+        #   使うため、自前の逐次ループに置き換えると丸め順が変わりビット同一性が
+        #   壊れる (ここだけは小配列 2 本の割り当てを許容する)
+        return 2.0 * pi * sum(wx .* 2.0 .* jac_t .* vec(Sv) ./ Q2 .^ 2)
     end
 
     K >= 2.0 * k_i && error("sym kinematics requires K < 2*k_i")
     kz = sqrt(k_i^2 - K * K / 4.0)             # k_± の z 成分 (Ewald 球上)
-    phi, wphi = gl01(n_phi, Float64(pi))       # φ ∈ (0, π)、反転対称で ×2
-    cphi = cos.(phi)
-
-    nx, np_ = n_x, n_phi
-    Qp2 = zeros(nx, np_)
-    Qm2 = zeros(nx, np_)
-    cQ = zeros(nx, np_)
+    cphi = ws.cphi
+    Qp2 = ws.Qp2; Qm2 = ws.Qm2; cQ = ws.cQ
     @inbounds for j in 1:np_, i in 1:nx
         kp_d = k_i * cth[i]                                    # k₊·d̂
         km_d = cth[i] * (k_i^2 - K * K / 2.0) / k_i -
@@ -1943,16 +2066,22 @@ function angular_integral(rl::RlTable, K::Float64, k_i::Float64, k_f::Float64,
         Qm2[i, j] = k_i^2 + k_f^2 - 2.0 * k_f * km_d
         qpqm = (kz * kz - K * K / 4.0) - k_f * (kp_d + km_d) + k_f^2   # Q₊·Q₋
         cQ[i, j] = clamp(qpqm / sqrt(Qp2[i, j] * Qm2[i, j]), -1.0, 1.0)
+        ws.Qp[i, j] = sqrt(Qp2[i, j])
+        ws.Qm[i, j] = sqrt(Qm2[i, j])
     end
-    Qp = sqrt.(Qp2)
-    Qm = sqrt.(Qm2)
-    S = legendre_sum(rl, Qp, Qm, cQ, occ)
-    integrand = @. (Qm2 / (Qp2 + Qm2)) * S / (Qp2 * Qm2)       # partition of unity
+    S = legendre_sum!(ws.S, ws.Pl, rl, ws.Qp, ws.Qm, cQ, occ)
     val = 0.0
-    @inbounds for j in 1:np_, i in 1:nx
-        val += wx[i] * 2.0 * jac_t[i] * wphi[j] * integrand[i, j]
+    @inbounds for j in 1:np_, i in 1:nx        # integrand を融合 (式・結合順は旧と同一)
+        term = (Qm2[i, j] / (Qp2[i, j] + Qm2[i, j])) * S[i, j] / (Qp2[i, j] * Qm2[i, j])
+        val += wx[i] * 2.0 * jac_t[i] * ws.wphi[j] * term
     end
     return 4.0 * val                           # ×2(φ 対称) × 2(±チャート対称)
+end
+
+"互換ラッパ (単発呼び出し用)。値は AngWS 経由と同一"
+function angular_integral(rl::RlTable, K::Float64, k_i::Float64, k_f::Float64,
+                          occ::Float64, n_x::Int, n_phi::Int)
+    return angular_integral(AngWS(k_i, k_f, n_x, n_phi, rl.lam_max), rl, K, occ)
 end
 
 """ε ノード 1 点分の計算 (Python 版 _eps_worker。スレッド並列の単位)。
@@ -2020,8 +2149,12 @@ function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
     end
     sig_ok = significant .& cont.ok
     mres = any(sig_ok) ? maximum(cont.match_resid[sig_ok]) : 0.0
-    row = [kf / k_i * angular_integral(rl, K, k_i, kf, occ_init, n_x, n_phi)
+    # 260805Cl 変更: K 非依存の角度幾何・作業領域を 1 回だけ作る (旧: K ごとに再構築)
+    ws = AngWS(k_i, kf, n_x, n_phi, rl.lam_max)
+    row = [kf / k_i * angular_integral(ws, rl, K, occ_init)
            for K in K_nodes]                   # k_f/k_i は位相空間因子
+    # 旧: row = [kf / k_i * angular_integral(rl, K, k_i, kf, occ_init, n_x, n_phi)
+    #            for K in K_nodes]
     return row, mres, (c_ortho, resid_ortho), l_max, bad_count, r_tail
 end
 
