@@ -398,6 +398,139 @@ function sph_jl_all!(out::AbstractVector, lmax::Int, x::Float64)
     return out
 end
 
+# ==== 260805Cl 追加: 球ベッセルの 8 レーン同時評価 =========================
+# sph_jl_all! は乗算→減算の依存連鎖に律速される (実測 ~8 cycle/反復。@inbounds
+# もポインタ格納も効かない)。動径点は互いに独立なので、8 本の連鎖を NTuple{8}
+# で同時に流すと同じレイテンシで 8 点処理できる (AVX-512 zmm。実測 3.5-4.2 倍)。
+#
+# ★ビット同一性の設計 (スカラー版 sph_jl_all! と演算列を完全に一致させる):
+#   - 漸化は c/X*jc - jp の順 (div→mul→sub)。muladd/fma は丸めが変わるので不可
+#   - リスケールはレーン別マスク乗算。非該当レーンは ×1.0 = 恒等 (丸め誤差ゼロ)
+#   - 規格化 (sin(x)/x)/j0 もレーンごとにスカラーと同式
+#   - よってスカラー版と全ビット一致する (検証スクリプトで === を確認)
+#
+# ★ntuple のクロージャに「ループ内で再代入される変数」を捕捉させないこと。
+#   捕捉すると Core.Box 化して 8 回の動的呼び出しに落ちる (実測で SIMD 利得消失)。
+#   必ず引数渡しの @inline ヘルパを経由する。
+const _T8 = NTuple{8,Float64}
+
+@inline _rec8(c::Float64, X::_T8, jc::_T8, jp::_T8) =
+    ntuple(j -> c / X[j] * jc[j] - jp[j], Val(8))
+@inline _mul8(a::_T8, f::_T8) = ntuple(j -> a[j] * f[j], Val(8))
+@inline _st8(p::Ptr{Float64}, v::_T8) = unsafe_store!(Ptr{_T8}(p), v)
+@inline _ld8(p::Ptr{Float64}) = unsafe_load(Ptr{_T8}(p))
+@inline _absgt8(v::_T8, t::Float64) =
+    (abs(v[1]) > t) | (abs(v[2]) > t) | (abs(v[3]) > t) | (abs(v[4]) > t) |
+    (abs(v[5]) > t) | (abs(v[6]) > t) | (abs(v[7]) > t) | (abs(v[8]) > t)
+@inline _mask8(v::_T8) = ntuple(j -> ifelse(abs(v[j]) > 1e250, 1e-200, 1.0), Val(8))
+@inline _scale8(X::_T8, j0::_T8) = ntuple(j -> (sin(X[j]) / X[j]) / j0[j], Val(8))
+@inline _j0_8(X::_T8) = ntuple(j -> sin(X[j]) / X[j], Val(8))
+@inline _j1_8(X::_T8) = ntuple(j -> sin(X[j]) / X[j]^2 - cos(X[j]) / X[j], Val(8))
+
+"""Miller 下方漸化の 8 点同時版。tab は転置テーブル (i 内側 × λ 外側) で、
+tab[off + j + l*tile] = j_l(X[j])。演算列はスカラー版 sph_jl_all! と同一。"""
+function _jl8_miller!(tab::Vector{Float64}, tile::Int, off::Int, lmax::Int, X::_T8)
+    M = lmax + 20 + ceil(Int, sqrt(40.0 * (lmax + 1)))
+    jp = ntuple(_ -> 0.0, Val(8))
+    jc = ntuple(_ -> 1e-30, Val(8))
+    GC.@preserve tab begin
+        p0 = pointer(tab) + off * 8            # off は 0-based 開始位置
+        st = tile * 8                          # λ 方向のバイトストライド
+        for l in M:-1:1
+            jm = _rec8(Float64(2l + 1), X, jc, jp)
+            jp = jc
+            jc = jm
+            l - 1 <= lmax && _st8(p0 + (l - 1) * st, jm)
+            if _absgt8(jc, 1e250)              # 途中リスケール (レーン別マスク)
+                f = _mask8(jc)
+                jc = _mul8(jc, f)
+                jp = _mul8(jp, f)
+                for k in l:lmax+1
+                    qp = p0 + (k - 1) * st
+                    _st8(qp, _mul8(_ld8(qp), f))
+                end
+            end
+        end
+        j0 = _ld8(p0)
+        s = _scale8(X, j0)
+        for k in 1:lmax+1
+            qp = p0 + (k - 1) * st
+            _st8(qp, _mul8(_ld8(qp), s))
+        end
+    end
+    return nothing
+end
+
+"上方漸化 (x > lmax+10) の 8 点同時版。演算列はスカラー版と同一。"
+function _jl8_upward!(tab::Vector{Float64}, tile::Int, off::Int, lmax::Int, X::_T8)
+    GC.@preserve tab begin
+        p0 = pointer(tab) + off * 8
+        st = tile * 8
+        jm = _j0_8(X)
+        _st8(p0, jm)
+        if lmax >= 1
+            jc = _j1_8(X)
+            _st8(p0 + st, jc)
+            for l in 1:lmax-1
+                jn = _rec8(Float64(2l + 1), X, jc, jm)
+                jm = jc
+                jc = jn
+                _st8(p0 + (l + 1) * st, jc)
+            end
+        end
+    end
+    return nothing
+end
+
+"スカラー版で 1 点だけ評価して転置テーブルへ撒く (端数・特殊域用)"
+@inline function _jl_scalar_scatter!(tab::Vector{Float64}, tile::Int, i::Int,
+                                     lmax::Int, x::Float64, tmp::Vector{Float64})
+    sph_jl_all!(view(tmp, 1:lmax+1), lmax, x)
+    @inbounds for l in 0:lmax
+        tab[l*tile+i] = tmp[l+1]
+    end
+    return nothing
+end
+
+"""タイル分の x (単調非減少) について j_λ を一括評価し、転置テーブルへ書く。
+上方漸化域 (x > lmax+10) との境界は単調性を利用して索引で切る。
+x < 1e-12 の δ 域は本番で到達不能 (x_min = q_lo·r_int[1] ≥ 1e-10) だが、
+保険としてスカラーへ落とす。8 点に満たない端数もスカラー。"""
+function sph_jl_tile!(tab::Vector{Float64}, tile::Int, m::Int, lmax::Int,
+                      xb::Vector{Float64}, tmp::Vector{Float64})
+    thr = lmax + 10.0
+    jup = m                                    # Miller 域の終端索引
+    @inbounds while jup > 0 && xb[jup] > thr
+        jup -= 1
+    end
+    i = 1
+    @inbounds while i + 7 <= jup               # Miller 域: 8 点グループ
+        if xb[i] < 1e-12
+            _jl_scalar_scatter!(tab, tile, i, lmax, xb[i], tmp)
+            i += 1
+        else
+            X = ntuple(j -> xb[i+j-1], Val(8))
+            _jl8_miller!(tab, tile, i - 1, lmax, X)
+            i += 8
+        end
+    end
+    @inbounds while i <= jup                   # Miller 端数
+        _jl_scalar_scatter!(tab, tile, i, lmax, xb[i], tmp)
+        i += 1
+    end
+    @inbounds while i + 7 <= m                 # 上方域: 8 点グループ
+        X = ntuple(j -> xb[i+j-1], Val(8))
+        _jl8_upward!(tab, tile, i - 1, lmax, X)
+        i += 8
+    end
+    @inbounds while i <= m                     # 上方端数
+        _jl_scalar_scatter!(tab, tile, i, lmax, xb[i], tmp)
+        i += 1
+    end
+    return nothing
+end
+# ==== 260805Cl 追加ここまで ==================================================
+
 "球ベッセル第 2 種 y_l(x) を l = 0..lmax まで (上方漸化は常に安定)"
 function sph_yl_all!(out::AbstractVector, lmax::Int, x::Float64)
     ym = -cos(x) / x
@@ -1639,21 +1772,30 @@ function RlTable(cont::ContinuumSet, r_b, u_b, q_lo::Float64, q_hi::Float64,
     # 収まり、実測で内側ループが 2.4 倍。
     # ★総和順序は不変 (各チャネルの累算器にタイルを昇順で足すだけ) なので
     #   結果は **ビット同一**。作業配列も 3 MB → 76 KB に縮小する。
+    # 260805Cl 変更: 球ベッセルを 8 レーン同時評価 (sph_jl_tile!) に切り替え。
+    # jl_tab は (i 内側 × λ 外側) の転置 1 次元テーブルにする — 8 レーンの格納が
+    # 連続 64 バイト = vmovupd zmm 1 命令になり、消費側の走査も単位ストライドになる。
+    # 演算列はスカラー版と同一 (設計は _jl8_miller! のコメント参照) で、累算順序も
+    # 不変なので結果は**ビット同一**。
     tile = 128
-    jl_tab = zeros(lam_max + 1, tile)
+    jl_tab = zeros(tile * (lam_max + 1))
+    xb = zeros(tile)
+    tmpj = zeros(lam_max + 1)
     acc = zeros(length(channels))
     for (iq, qv) in enumerate(q)
         fill!(acc, 0.0)
         for i0 in 1:tile:n_int
             i1 = min(i0 + tile - 1, n_int)
-            for i in i0:i1                     # j_λ(q·r) を全 λ 一括で
-                sph_jl_all!(view(jl_tab, :, i - i0 + 1), lam_max,
-                            qv * cont.r_int[i])
+            m = i1 - i0 + 1
+            @inbounds for j in 1:m
+                xb[j] = qv * cont.r_int[i0+j-1]
             end
+            sph_jl_tile!(jl_tab, tile, m, lam_max, xb, tmpj)
             @inbounds for (ic, (lp, lam, _)) in enumerate(channels)
                 s = acc[ic]
-                for i in i0:i1                 # R = ∫u_εl'·j_λ(Qr)·u_b dr (Simpson)
-                    s += gw[lp+1, i] * jl_tab[lam+1, i-i0+1]
+                base = lam * tile
+                for j in 1:m                   # R = ∫u_εl'·j_λ(Qr)·u_b dr (Simpson)
+                    s += gw[lp+1, i0+j-1] * jl_tab[base+j]
                 end
                 acc[ic] = s
             end
@@ -1662,6 +1804,30 @@ function RlTable(cont::ContinuumSet, r_b, u_b, q_lo::Float64, q_hi::Float64,
             R[ic, iq] = acc[ic]
         end
     end
+    # 260804Cl 版 (スカラー sph_jl_all! + (λ×i) レイアウト。値はビット同一):
+    # tile = 128
+    # jl_tab = zeros(lam_max + 1, tile)
+    # acc = zeros(length(channels))
+    # for (iq, qv) in enumerate(q)
+    #     fill!(acc, 0.0)
+    #     for i0 in 1:tile:n_int
+    #         i1 = min(i0 + tile - 1, n_int)
+    #         for i in i0:i1
+    #             sph_jl_all!(view(jl_tab, :, i - i0 + 1), lam_max,
+    #                         qv * cont.r_int[i])
+    #         end
+    #         @inbounds for (ic, (lp, lam, _)) in enumerate(channels)
+    #             s = acc[ic]
+    #             for i in i0:i1
+    #                 s += gw[lp+1, i] * jl_tab[lam+1, i-i0+1]
+    #             end
+    #             acc[ic] = s
+    #         end
+    #     end
+    #     @inbounds for ic in 1:length(channels)
+    #         R[ic, iq] = acc[ic]
+    #     end
+    # end
     # 旧実装 (タイル無し。順序は上と同一):
     # jl_tab = zeros(lam_max + 1, n_int)
     # for (iq, qv) in enumerate(q)
