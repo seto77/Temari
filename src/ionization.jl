@@ -1777,33 +1777,43 @@ function RlTable(cont::ContinuumSet, r_b, u_b, q_lo::Float64, q_hi::Float64,
     # 連続 64 バイト = vmovupd zmm 1 命令になり、消費側の走査も単位ストライドになる。
     # 演算列はスカラー版と同一 (設計は _jl8_miller! のコメント参照) で、累算順序も
     # 不変なので結果は**ビット同一**。
+    # 260805Cl 変更 (P2-1): ループを入れ替え、r タイルを最外・q を内側にする。
+    # 旧構造は gw (nL×n_int、最大 ~6 MB) を q ごとに 360 回まるごと再ストリーム
+    # しており、16 プロセスでの帯域天井 (8→16 で 1.16 倍しか伸びない) の主犯だった。
+    # 入れ替えで gw のタイル片 (~60 KB) が L1/L2 に留まったまま全 q を回れる。
+    # ★各 (ic, iq) の累算器にタイルを昇順で足す順序は不変なので**ビット同一**。
     tile = 128
     jl_tab = zeros(tile * (lam_max + 1))
     xb = zeros(tile)
     tmpj = zeros(lam_max + 1)
-    acc = zeros(length(channels))
-    for (iq, qv) in enumerate(q)
-        fill!(acc, 0.0)
-        for i0 in 1:tile:n_int
-            i1 = min(i0 + tile - 1, n_int)
-            m = i1 - i0 + 1
+    nch = length(channels)
+    fill!(R, 0.0)                              # R を累算行列として使う
+    for i0 in 1:tile:n_int
+        i1 = min(i0 + tile - 1, n_int)
+        m = i1 - i0 + 1
+        for (iq, qv) in enumerate(q)
             @inbounds for j in 1:m
                 xb[j] = qv * cont.r_int[i0+j-1]
             end
             sph_jl_tile!(jl_tab, tile, m, lam_max, xb, tmpj)
             @inbounds for (ic, (lp, lam, _)) in enumerate(channels)
-                s = acc[ic]
+                s = R[ic, iq]
                 base = lam * tile
                 for j in 1:m                   # R = ∫u_εl'·j_λ(Qr)·u_b dr (Simpson)
                     s += gw[lp+1, i0+j-1] * jl_tab[base+j]
                 end
-                acc[ic] = s
+                R[ic, iq] = s
             end
         end
-        @inbounds for ic in 1:length(channels)
-            R[ic, iq] = acc[ic]
-        end
     end
+    # 260805Cl 旧 (q 最外。値はビット同一):
+    # for (iq, qv) in enumerate(q)
+    #     fill!(acc, 0.0)
+    #     for i0 in 1:tile:n_int
+    #         ... sph_jl_tile! → acc[ic] += Σ_j gw·jl ...
+    #     end
+    #     R[:, iq] = acc
+    # end
     # 260804Cl 版 (スカラー sph_jl_all! + (λ×i) レイアウト。値はビット同一):
     # tile = 128
     # jl_tab = zeros(lam_max + 1, tile)
