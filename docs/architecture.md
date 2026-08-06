@@ -16,6 +16,27 @@ L0  Numerics       spherical Bessel, Coulomb functions, splines, quadrature,
                    ODE integrators
 ```
 
+## Where the layers live
+
+`src/ionization.jl` is a thin loader plus the command line; it includes the
+layer files in dependency order. There is no Julia `module` — the namespace
+stays flat, so anything that includes `src/ionization.jl` sees every name, and
+concatenating the files in include order reproduces a single-file build.
+
+| File | Layer | Contents |
+|---|---|---|
+| `l0_numerics.jl` | L0 | constants, accuracy knobs, splines, Gauss–Legendre, spherical Bessel (scalar and 8-lane), Coulomb functions, Numerov |
+| `l0_json.jl` | L0 | the minimal JSON reader/writer that stands in for a stdlib that does not exist |
+| `l1_atomic.jl` | L1 | self-consistent HFS, bound Schrödinger and Dirac states, relaxed core-hole potential |
+| `l2_continuum.jl` | L2 | `ContinuumSet` — distorted waves, energy normalization, Coulomb matching, orthogonalization, the scalar-relativistic option |
+| `l3_radial.jl` | L3 | `RlTable` — the multipole integrals and their PCHIP interpolation |
+| `l4_angular.jl` | L4 | 3j symbols, Legendre recursion, MDFF assembly |
+| `l5_exit_edx.jl` | L5 | the ε quadrature, the per-ε driver, the N(K) contraction, Bote–Salvat absolute cross sections, the (Z, shell, E₀) pipeline |
+| `selftest.jl` | — | the T0–T8 ladder and `refcheck` |
+
+Only `l5_exit_edx.jl` knows what is being reported. A second exit is a file
+next to it, not a change to anything below.
+
 ## The two axes that vary
 
 Every quantity in the roadmap is a choice of two independent things:
@@ -40,9 +61,11 @@ Every quantity in the roadmap is a choice of two independent things:
 | σ(β, Δ) | θ < β and ΔE window | EELS quantification k-factor |
 | δ_l | — | phase shift per partial wave |
 
-The current implementation hard-codes one cell of this table (screened Coulomb
-operator, F(s,E₀) exit) into a single chapter. The first refactoring is to make
-the operator and the exit separate, injectable pieces.
+The current implementation still fills exactly one cell of this table: screened
+Coulomb operator, F(s,E₀) exit. The two now live in separate files — the
+operator in L4, the exit in L5 — but they are not yet injectable: L5 calls the
+L4 routines by name rather than through a seam. Adding the second exit is what
+will force that seam to be real, so it is deliberately left until then.
 
 ## What is already computed and thrown away
 
