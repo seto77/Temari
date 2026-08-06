@@ -1,5 +1,11 @@
 # Temari
 
+[![Documentation](https://img.shields.io/badge/docs-seto77.github.io%2FTemari-blue)](https://seto77.github.io/Temari/)
+[![CI](https://github.com/seto77/Temari/actions/workflows/ci.yml/badge.svg)](https://github.com/seto77/Temari/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Julia 1.11.9](https://img.shields.io/badge/Julia-1.11.9-9558B2)](https://julialang.org/)
+[![Dependencies: none](https://img.shields.io/badge/dependencies-none-lightgrey)](#design-commitments)
+
 **Atomic scattering and excitation factors from first principles.**
 
 Temari solves an isolated atom from scratch — self-consistent field, bound
@@ -16,6 +22,24 @@ beyond the Julia standard library.
 **Status: early. The engine exists and is in production use; this repository is
 being assembled around it.** See [計画書.md](計画書.md) (Japanese) for the full
 plan and [docs/architecture.md](docs/architecture.md) for the layer structure.
+
+**📖 Documentation: <https://seto77.github.io/Temari/>** — getting started, the
+full command-line reference, the prescription, verification and the
+reproducibility policy.
+
+## Quick start
+
+No package to install, no build step: Julia's standard library is the only
+dependency.
+
+```bash
+git clone https://github.com/seto77/Temari.git
+cd Temari
+
+julia -t auto src/ionization.jl selftest        # analytic ladder, ~10 s
+julia -t auto src/ionization.jl 26 K 200 --quick  # Fe K at 200 keV
+julia -t auto src/gui.jl                        # zero-dependency browser GUI
+```
 
 ## Why
 
@@ -84,6 +108,27 @@ Three tiers, all reproducible from this repository:
 
 Reference data used during development (published tables, GPL code output) is
 **not included** in this repository.
+
+Every push runs `selftest`, the kernel bit-identity checks and a gated
+`refcheck` on Linux and Windows, against Julia 1.11.9 and 1.12.
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) first. One rule dominates the others:
+**a change that alters the output bits without meaning to is a defect, however
+fast it is.** The verification commands a pull request is expected to show are
+listed there.
+
+Bug reports and feature requests use the
+[issue templates](https://github.com/seto77/Temari/issues/new/choose).
+Please do not paste numbers copied from published tables or from
+restrictively licensed codes into issues.
+
+## Citing
+
+See [CITATION.cff](.github/CITATION.cff), or use GitHub's "Cite this
+repository". If you publish cross sections obtained through Temari, cite the
+Bote–Salvat papers below as well.
 
 ## Credits and licensing
 

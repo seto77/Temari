@@ -1,0 +1,71 @@
+name: Bug report
+description: A wrong number, a crash, or behaviour that disagrees with the documentation.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: if the calculation simply stopped making progress on Windows
+        under a long multithreaded batch, that is a known Julia runtime issue -
+        see [Troubleshooting](https://seto77.github.io/Temari/troubleshooting/).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The exact command line, including the thread count.
+      placeholder: |
+        julia -t 4 src/ionization.jl 26 K 200 --quick
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Full console output, or the relevant part of it including any stack trace.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: julia
+    attributes:
+      label: Julia version
+      description: Output of `julia --version`. The shipped datasets are generated with 1.11.9.
+      placeholder: "1.11.9"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and CPU
+      placeholder: "Windows 11 26100, Ryzen 9 9950X (16 cores)"
+    validations:
+      required: true
+
+  - type: input
+    id: commit
+    attributes:
+      label: Temari version or commit
+      placeholder: "v0.9.0, or the short commit hash"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: selftest
+    attributes:
+      label: Self-verification
+      options:
+        - label: "`julia -t auto src/ionization.jl selftest` was run and its result is included above (it takes about 10 s)"
+        - label: "The SCF caches (`atom_cache_*.jls`) were deleted and the problem still occurs"

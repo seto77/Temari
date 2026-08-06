@@ -1,0 +1,88 @@
+# Minimal CI: the verification ladder that the repository already ships.
+# Nothing here needs a package registry - Temari depends on the Julia standard
+# library only, so every job is "check out, install Julia, run a script".
+name: CI
+
+on:
+  push:
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    # Analytic ladder T0-T8: hydrogen bound and continuum states, point-nucleus
+    # Dirac eigenvalues, 3j closed forms, and the c -> infinity limit.
+    # Failures are @assert, so a non-zero exit is a real failure.
+    name: selftest (${{ matrix.os }}, Julia ${{ matrix.julia }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        julia: ["1.11.9", "1.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia }}
+
+      # 1.11.9 is the interpreter pinned by the shipped dataset generation
+      # (see the reproducibility policy); 1.12 is tested to catch drift early.
+      - name: selftest
+        run: julia --startup-file=no -t auto src/ionization.jl selftest
+
+  bit-identity:
+    # The optimized kernels must produce exactly the same bits as the scalar
+    # reference implementations. Both scripts exit non-zero on any mismatch.
+    name: bit-identity of the optimized kernels
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.11.9"
+
+      - name: SIMD spherical Bessel vs scalar (288 cases)
+        run: julia --startup-file=no -t 1 tools/verify_simd_bessel.jl
+
+      - name: Radial-integral q lane vs reference (75 cases)
+        run: julia --startup-file=no -t 1 tools/verify_e5_qlane.jl
+
+  refcheck:
+    # Cross-implementation check: the Julia engine against values produced by the
+    # independent Python implementation (src/reference_values.json).
+    # refcheck() itself only reports, so the gate is applied here.
+    name: refcheck vs the independent Python implementation
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.11.9"
+
+      - name: "refcheck (gate: worst deviation < 1e-5)"
+        run: |
+          julia --startup-file=no -t auto -e '
+            include("src/ionization.jl")
+            worst = refcheck()
+            if !(worst < 1e-5)
+                @error "refcheck gate failed" worst
+                exit(1)
+            end
+            println("refcheck gate OK: worst = ", worst)'

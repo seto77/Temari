@@ -1,0 +1,48 @@
+name: Feature request
+description: A quantity you want computed, or an output you want exposed.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The [roadmap](https://seto77.github.io/Temari/roadmap/) lists the quantities
+        already planned, and the ones deliberately out of scope (fluorescence yields,
+        Auger and Coster-Kronig rates, quantitative white lines). Please check it first -
+        several requests are already scheduled, and saying "this one, sooner" is useful.
+
+  - type: textarea
+    id: quantity
+    attributes:
+      label: What should be computed or exposed
+      description: >
+        Name the quantity and how you would want it reported (per channel, per energy,
+        integrated over what).
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: What you would use it for
+      description: >
+        The application matters here - it usually determines the accuracy target and the
+        grid, which are the real design decisions.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reference
+    attributes:
+      label: Reference values you can compare against
+      description: >
+        Published tables, another code, or measurements. External validation material is
+        the scarcest resource in this project.
+    validations:
+      required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        **Note on licensing:** do not paste tables or numerical output copied from
+        published papers or from GPL-licensed codes into this issue. A citation to where
+        the comparison data lives is enough.

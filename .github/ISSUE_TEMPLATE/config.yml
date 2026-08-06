@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or discussion about the physics
+    url: https://github.com/seto77/Temari/discussions
+    about: Prescription choices, verification, what a given output means, or how to add an exit.
+  - name: Documentation
+    url: https://seto77.github.io/Temari/
+    about: Getting started, CLI reference, verification and reproducibility policy.
+  - name: ReciPro (the microscopy application that ships tables built with Temari)
+    url: https://github.com/seto77/ReciPro
+    about: Issues about STEM-EDX simulation in the GUI application belong there, not here.

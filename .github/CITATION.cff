@@ -1,0 +1,56 @@
+cff-version: 1.2.0
+message: "If you use Temari in academic work, please cite this repository. If you publish ionization cross sections obtained through it, please also cite the two Bote-Salvat papers listed under references."
+type: software
+title: "Temari"
+abstract: "Atomic scattering and excitation factors from first principles. Temari solves an isolated atom from scratch - self-consistent field, bound orbitals, distorted continuum waves - and derives the scattering and excitation factors needed by electron microscopy, spectroscopy and transport simulation. No external atomic-structure code, no fitted parameter tables, no dependencies beyond the Julia standard library."
+authors:
+  - family-names: "Seto"
+    given-names: "Yusuke"
+    affiliation: "Osaka Metropolitan University, Japan"
+url: "https://seto77.github.io/Temari/"
+repository-code: "https://github.com/seto77/Temari"
+license: MIT
+version: "0.9.0"
+date-released: "2026-08-05"
+keywords:
+  - atomic physics
+  - electron microscopy
+  - ionization form factor
+  - inner-shell ionization
+  - STEM-EDX
+  - EELS
+  - generalized oscillator strength
+  - Dirac-Hartree-Fock-Slater
+  - distorted wave
+  - Julia
+
+references:
+  - type: article
+    authors:
+      - family-names: "Bote"
+        given-names: "David"
+      - family-names: "Salvat"
+        given-names: "Francesc"
+    title: "Calculations of inner-shell ionization by electron impact with the distorted-wave and plane-wave Born approximations"
+    journal: "Physical Review A"
+    year: 2008
+    volume: 77
+    start: 042701
+    doi: "10.1103/PhysRevA.77.042701"
+  - type: article
+    authors:
+      - family-names: "Bote"
+        given-names: "David"
+      - family-names: "Salvat"
+        given-names: "Francesc"
+      - family-names: "Jablonski"
+        given-names: "Aleksander"
+      - family-names: "Powell"
+        given-names: "Cedric J."
+    title: "Cross sections for ionization of K, L and M shells of atoms by impact of electrons and positrons with energies up to 1 GeV: Analytical formulas"
+    journal: "Atomic Data and Nuclear Data Tables"
+    year: 2009
+    volume: 95
+    start: 871
+    end: 909
+    doi: "10.1016/j.adt.2009.08.001"
