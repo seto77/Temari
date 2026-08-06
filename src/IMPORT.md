@@ -1,8 +1,9 @@
 # v0 import — provenance
 
-`src/` の中身は、ReciPro の STEM-EDX 用イオン化テーブル生成コードを **無改変で**
-取り込んだもの。Temari の出発点であり、まだ層分割 (`docs/architecture.md`) は
-適用されていない。
+`src/` の出発点は、ReciPro の STEM-EDX 用イオン化テーブル生成コードを **無改変で**
+取り込んだもの。**2026-08-06 に層分割 (`docs/architecture.md`) を適用済み** —
+`ionization.jl` は薄いローダ + CLI で、実体は `l0_*`〜`l5_*` と `selftest.jl`
+(コミット `382f11a`、5 チャネル === でビット同一を確認)。以下の来歴表は分割前の記録。
 
 | 項目 | 値 |
 |---|---|

@@ -58,8 +58,9 @@ Planned, in rough order (see the roadmap in 計画書.md):
 
 1. **Zero dependencies.** Julia standard library only. The sole bundled data
    file is the Bote–Salvat cross-section coefficient set (public domain).
-2. **Standalone.** It stays possible to drop the whole thing into one file and
-   hand it to someone.
+2. **Standalone.** No `module`, no package environment: the layer files carry a
+   flat namespace and concatenate in include order, so it stays possible to
+   hand the whole engine to someone as a single file.
 3. **MIT licensed.** A reference implementation should be readable and usable.
 4. **Fast**, but reproducibility outranks speed: optimizations that change
    floating-point summation order are adopted only when a full table

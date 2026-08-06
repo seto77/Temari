@@ -32,6 +32,11 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
   `J0_MIN = 1e-8`)。x ≈ nπ で j̃₀ が丸め誤差 (最悪ちょうど 0 → 出力全体が NaN) になり
   全 λ が汚染される問題。**窓の外はビット同一**なので v3 出荷データとの整合は保たれる
   (発火率 ~4.1e-8/規格化)。詳細は `計画書.md` §8.1、経緯は `docs/next_phase_2026-08-06.md` §3.1
+- **2026-08-06: P2 層分割を実施** (`382f11a`)。`src/ionization.jl` は薄いローダ + CLI、
+  実体は `l0_numerics` / `l0_json` / `l1_atomic` / `l2_continuum` / `l3_radial` /
+  `l4_angular` / `l5_exit_edx` / `selftest`。**module は導入せずフラット名前空間**
+  (include するだけで全名前が見える / 連結すれば単一ファイルに戻る)。純粋な移動で
+  5 チャネル === ビット同一。層とファイルの対応は `docs/architecture.md`
 - **現状の残務・次の一手の正本 = `docs/next_phase_2026-08-06.md`** (P1 完了時点の引き継ぎ)
 - 次の物理 = v4 (完全 Dirac 連続・−Re(DX*)・ULTRA 求積) + M 殻。正本 =
   `ReciPro/.project-guidance/ReciPro/ReciPro_STEM-EDX_v4精度検討.md`。
