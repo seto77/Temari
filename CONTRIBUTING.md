@@ -68,7 +68,7 @@ documentation or in issues. Cite where the comparison data lives instead.
 All of these run from the repository root and need nothing but Julia.
 
 ```powershell
-# 1. Analytic ladder T0-T8 (~10 s). Failures are assertions.
+# 1. Analytic ladder T0-T10 (~10 s). Failures are assertions.
 julia -t auto src/ionization.jl selftest
 
 # 2. Against the independent Python implementation (~1 min).

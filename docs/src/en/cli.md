@@ -29,6 +29,7 @@ julia -t auto src/ionization.jl edge <Z> <channel> <E0_keV> [--quick|--high] [--
 | `refcheck` | Compares against `src/reference_values.json`, the values produced by the independent Python implementation. Prints `WORST vs Python`. | ~1 min |
 | *(none)* | The **F(s, E₀) exit**: compute one channel on an s grid. | seconds to minutes |
 | `edge` | The **dσ/dΔE exit**: the EELS core-loss edge shape and the inner-shell stopping-power contribution, at K = 0. | cheaper than the above — one K node instead of the whole s grid |
+| `phase` | The **δ_l exit**: elastic scattering phase shifts in the neutral atom's static field. Takes `<Z> <ε_eV>`, not a channel. | seconds |
 
 `refcheck` reports but does not gate — it always exits 0. To gate it (as CI
 does), call the function and inspect the return value:
@@ -95,6 +96,40 @@ This is an isolated atom in a mean field, first Born, one inner-shell channel.
 There are no multiplets and no solid-state density of states, so the near-edge
 structure (ELNES) is outside the model; the smooth tail from roughly 20 eV above
 the edge is what it is for.
+
+### The `phase` exit
+
+```bash
+julia +1.11 -t auto src/ionization.jl phase 26 100 --lmax 30 --json fe_phase.json
+```
+
+Arguments are `<Z> <ε_eV>` — an atomic number and the incident electron's kinetic
+energy — not a channel, because nothing is being ionized. The continuum solver
+runs in the **neutral** atom's static field (the Latter tail is switched off so
+V → 0, which is the scattering boundary condition rather than the bound-state
+one), and reports the phase shift its asymptotic fit has been computing and
+discarding all along.
+
+Because the field is neutral, the reference pair is Riccati–Bessel rather than
+Coulomb, and the overall sign of the reference is pinned — so δ_l is unambiguous
+here. Against the Coulomb reference used inside an ionization run it would only
+be defined modulo π.
+
+Two limits to keep in mind:
+
+- **δ_l is a principal value.** Low partial waves whose true phase exceeds π
+  wrap into (−π, π]. Unwrapping them needs an energy sweep and Levinson's
+  theorem, which is what the Mott cross sections on the roadmap will require.
+- **Scalar and spin-averaged**, with Slater local exchange and no polarization
+  or absorption potential. Fine for the shape of the high-l tail; not enough for
+  quantitative low-energy diffraction.
+
+Validation is `selftest` T10: at high l, where the centrifugal barrier keeps the
+wave out of the strong-field region, δ_l is compared against the Born
+approximation tan δ_l ≈ −2k ∫ V(r) j_l(kr)² r² dr integrated from the same
+potential. They agree to about 3 %, which checks the sign and the magnitude
+independently. T2 and T3 pin the trivial cases: a vanishing potential and a pure
+Coulomb field must both give zero short-range phase, and do.
 
 ### Threads
 

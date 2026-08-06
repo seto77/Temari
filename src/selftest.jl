@@ -133,8 +133,13 @@ function selftest()
             push!(errs, maximum(abs.(cont.u_int[li, :] .- u_exact)) / ref)
         end
         err = maximum(errs)
-        @printf("[T2] 自由粒子 eps=%s: max 相対誤差 = %.2e\n", eps, err)
+        # 短距離位相シフト: V=0 かつ Bessel 参照なので δ_l は厳密に 0 (符号も一意)。
+        # 残差はメッシュ由来の分散位相そのもので、上の err と同じ起源。
+        dmax = maximum(abs.(cont.delta[cont.ok]))
+        @printf("[T2] 自由粒子 eps=%s: max 相対誤差 = %.2e   max|δ_l| = %.2e (厳密に 0)\n",
+                eps, err, dmax)
         @assert err < 2e-3 "T2 FAIL"            # κh 固定による分散位相 (Python 版参照)
+        @assert dmax < 2e-2 "T2 FAIL: 自由粒子の位相シフトが 0 でない"
     end
 
     # ---- T3+T4: 水素の連続状態 R_l (参照値は mpmath で事前計算して埋め込み) ----
@@ -144,6 +149,12 @@ function selftest()
     pot = PureCoulomb()
     for eps in (0.25, 2.0)
         cont = ContinuumSet(V_for(pot, eps), eps, 6, 16.0, 30.0; q_resolve=5.0)
+        # 純 Coulomb 場では解が参照 F_l そのものなので短距離位相はゼロ。Coulomb
+        # 参照は全体符号が不定なので δ_l ≈ 0 と ≈ ±π が混在する — |sin δ_l| で見る
+        # (= tan δ_l = b/a という符号不定性に強い不変量を見ていることに相当)
+        smax = maximum(abs.(sin.(cont.delta[cont.ok])))
+        @printf("[T3] 純 Coulomb eps=%s: max|sin δ_l| = %.2e (厳密に 0)\n", eps, smax)
+        @assert smax < 1e-2 "T3 FAIL: 純 Coulomb で短距離位相が残っている"
         c, resid = orthogonalize_l0!(cont, r_b, u_b)
         jlb = zeros(7)
         for (e0, l, Q, R_ex) in t3_refs
@@ -243,6 +254,42 @@ function selftest()
         @printf("     有限核単独 %.2e / 実 c での物理効果 %.2e (Fe K, 参考)\n",
                 d_nuc, d_rel)
         @assert d_inf < 1e-9 "T8 FAIL (c→∞ limit)"
+    end
+
+    # ---- T10: 弾性位相シフト δ_l vs Born 近似 (高 l 域) ----
+    # δ_l は「捨てていた量」なので解析解が無い。独立な検算として、Born 近似
+    #   tan δ_l ≈ −2k ∫ V(r) j_l(kr)² r² dr
+    # を同じポテンシャルから直接積分して比べる。低 l は Born が破綻する (かつ
+    # |δ|>π で主値へ折り返す) ので、遠心障壁が弱い場を保証する高 l 域だけを見る。
+    # ここが合えば **δ_l の符号と大きさの両方**が独立に裏づけられる。
+    # Z=26 の中性 SCF は T8 で既にキャッシュ済みなので追加コストは小さい。
+    let z = 26, eps_eV = 200.0, lm = 24
+        o = compute_phase(z, eps_eV; l_max=lm, verbose=false)
+        k = o["kappa_a0inv"]
+        pot = V_bound_callable(get_neutral(z); latter_charge=0.0)
+        r = collect(range(1e-5, 40.0, length=40_000))
+        V = [pot(x) for x in r]
+        jb = zeros(lm + 1)
+        born = zeros(lm + 1)
+        jl2 = zeros(lm + 1, length(r))
+        for i in eachindex(r)
+            sph_jl_all!(jb, lm, k * r[i])
+            @inbounds for li in 1:lm+1
+                jl2[li, i] = jb[li]^2
+            end
+        end
+        for li in 1:lm+1
+            born[li] = -2.0 * k * trapz(V .* view(jl2, li, :) .* r .^ 2, r)
+        end
+        d = o["delta_rad"]
+        lo, hi = 8, lm - 2                       # Born が効く窓 (障壁で場が弱い)
+        worst = maximum(abs(d[l+1] / born[l+1] - 1.0) for l in lo:hi)
+        @printf("[T10] 弾性 δ_l vs Born (Z=%d, ε=%.0f eV, l=%d..%d): max|比−1| = %.3f\n",
+                z, eps_eV, lo, hi, worst)
+        @printf("      δ_l は主値 (−π,π]。低 l は |δ|>π で折り返すので窓の外 (P4 で連続化)\n")
+        @assert worst < 0.15 "T10 FAIL: 高 l の δ_l が Born と合わない"
+        @assert all(>(0.0), d[lo:hi+1]) "T10 FAIL: 引力場なのに δ_l > 0 でない"
+        @assert abs(d[end]) < abs(d[lo+1]) "T10 FAIL: δ_l が l→大 で 0 へ向かっていない"
     end
 
     @printf("%s\nALL PASS (%.0f s)\n%s\n", bar, time() - t_start, bar)

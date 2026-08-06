@@ -34,6 +34,7 @@ concatenating the files in include order reproduces a single-file build.
 | `l5_channel.jl` | L5 | everything an exit shares: the channel table, the SCF/Dirac caches, `prepare_channel`, the ε quadrature, the per-ε driver, the N(K) contraction, Bote–Salvat absolute cross sections |
 | `l5_exit_edx.jl` | L5 | the F(s, E₀) exit — K on an s grid, reported as N(K)/N(0) |
 | `l5_exit_eels.jl` | L5 | the dσ/dΔE exit — K = 0 only, reported as an edge shape plus the stopping-power contraction |
+| `l5_exit_phase.jl` | L5 | the δ_l exit — elastic phase shifts in the neutral atom's static field |
 | `selftest.jl` | — | the T0–T9 ladder and `refcheck` |
 
 Only the `l5_exit_*.jl` files know what is being reported. A second exit is a
@@ -80,6 +81,12 @@ returning. Exposing them is an output-plumbing change, not physics:
   no work. **Exposed** as the `edge` subcommand (`l5_exit_eels.jl`).
 - **The asymptotic fit coefficients** — the continuum solver least-squares fits
   the tail to u ≈ a·F_l + b·G_l. The elastic phase shift is δ_l = atan2(b, a).
+  **Exposed** as the `phase` subcommand (`l5_exit_phase.jl`); only the amplitude
+  √(a²+b²) was kept before. Two caveats came out of exposing it, both recorded
+  in `l2_continuum.jl`: the Coulomb reference pair has no pinned overall sign, so
+  against it δ_l is defined only modulo π (against the Riccati–Bessel reference
+  used for a neutral atom it is unambiguous), and the reported value is a
+  principal value, so low partial waves with |δ| > π wrap.
 - **The ε quadrature weights** alongside `dNde` — one contraction gives the
   inner-shell contribution to stopping power.
 

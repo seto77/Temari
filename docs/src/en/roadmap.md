@@ -16,7 +16,7 @@ come first.
 | --- | --- | --- |
 | **EELS core-loss dσ/dΔE** | The `diag.dNde` matrix (ε node × K node). Its K = 0 column, times $4\gamma^2 a_0^2$, *is* the parallel-illumination dσ/dε. | **done** — `edge` subcommand |
 | **Inner-shell stopping power** | One contraction of `diag.dNde` with the ε quadrature weights. | **done** — reported by `edge` |
-| **Elastic phase shifts $\delta_l$** | The continuum solver least-squares fits the tail to $u \approx a F_l + b G_l$. Then $\delta_l = \mathrm{atan2}(b, a)$. | next — the fit keeps only $\sqrt{a^2+b^2}$ today, so $(a, b)$ has to be retained |
+| **Elastic phase shifts $\delta_l$** | The continuum solver least-squares fits the tail to $u \approx a F_l + b G_l$. Then $\delta_l = \mathrm{atan2}(b, a)$. | **done** — `phase` subcommand, validated against the Born approximation to 3 % at high $l$ |
 
 ## Small to medium effort
 
@@ -26,7 +26,7 @@ come first.
 | **Double-differential d²σ/dΩdΔE** | small | The K = 0 branch of the angular integral already evaluates $S/Q^4$ on a θ grid — and that grid is built by a transform that flattens the forward $1/Q^4$ peak, so nodes automatically cluster where EELS collection angles are. |
 | **Partial cross sections σ(β, Δ)** | medium | The EELS quantification k-factor itself. Broadest reach of anything on this list. The real work is designing ε nodes for the energy window. |
 | **X-ray scattering factors $f_x(s)$, Mott–Bethe, $f_e(s)$** | small | Straight from the SCF charge density. Gives arbitrary ions from first principles, replacing fitted parameter tables. |
-| **Mott elastic dσ/dΩ, σ_el, σ_tr** | medium | From $\delta_l$. Needs the neutral asymptotic condition and a different partial-wave cap. |
+| **Mott elastic dσ/dΩ, σ_el, σ_tr** | medium | From $\delta_l$, which the `phase` subcommand now produces against the neutral asymptotic condition. What is still missing is spin: these are scalar, spin-averaged phase shifts, so the spin-flip amplitude $g(\theta)$ needs κ-resolved Dirac continuum states. Low partial waves also have to be unwrapped out of their principal value first (Levinson). |
 | **Photoionization σ_nl(ω) and asymmetry β_nl** | medium | Swap the fast-electron operator for the photon dipole operator. The energy normalization is already the one photoionization requires. |
 | **M shell (M1–M5)** | small | The bundled coefficient set already covers 9 subshells for Z ≳ 50. Five rows in the channel table, plus a $[3j]^2$ table for $l_\text{init} = 2$. |
 | **ΔSCF binding and relaxation energies** | medium | Both the neutral and the relaxed-ion SCF are already solved and cached. |

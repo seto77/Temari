@@ -70,7 +70,7 @@ function make_case(nL::Int, n_int::Int; r_lo=1e-6, r_hi=300.0)
     end
     w_int = [r * (0.5 + nextu()) * 1e-2 for r in r_int]   # 正の擬似 Simpson 重み
     cont = ContinuumSet(1.0, sqrt(2.0), r_int, u_int, w_int,
-                        zeros(nL), fill(true, nL))
+                        zeros(nL), fill(true, nL), zeros(nL))
     r_b = exp.(range(log(1e-5), log(60.0), length=400))
     u_b = [r^2 * exp(-1.5 * r) for r in r_b]
     return cont, r_b, u_b

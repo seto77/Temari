@@ -172,7 +172,36 @@ struct ContinuumSet
     w_int::Vector{Float64}
     match_resid::Vector{Float64}
     ok::Vector{Bool}
+    delta::Vector{Float64}       # 短距離位相シフト δ_l [rad] (下記)
 end
+
+# ---- δ_l について (260806Cl 追加、P3「捨てていた量」の 1 つ) ------------------
+# 末尾フィット u ≈ a·F_l + b·G_l の (a, b) から δ_l = atan2(b, a)。これまでは
+# 振幅 C = √(a²+b²) だけを使い (エネルギー規格化)、位相は捨てていた。
+#
+# 意味: **参照ペア (F_l, G_l) に対する短距離位相シフト**。本番経路では F,G は
+# z_asym の点 Coulomb 関数なので、δ_l は「遮蔽されたイオン場が点 Coulomb 尾から
+# ずれている分」= 全弾性位相 σ_l + δ_l のうち σ_l = arg Γ(l+1+iη) を除いた部分。
+# z_asym = 0 (中性場・|η| < ETA_BESSEL) では F,G が Riccati-Bessel になるので
+# δ_l がそのまま通常の散乱位相シフトになる。
+#
+# ⚠ 符号の規約 — 参照ペアによって一意性が違う:
+#   * Riccati-Bessel 参照 (z_asym = 0、|η| < ETA_BESSEL): 参照は自前の j_l / y_l で
+#     符号が標準に固定されているので、**δ_l ∈ (−π, π] は一意**。
+#   * Coulomb 参照 (本番の |η| ≥ ETA_BESSEL): `coulomb_fg_window` の返す (F_l, G_l) は
+#     **全体符号が固定されていない** (Wronskian F'G−FG' = 1 は両方の符号反転で不変。
+#     selftest T0b が |F| と G/F で照合しているのはこのため)。よって a, b が揃って
+#     符号反転しうるので、**δ_l は mod π でのみ意味を持つ** (tan δ_l = b/a が不変量)。
+#     実測: 純 Coulomb 場では l ごとに δ_l ≈ 0 と ≈ −π が混在する — どちらも
+#     「短距離位相ゼロ」を意味する。
+#   全体符号を固定するには arg Γ(l+1+iη) 相当の情報が要る。Levinson の巻き数や
+#   Mott 弾性散乱 (P4) はそれを前提にするので、そこで手当てすること。
+#   なお δ_l は l 方向にも ε 方向にも分岐追跡していない。
+#
+# 検査: ポテンシャルが参照の尾とちょうど一致する場合、短距離位相はゼロでなければ
+# ならない。selftest T2 (自由粒子 V=0, z_asym=0 → Bessel 参照) と
+# T3 (純 Coulomb V=−1/r, z_asym=1 → Coulomb 参照) がまさにその状況なので、
+# 前者は |δ_l|、後者は符号不定性に強い |sin δ_l| で追加コストなしにゲートしている。
 
 function ContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
                       r_match::Float64; q_resolve::Float64=0.0,
@@ -265,6 +294,7 @@ function ContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
     Cl = zeros(nL)
     ok = trues(nL)
     resid = zeros(nL)
+    delta = zeros(nL)                          # 短距離位相シフト (上のコメント)
     use_bessel = abs(eta) < eta_bessel
     jl_buf = zeros(l_max + 1)
     yl_buf = zeros(l_max + 1)
@@ -298,6 +328,7 @@ function ContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
         M = hcat(Fb[:, li], Gb[:, li])
         ab = M \ (ufit ./ fmax)                # 最小二乗 (QR)。窓正規化つき
         Cl[li] = hypot(ab[1], ab[2]) * fmax    # 漸近振幅 C = √(a²+b²)
+        delta[li] = atan(ab[2], ab[1])         # 位相 δ_l = atan2(b, a)
         pred = (M * ab) .* fmax
         nrm = norm(pred)
         resid[li] = norm(ufit .- pred) / (nrm > 0 ? nrm : 1.0)
@@ -334,7 +365,7 @@ function ContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
         w_int[nA_keep] += gap / 2.0
         w_int[nA_keep+1] += gap / 2.0
     end
-    return ContinuumSet(eps, kappa, r_int, u_int, w_int, resid, collect(ok))
+    return ContinuumSet(eps, kappa, r_int, u_int, w_int, resid, collect(ok), delta)
 end
 
 "束縛軌道 u(r) を別グリッドへ log-spline 補間 (定義域外は 0、Python 版 _u_on_grid)"

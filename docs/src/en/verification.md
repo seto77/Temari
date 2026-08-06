@@ -18,13 +18,15 @@ Failures are assertions, so the command exits non-zero on a real failure.
 | T0b | Coulomb $F$, $G$ against mpmath — magnitude, ratio and Wronskian | max 3.9×10⁻¹⁴ |
 | T0c | The Miller-normalization guard near $x \approx n\pi$, against a 512-bit `BigFloat` reference computed in-process (no external data) | 60 guarded cases, max 8.1×10⁻¹⁶ |
 | T1 | Hydrogen 1s energy and radial function | ΔE 2.1×10⁻¹², max\|Δu\|/max\|u\| 8.3×10⁻⁸ |
-| T2 | Free-particle continuum normalization at ε = 0.5, 8, 200 Ha | 7×10⁻⁵ … 1.5×10⁻³ |
-| T3 | Radial multipole integrals $R_{l\lambda}(Q)$ against closed-form hydrogenic results | rel. ≤ 1×10⁻⁴ |
+| T2 | Free-particle continuum normalization at ε = 0.5, 8, 200 Ha, and the short-range phase shift it must not have | 7×10⁻⁵ … 1.5×10⁻³; max\|δ_l\| ≤ 6.5×10⁻³ |
+| T3 | Radial multipole integrals $R_{l\lambda}(Q)$ against closed-form hydrogenic results, and the vanishing short-range phase of a pure Coulomb field | rel. ≤ 1×10⁻⁴; max\|sin δ_l\| ≤ 2.3×10⁻⁴ |
 | T4 | Orthogonalization of the continuum wave against the initial state | coefficient ~10⁻⁶ or below |
 | T5 | Hydrogen K-shell σ through the whole pipeline, against Bote–Salvat | ratio 0.997 |
 | T6 | Point-nucleus Dirac eigenvalues against the exact Sommerfeld formula, including the 2s/2p½ degeneracy and the 2p³ᐟ²/2p½ splitting, at Z = 26 and 79 | rel. < 1×10⁻⁵ |
 | T7 | 3j closed forms, the K-shell reduction $A = (2l'+1)$, and no overflow at high $l$ | exact |
 | T8 | The $c \to \infty$ limit: the relativistic path must reduce to the non-relativistic one | 8.5×10⁻¹⁵ (gate 10⁻⁹) |
+| T9 | The EELS exit: $\int \mathrm{d}\sigma/\mathrm{d}\Delta E \, \mathrm{d}\Delta E = \sigma$ as an identity, positivity, the edge as the maximum, phase space closing at the top, and a mean loss above the threshold | closure 1.5×10⁻¹⁶ |
+| T10 | Elastic phase shifts $\delta_l$ at high $l$ against the Born approximation $\tan\delta_l \approx -2k\int V j_l^2 r^2 \mathrm{d}r$, integrated from the same potential | max\|ratio − 1\| = 3.2 % |
 
 T8 is the strongest structural check in the ladder: it exercises the entire
 relativistic code path and demands that it collapse onto an independently

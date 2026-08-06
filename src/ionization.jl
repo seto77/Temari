@@ -82,6 +82,7 @@ include(joinpath(@__DIR__, "l4_angular.jl"))
 include(joinpath(@__DIR__, "l5_channel.jl"))    # 出口に依らない基盤
 include(joinpath(@__DIR__, "l5_exit_edx.jl"))   # 出口: F(s, E0)
 include(joinpath(@__DIR__, "l5_exit_eels.jl"))  # 出口: dσ/dΔE と阻止能寄与
+include(joinpath(@__DIR__, "l5_exit_phase.jl")) # 出口: 弾性散乱位相シフト δ_l
 include(joinpath(@__DIR__, "selftest.jl"))
 
 # ====================================================================
@@ -94,9 +95,47 @@ const USAGE = """
   julia -t auto ionization.jl refcheck
   julia -t auto ionization.jl      Z channel E0keV [opts]   # F(s) 出口 (EDX)
   julia -t auto ionization.jl edge Z channel E0keV [opts]   # dσ/dΔE 出口 (EELS)
+  julia -t auto ionization.jl phase Z epsEV [--lmax N] [--json path]  # δ_l 出口 (弾性)
 
 opts: [--quick|--high] [--rel] [--s s1 s2 ...] [--json path]
       --s は F(s) 出口のみ (edge は K=0 の 1 点で、その分だけ安い)"""
+
+"phase サブコマンド: 中性原子の静的場に対する弾性散乱位相シフト δ_l"
+function main_phase(args)
+    length(args) >= 2 || error("Z と ε[eV] を指定 (例: phase 26 100)")
+    z = parse(Int, args[1])
+    eps_eV = parse(Float64, args[2])
+    l_max = nothing
+    json_path = nothing
+    i = 3
+    while i <= length(args)
+        if args[i] == "--lmax"
+            l_max = parse(Int, args[i+1]); i += 1
+        elseif args[i] == "--json"
+            json_path = args[i+1]; i += 1
+        end
+        i += 1
+    end
+    println("初回はこの元素の SCF を解くため時間がかかります...")
+    o = compute_phase(z, eps_eV; l_max=l_max)
+    @printf("\n%4s  %14s  %14s  %12s\n", "l", "δ_l [rad]", "sin²δ_l", "フィット残差")
+    for (l, d, s2, rs, ok) in zip(o["l"], o["delta_rad"], o["sin2_delta"],
+                                  o["match_resid"], o["ok"])
+        @printf("%4d  %14.6f  %14.6e  %12.2e%s\n", l, d, s2, rs, ok ? "" : "  (フィット不成立)")
+    end
+    d = o["delta_rad"]
+    @printf("\n最大 |δ_l| = %.4f rad (l=%d) / 最高部分波 |δ| = %.2e (0 へ収束していること)\n",
+            maximum(abs, d), argmax(abs.(d)) - 1, abs(d[end]))
+    println("参照: ", o["reference"], " / 交換: ", o["exchange"])
+    println("注意: ", o["note"], "。Mott 断面積 (スピン分解) は P4")
+    if json_path !== nothing
+        open(json_path, "w") do io
+            write_json(io, o); println(io)
+        end
+        println("\n$json_path に保存しました")
+    end
+    return 0
+end
 
 function main_(args)
     if isempty(args)
@@ -105,6 +144,7 @@ function main_(args)
     end
     args[1] == "selftest" && return selftest()
     args[1] == "refcheck" && (refcheck(); return 0)
+    args[1] == "phase" && return main_phase(args[2:end])   # 260806Cl: 弾性 δ_l 出口
     edge_mode = args[1] == "edge"                # 260806Cl: EELS 出口
     edge_mode && (args = args[2:end])
     length(args) >= 3 || error("Z channel E0keV の 3 つを指定 (例: 26 K 200)")
