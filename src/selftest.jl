@@ -256,6 +256,43 @@ function selftest()
         @assert d_inf < 1e-9 "T8 FAIL (c→∞ limit)"
     end
 
+    # ---- T11: GOS の Bethe 和則と双極子極限 ----
+    # GOS = 2ΔE·S(Q)/Q²。検査は物理法則そのもので、当てはめる自由度が無い:
+    #  (a) 大 Q 極限: 衝撃 (二体衝突) 領域では副殻の全振動子強度が連続状態へ移るので
+    #      ∫ df/dΔE dΔE → 副殻の電子数。尾根 ε ≈ Q²/2 を ε 域に入れる必要がある
+    #  (b) 小 Q 極限: S ∝ Q² なので GOS は有限値へ収束する (光学的振動子強度)。
+    #      Q² の相殺が正しくないとここが発散/消失するので、多重極機構の検査になる
+    # 水素 1s は T1 の厳密軌道 (u = 2r e^{-r}) と純 Coulomb 場をそのまま使えるので
+    # SCF を経由せずに検査できる。占有数 1 electron なので和則の右辺は 1。
+    let E_th_H = 0.5, occ = 1.0, q_big = 8.0
+        # 厳密な比較対象: 水素 1s の連続状態への双極子振動子強度。TRK 和則
+        # (Σ_all f = 1) から Lyman 系列を引く。f(1s→np) は閉形式 (Bethe–Salpeter)
+        # なのでここで計算でき、外部の数表を持ち込まずに済む。n^-3 で収束する。
+        f_lyman(n) = exp(8 * log(2.0) + 5 * log(n) + (2n - 4) * log(n - 1.0) -
+                         log(3.0) - (2n + 4) * log(n + 1.0))
+        f_cont_exact = 1.0 - sum(f_lyman(n) for n in 2:2000)   # = 0.434996...
+
+        # ε 域は尾根 ε ≈ Q²/2 の**幅まで**覆う必要がある (Compton 幅 ~Q)。
+        # 1.2Q² なら尾根の 2 倍以上まで届く。0.6Q² では尾を切って和則が 0.92 に落ちる
+        eps_max = 1.2 * q_big^2
+        epsH, weH = eps_nodes(E_th_H, eps_max, 8, 24, 10)
+        qs = [0.01, 0.02, 0.04, q_big]
+        gosH, _ = gos_surface(PureCoulomb(), r_b, u_b, E_th_H, 1, epsH, qs, 0, occ;
+                              l_cap=48, n_q=160)
+        f = [sum(weH[ie] * gosH[ie, iq] for ie in eachindex(weH)) for iq in eachindex(qs)]
+        # f(Q) = f(0) + cQ² なので Richardson で Q→0 へ外挿し、差分比で Q² 依存を確認
+        f0 = (4.0 * f[1] - f[2]) / 3.0
+        ratio = (f[3] - f[2]) / (f[2] - f[1])          # Q² なら 4
+        @printf("[T11] GOS 水素 1s: 双極子極限 %.5f (厳密 %.5f, 差 %.2f%%) / Q² 差分比 %.2f (期待 4)\n",
+                f0, f_cont_exact, 100 * (f0 / f_cont_exact - 1), ratio)
+        @printf("      Bethe 和則 ∫df/dΔE dΔE = %.4f at Q=%.0f (期待 %.1f = 電子数)\n",
+                f[end], q_big, occ)
+        @assert all(>(0.0), f) "T11 FAIL: 振動子強度が非正"
+        @assert abs(f0 / f_cont_exact - 1) < 0.01 "T11 FAIL: 双極子極限が厳密値と合わない"
+        @assert 3.0 < ratio < 5.5 "T11 FAIL: 小 Q が Q² で近づいていない (S ∝ Q² の相殺)"
+        @assert 0.93 < f[end] / occ < 1.03 "T11 FAIL: 大 Q で Bethe 和則を満たさない"
+    end
+
     # ---- T10: 弾性位相シフト δ_l vs Born 近似 (高 l 域) ----
     # δ_l は「捨てていた量」なので解析解が無い。独立な検算として、Born 近似
     #   tan δ_l ≈ −2k ∫ V(r) j_l(kr)² r² dr

@@ -85,6 +85,16 @@ function write_json(io::IO, v; indent=0)
             println(io, i < length(ks) ? "," : "")
         end
         print(io, pad, "}")
+    elseif v isa AbstractMatrix
+        # 260806Cl 追加 (GOS 面): 行の配列として書く。行 = 第 1 添字なので
+        # JSON 側は v[i][j] = v[i, j]。改行を入れるのは行の境目だけ
+        println(io, "[")
+        for i in axes(v, 1)
+            print(io, pad, "  ")
+            write_json(io, view(v, i, :); indent=indent + 1)
+            println(io, i < last(axes(v, 1)) ? "," : "")
+        end
+        print(io, pad, "]")
     elseif v isa AbstractVector
         print(io, "[")
         for (i, x) in enumerate(v)

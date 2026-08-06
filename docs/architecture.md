@@ -35,6 +35,7 @@ concatenating the files in include order reproduces a single-file build.
 | `l5_exit_edx.jl` | L5 | the F(s, E₀) exit — K on an s grid, reported as N(K)/N(0) |
 | `l5_exit_eels.jl` | L5 | the dσ/dΔE exit — K = 0 only, reported as an edge shape plus the stopping-power contraction |
 | `l5_exit_phase.jl` | L5 | the δ_l exit — elastic phase shifts in the neutral atom's static field |
+| `l5_exit_gos.jl` | L5 | the GOS exit — df/dΔE(Q), the Bethe surface. No E₀ anywhere in it |
 | `selftest.jl` | — | the T0–T9 ladder and `refcheck` |
 
 Only the `l5_exit_*.jl` files know what is being reported. A second exit is a
@@ -100,6 +101,18 @@ the beam energy E₀.
 This means the E₀ dimension disappears entirely for a GOS table: one run per
 channel instead of one run per (channel, E₀) pair. For the shipping tables that
 is a factor of ~22 in cost.
+
+**Implemented** as the `gos` subcommand. The seam that made it possible is
+`eps_setup` in `l5_channel.jl`: everything about one ε node that does *not*
+depend on the incident kinematics — partial-wave cap, matching radius, mesh
+density, the continuum solve, the R table, the significance filter — factored
+out of `eps_worker`. The only thing an exit still chooses is the Q range. The
+F(s) exit derives it from k_i and k_f; the GOS exit derives it from the Q grid
+the user asked for, and never forms k_i at all. `prepare_channel` accordingly
+accepts no beam energy in that mode.
+
+The GOS itself is one line on top: df/dΔE(Q) = 2ΔE·S(Q)/Q², where S is the same
+quantity the F(s) exit has always assembled.
 
 ## Reproducibility constraints on optimization
 

@@ -19,6 +19,8 @@ julia -t auto src/ionization.jl selftest
 julia -t auto src/ionization.jl refcheck
 julia -t auto src/ionization.jl      <Z> <channel> <E0_keV> [--quick|--high] [--rel] [--s ...] [--json <path>]
 julia -t auto src/ionization.jl edge <Z> <channel> <E0_keV> [--quick|--high] [--rel] [--json <path>]
+julia -t auto src/ionization.jl gos  <Z> <channel>          [--quick|--high] [--rel] [--epsmax <Ha>] [--qmax <a0^-1>] [--json <path>]
+julia -t auto src/ionization.jl phase <Z> <eps_eV> [--lmax <N>] [--json <path>]
 ```
 
 ### Subcommands
@@ -30,6 +32,7 @@ julia -t auto src/ionization.jl edge <Z> <channel> <E0_keV> [--quick|--high] [--
 | *(none)* | The **F(s, E₀) exit**: compute one channel on an s grid. | seconds to minutes |
 | `edge` | The **dσ/dΔE exit**: the EELS core-loss edge shape and the inner-shell stopping-power contribution, at K = 0. | cheaper than the above — one K node instead of the whole s grid |
 | `phase` | The **δ_l exit**: elastic scattering phase shifts in the neutral atom's static field. Takes `<Z> <ε_eV>`, not a channel. | seconds |
+| `gos` | The **GOS exit**: the generalized oscillator strength surface df/dΔE(Q). Takes `<Z> <channel>` and **no beam energy** — the GOS does not depend on one. | comparable to one F(s) run, and it serves every E₀ |
 
 `refcheck` reports but does not gate — it always exits 0. To gate it (as CI
 does), call the function and inspect the return value:
@@ -96,6 +99,44 @@ This is an isolated atom in a mean field, first Born, one inner-shell channel.
 There are no multiplets and no solid-state density of states, so the near-edge
 structure (ELNES) is outside the model; the smooth tail from roughly 20 eV above
 the edge is what it is for.
+
+### The `gos` exit
+
+```bash
+julia +1.11 -t auto src/ionization.jl gos 26 K --epsmax 2000 --json fe_k_gos.json
+```
+
+The generalized oscillator strength surface df/dΔE(Q) — the Bethe surface. Note
+what the argument list is missing: **there is no beam energy**, because the GOS
+does not have one. Neither the continuum solver nor the radial table uses k_i or
+k_f as physics, only to pick a mesh, so the E₀ dimension is simply absent. One
+run per channel serves every incident energy.
+
+| Key | Meaning |
+| --- | --- |
+| `dE_eV`, `q_a0inv` | The ΔE and Q grids. ΔE sits on the ε quadrature nodes; Q is log-spaced |
+| `gos_per_eV` | df/dΔE in 1/eV, indexed `[ΔE][Q]` |
+| `quad_weight_eV` | ε quadrature weights, so ∫ over ΔE is reproducible |
+| `f_sum` | ∫ df/dΔE dΔE at each Q, over the chosen ε range |
+| `q_sum_rule_max` | The largest Q at which `f_sum` can be read as a sum rule |
+
+**How to read `f_sum`.** At large Q the collision becomes impulsive and the
+subshell's whole oscillator strength moves into the continuum, so
+∫ df/dΔE dΔE → the electron count. That is a real, parameter-free check — but
+only if the ε range actually contains the Bethe ridge at ε ≈ Q²/2 *and its
+Compton width*, which scales with the bound electron's momentum spread
+√(2E_th) and therefore with Z. `q_sum_rule_max` is where that stops holding,
+and `--epsmax` is the knob. Carbon K is a good illustration: the default ε range
+gives 0.919 of the two electrons at the top valid Q, and `--epsmax 800` gives
+0.989. Treat the number as a convergence diagnostic, not a claim.
+
+At the other end, Q → 0, the GOS tends to the optical oscillator strength
+density. The approach is O(Q²) — `selftest` T11 verifies both the limit and the
+exponent.
+
+Same caveats as the F(s) exit apply: isolated atom, mean field, first Born,
+direct term only. The ε upper limit is a user choice here rather than a
+kinematic one, since nothing bounds it.
 
 ### The `phase` exit
 

@@ -22,7 +22,7 @@ come first.
 
 | Quantity | Effort | Why it is cheap here |
 | --- | --- | --- |
-| **Generalized oscillator strength (GOS) / Bethe surface** | medium | The GOS is by definition independent of E₀, and neither the continuum solver nor the radial table references $k_i$/$k_f$ as physics — only to choose mesh density. **The whole E₀ dimension disappears**: one run per channel instead of one per (channel, E₀). For the shipped grids that is a factor of ~22 in cost. |
+| **Generalized oscillator strength (GOS) / Bethe surface** | **done** | The `gos` subcommand. The E₀ dimension is gone: one run per channel instead of one per (channel, E₀), a factor of ~22 against the shipped grids. Validated against the Bethe sum rule at large Q and, at Q → 0, against the exact hydrogen continuum dipole strength. |
 | **Double-differential d²σ/dΩdΔE** | small | The K = 0 branch of the angular integral already evaluates $S/Q^4$ on a θ grid — and that grid is built by a transform that flattens the forward $1/Q^4$ peak, so nodes automatically cluster where EELS collection angles are. |
 | **Partial cross sections σ(β, Δ)** | medium | The EELS quantification k-factor itself. Broadest reach of anything on this list. The real work is designing ε nodes for the energy window. |
 | **X-ray scattering factors $f_x(s)$, Mott–Bethe, $f_e(s)$** | small | Straight from the SCF charge density. Gives arbitrary ions from first principles, replacing fitted parameter tables. |

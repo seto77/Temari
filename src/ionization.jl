@@ -83,6 +83,7 @@ include(joinpath(@__DIR__, "l5_channel.jl"))    # 出口に依らない基盤
 include(joinpath(@__DIR__, "l5_exit_edx.jl"))   # 出口: F(s, E0)
 include(joinpath(@__DIR__, "l5_exit_eels.jl"))  # 出口: dσ/dΔE と阻止能寄与
 include(joinpath(@__DIR__, "l5_exit_phase.jl")) # 出口: 弾性散乱位相シフト δ_l
+include(joinpath(@__DIR__, "l5_exit_gos.jl"))   # 出口: 一般化振動子強度 (E0 非依存)
 include(joinpath(@__DIR__, "selftest.jl"))
 
 # ====================================================================
@@ -96,9 +97,69 @@ const USAGE = """
   julia -t auto ionization.jl      Z channel E0keV [opts]   # F(s) 出口 (EDX)
   julia -t auto ionization.jl edge Z channel E0keV [opts]   # dσ/dΔE 出口 (EELS)
   julia -t auto ionization.jl phase Z epsEV [--lmax N] [--json path]  # δ_l 出口 (弾性)
+  julia -t auto ionization.jl gos  Z channel [--quick|--high] [--rel]
+                                   [--epsmax Ha] [--qmax a0inv] [--json path]  # GOS 出口
+                                   # E0 を取らない (GOS は E0 非依存)
 
 opts: [--quick|--high] [--rel] [--s s1 s2 ...] [--json path]
       --s は F(s) 出口のみ (edge は K=0 の 1 点で、その分だけ安い)"""
+
+"gos サブコマンド: 一般化振動子強度 df/dΔE(Q)。E0 を取らない"
+function main_gos(args)
+    length(args) >= 2 || error("Z と channel を指定 (例: gos 26 K)")
+    z = parse(Int, args[1])
+    tag = uppercase(args[2])
+    quick = "--quick" in args
+    high = "--high" in args
+    rel = "--rel" in args
+    eps_max = nothing
+    q_max = nothing
+    json_path = nothing
+    i = 3
+    while i <= length(args)
+        if args[i] == "--epsmax"
+            eps_max = parse(Float64, args[i+1]); i += 1
+        elseif args[i] == "--qmax"
+            q_max = parse(Float64, args[i+1]); i += 1
+        elseif args[i] == "--json"
+            json_path = args[i+1]; i += 1
+        end
+        i += 1
+    end
+    settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
+    println("Z=$z $tag   出口: GOS df/dΔE(Q)   処方: ", rel ? MODEL_ID_REL : MODEL_ID)
+    println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
+            "   スレッド: ", Threads.nthreads(), "   (E0 非依存)")
+    o = compute_gos(z, tag; settings=settings, eps_max_Ha=eps_max, q_max=q_max,
+                    rel_continuum=rel)
+    q = o["q_a0inv"]; fs = o["f_sum"]; occ = o["occupancy"]
+    @printf("\n完了 (%.0f s)  ΔE ノード %d 点 × Q %d 点   ε 上端 = %.1f eV\n",
+            o["elapsed_s"], length(o["dE_eV"]), length(q),
+            o["eps_max_Ha"] * HARTREE_EV)
+    @printf("\n%12s  %16s  %14s\n", "Q [1/a₀]", "∫df/dΔE dΔE", "占有数比")
+    for iq in 1:max(1, length(q) ÷ 12):length(q)
+        @printf("%12.4f  %16.6f  %14.4f\n", q[iq], fs[iq], fs[iq] / occ)
+    end
+    qsr = o["q_sum_rule_max"]
+    @printf("\n和則: 大 Q 極限で ∫df/dΔE dΔE → 副殻の電子数 %.1f\n", occ)
+    iv = findlast(<=(qsr), q)
+    if iv === nothing
+        @printf("      ★Q グリッド全体が和則の有効域 (Q ≤ %.2f) の外。ε 上端を上げること\n", qsr)
+    else
+        @printf("      有効域の上端 Q=%.2f で %.4f (比 %.4f)\n", q[iv], fs[iv], fs[iv] / occ)
+        q[end] > qsr && @printf("      ★Q > %.2f では尾根 ε≈Q²/2 が ε 域外なので f_sum は和則量にならない (GOS 自体は有効)\n", qsr)
+    end
+    d = o["diag"]
+    @printf("\n診断: match_resid=%.2e / badL=%d / l_used_max=%d\n",
+            d["max_match_resid"], d["bad_significant_l"], d["l_used_max"])
+    if json_path !== nothing
+        open(json_path, "w") do io
+            write_json(io, o); println(io)
+        end
+        println("\n$json_path に保存しました")
+    end
+    return 0
+end
 
 "phase サブコマンド: 中性原子の静的場に対する弾性散乱位相シフト δ_l"
 function main_phase(args)
@@ -145,6 +206,7 @@ function main_(args)
     args[1] == "selftest" && return selftest()
     args[1] == "refcheck" && (refcheck(); return 0)
     args[1] == "phase" && return main_phase(args[2:end])   # 260806Cl: 弾性 δ_l 出口
+    args[1] == "gos" && return main_gos(args[2:end])       # 260806Cl: GOS 出口
     edge_mode = args[1] == "edge"                # 260806Cl: EELS 出口
     edge_mode && (args = args[2:end])
     length(args) >= 3 || error("Z channel E0keV の 3 つを指定 (例: 26 K 200)")

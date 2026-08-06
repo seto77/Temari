@@ -41,7 +41,7 @@ function eps_nodes(E_th::Float64, eps_max::Float64, n1::Int, n2::Int, n3::Int)
     return vcat(e1, e2, e3), vcat(we1, we2, we3)
 end
 
-"""ε ノード 1 点分の計算 (Python 版 _eps_worker。スレッド並列の単位)。
+"""ε ノード 1 点分の**運動学に依らない**準備 (260806Cl 分離、P3 の出口共通部)。
 
 手順 (式は全て Python 版と同一):
  1. 部分波上限 l_max = min(l_cap, 運動学 κr + 余裕, 遠心障壁の転回点が
@@ -49,18 +49,27 @@ end
  2. マッチ半径 = ポテンシャルが Coulomb 尾 −z_a/r に一致し (r_match_for)、
     かつ最高部分波の転回点 + 3 波長より外 — Coulomb フィットの正当化条件
  3. 連続状態を解き (ContinuumSet)、l'=l_init を束縛軌道と直交化
- 4. R_(l'λ)(Q) テーブル構築。対数 Q グリッド、q_lo ≈ 0.9(k_i−k_f) 〜 q_hi
+ 4. R_(l'λ)(Q) テーブル構築。対数 Q グリッド [q_lo, q_hi]
  5. 有意性フィルタ: 全部分波の寄与に占める比が sig_thresh 未満の l' を捨てる。
     有意なのに Coulomb フィット残差 > 1e-4 の l' は badL (本番ゲート = 0)
- 6. 尾の診断 r_tail: 有意チャネルの R(q_hi)² が残っていれば Q 打ち切りの警告
-戻り値: (各 K の (k_f/k_i)·角度積分, 最大フィット残差, 直交化記録, l_max,
-badL 数, r_tail)。"""
-function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
-                    z::Int, r_core::Float64, K_nodes::Vector{Float64},
-                    l_cap::Int, n_x::Int, n_phi::Int, n_q::Int, ppw::Float64,
-                    dt_log::Float64, l_init::Int, occ_init::Float64,
-                    sig_thresh::Float64;
-                    rel::Union{Nothing,RelCont}=nothing)
+ 6. 尾の診断 r_tail: q_hi が運動学的上限 `q_kin_max` に届いていないのに有意チャネルの
+    R(q_hi)² が残っていれば Q 打ち切りの警告 (GOS 出口は上限が無いので Inf を渡す)
+
+
+連続状態を解き、束縛軌道と直交化し、R_(l'λ)(Q) テーブルを [q_lo, q_hi] に張り、
+有意性フィルタと診断まで済ませて `(cont, rl, ...)` を返す。ここから先が出口ごとに
+違う: F(s)/EELS 出口は入射側の運動学で角度積分し (`eps_worker`)、GOS 出口は
+S(Q) をそのまま報告する (`l5_exit_gos.jl`)。
+
+**Q 域 (q_lo, q_hi) だけが呼び出し側の裁量**。F(s) 出口は入射・終状態の波数から
+運動学的に決め、GOS 出口は欲しい Q グリッドから決める。それ以外 (部分波上限・
+マッチ半径・メッシュ密度) は放出電子の ε と原子だけで決まり、E0 を参照しない —
+GOS が E0 非依存になるのはこの構造による (docs/architecture.md)。"""
+function eps_setup(pot_ion, r_b, u_b, e::Float64, z::Int, r_core::Float64,
+                   q_lo::Float64, q_hi::Float64, l_cap::Int, n_q::Int,
+                   ppw::Float64, dt_log::Float64, l_init::Int,
+                   sig_thresh::Float64, q_kin_max::Float64;
+                   rel::Union{Nothing,RelCont}=nothing)
     # 放出電子の波数。相対論 (第 3.5 章) では k_rel — グリッド密度・部分波上限・
     # マッチ半径の全てが正しい (短い) 波長基準になる
     kappa = rel === nothing ? sqrt(2.0 * e) : krel(e, rel.c)
@@ -73,8 +82,6 @@ function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
     lam = 2.0 * pi / kappa                     # 放出電子の波長
     r_match = min(max(r_match_for(pot_ion, e), r_core + 5.0, r_t + 3.0 * lam),
                   400.0)
-    q_hi = min(k_i + kf, kappa + 15.0 * z + 2.0 * maximum(K_nodes))
-    q_lo = max(1e-4, 0.9 * (k_i - kf))
     cont = ContinuumSet(V_for(pot_ion, e), e, l_max, r_core, r_match;
                         q_resolve=q_hi, ppw=ppw, dt_log=dt_log,
                         z_asym=pot_ion.z_asym, rel=rel)
@@ -91,7 +98,7 @@ function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
     bad_count = count(significant .& (cont.match_resid .> 1e-4) .& cont.ok)
     # R(q_hi) の尾の診断 (運動学的上限に一致する場合は打ち切り誤差でない)
     r_tail = 0.0
-    if q_hi < 0.999 * (k_i + kf)
+    if q_hi < 0.999 * q_kin_max
         peak = isempty(w_ch) ? 0.0 : maximum(w_ch)
         if peak > 0.0
             for (ic, (lp, _, A)) in enumerate(rl.channels)
@@ -106,13 +113,36 @@ function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
     end
     sig_ok = significant .& cont.ok
     mres = any(sig_ok) ? maximum(cont.match_resid[sig_ok]) : 0.0
+    return cont, rl, mres, (c_ortho, resid_ortho), l_max, bad_count, r_tail
+end
+
+"""ε ノード 1 点分の計算 (Python 版 _eps_worker。スレッド並列の単位)。
+
+`eps_setup` で作った R テーブルに、入射側の運動学で決まる角度積分を掛けた出口。
+Q 域は運動学から: q_hi は Ewald 対の最大移行 (k_i+k_f) と、行列要素が実質ゼロに
+なる κ+15z+2·max(K) の小さい方、q_lo は 0.9(k_i−k_f)。
+
+戻り値: (各 K の (k_f/k_i)·角度積分, 最大フィット残差, 直交化記録, l_max,
+badL 数, r_tail)。"""
+function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
+                    z::Int, r_core::Float64, K_nodes::Vector{Float64},
+                    l_cap::Int, n_x::Int, n_phi::Int, n_q::Int, ppw::Float64,
+                    dt_log::Float64, l_init::Int, occ_init::Float64,
+                    sig_thresh::Float64;
+                    rel::Union{Nothing,RelCont}=nothing)
+    kappa = rel === nothing ? sqrt(2.0 * e) : krel(e, rel.c)
+    q_hi = min(k_i + kf, kappa + 15.0 * z + 2.0 * maximum(K_nodes))
+    q_lo = max(1e-4, 0.9 * (k_i - kf))
+    cont, rl, mres, orec, l_max, bad_count, r_tail =
+        eps_setup(pot_ion, r_b, u_b, e, z, r_core, q_lo, q_hi, l_cap, n_q,
+                  ppw, dt_log, l_init, sig_thresh, k_i + kf; rel=rel)
     # 260805Cl 変更: K 非依存の角度幾何・作業領域を 1 回だけ作る (旧: K ごとに再構築)
     ws = AngWS(k_i, kf, n_x, n_phi, rl.lam_max)
     row = [kf / k_i * angular_integral(ws, rl, K, occ_init)
            for K in K_nodes]                   # k_f/k_i は位相空間因子
     # 旧: row = [kf / k_i * angular_integral(rl, K, k_i, kf, occ_init, n_x, n_phi)
     #            for K in K_nodes]
-    return row, mres, (c_ortho, resid_ortho), l_max, bad_count, r_tail
+    return row, mres, orec, l_max, bad_count, r_tail
 end
 
 # ==== 260806Cl 追加 (E8): 負荷時 1-2 ULP フリップの待ち伏せ計装 (休眠) =======
@@ -384,14 +414,16 @@ F(s) 出口 (`compute_channel`) も EELS 出口 (`compute_edge`) もここまで
   `ion_pot`      終状態の場 = 緩和 core-hole イオン + KS(2/3) 交換 (第 5 章)
   `rel`          放出電子のスカラー相対論設定 (nothing = 非相対論)
 """
-function prepare_channel(z::Int, tag::String, e0_keV::Float64;
+function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
                          rel_continuum::Bool=false,
                          rel_override::Union{Nothing,RelCont}=nothing)
     haskey(CHANNELS, tag) || error("unknown channel $tag (K/L1/L2/L3)")
     shell, j_lower, occ_init, subshell = CHANNELS[tag]
 
     eth_keV = bote_edge_eV(z, subshell) / 1e3   # 閾値 = Bote 表の吸収端
-    e0_keV > eth_keV || error("E0=$(e0_keV) keV は $tag 端 $(eth_keV) keV 以下 (σ=0)")
+    # e0_keV = nothing は「入射側の運動学が無い」出口 (GOS) 用。T0 も nothing になる
+    e0_keV === nothing || e0_keV > eth_keV ||
+        error("E0=$(e0_keV) keV は $tag 端 $(eth_keV) keV 以下 (σ=0)")
 
     ensure_converged(z, shell)
     neutral = get_neutral(z)
@@ -415,8 +447,11 @@ function prepare_channel(z::Int, tag::String, e0_keV::Float64;
             occ_init=occ_init, n_b=n_b, l_b=l_b, kappa=kap,
             eth_keV=eth_keV,
             E_th=eth_keV * 1000.0 / HARTREE_EV,     # keV → Ha
-            T0=e0_keV * 1000.0 / HARTREE_EV,
+            T0=(e0_keV === nothing ? nothing : e0_keV * 1000.0 / HARTREE_EV),
             E_b=E_b, r_b=r_b, u_b=u_b, frac_small=frac_small,
             ion_pot=ion_pot, rel=rel,
             model_id=(rel === nothing ? MODEL_ID : MODEL_ID_REL))
 end
+
+"入射エネルギーを伴わない準備 (GOS のように E0 非依存な出口用)"
+prepare_channel(z::Int, tag::String; kw...) = prepare_channel(z, tag, nothing; kw...)
