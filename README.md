@@ -60,21 +60,28 @@ Temari puts the engine in the open and adds exits to it.
 
 ## What it computes
 
-Working today (in production, shipping tables for
-[ReciPro](https://github.com/seto77/ReciPro)):
+One engine, four exits — the same self-consistent atom, the same relativistic
+bound orbitals and the same distorted continuum waves, differing only in what is
+integrated out and what is reported:
 
 - **Inner-shell ionization form factors** F(s, E₀) for K, L1, L2, L3 —
   relativistic j-resolved bound orbitals, relaxed core-hole continuum,
-  scalar-relativistic emitted electron
-- **Ionization cross sections** σ(E₀) via Bote–Salvat analytic coefficients
+  scalar-relativistic emitted electron — plus **ionization cross sections**
+  σ(E₀) via Bote–Salvat analytic coefficients. In production, shipping tables
+  for [ReciPro](https://github.com/seto77/ReciPro)
+- **EELS core-loss edges** dσ/dΔE, and the inner-shell contribution to the
+  **stopping power** (`edge`)
+- **Generalized oscillator strength** df/dΔE(Q), the Bethe surface — this one
+  carries no beam energy at all, so one run serves every E₀ (`gos`)
+- **Elastic scattering phase shifts** δ_l in the neutral atom's static field
+  (`phase`)
 
 Planned, in rough order (see the roadmap in 計画書.md):
 
-- Generalized oscillator strength / Bethe surface, core-loss dσ/dΔE,
-  double-differential d²σ/dΩdΔE, partial cross sections σ(β, Δ) for EELS
+- X-ray and electron atomic scattering factors f_x(s) / f_e(s), Mott–Bethe,
+  Mott differential cross sections
+- Double-differential d²σ/dΩdΔE, partial cross sections σ(β, Δ) for EELS
   quantification
-- Elastic partial-wave phase shifts δ_l, Mott differential cross sections,
-  X-ray and electron atomic scattering factors f_x(s) / f_e(s)
 - Subshell photoionization cross sections σ_nl(ω) and asymmetry parameters β_nl
 - M-shell channels, ΔSCF binding energies, Compton scattering functions
 

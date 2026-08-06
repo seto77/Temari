@@ -3,7 +3,7 @@
 !!! abstract "Where the authoritative statement lives"
     The comments in the source are the authoritative statement of the
     prescription: the overview in the header of `src/ionization.jl`, the details
-    in the layer files it loads (`l0_numerics.jl` … `l5_exit_edx.jl`), and the
+    in the layer files it loads (`l0_numerics.jl` … `l5_exit_*.jl`), and the
     fullest theoretical discussion — including the options that were *not* taken
     and the references [1]–[17] — in `src/ionization.py`, which implements the
     same prescription. This page is a map of them.
@@ -32,6 +32,22 @@ The **absolute** cross section that is shipped alongside it is *not* the engine'
 own value. It comes from the Bote–Salvat analytic formulas, which are fitted to
 distorted-wave and plane-wave Born calculations over a wide energy range. The
 engine's own $\sigma$ from $N(0)$ is reported only as a sanity indicator.
+
+### The same calculation, reported four ways
+
+The two integrals above are where the other exits branch off. Nothing below L5
+knows which one is running.
+
+| Exit | What it does differently |
+| --- | --- |
+| $F(s, E_0)$ | The full expression above, on a grid of $K$, normalized by $N(0)$ |
+| $\mathrm{d}\sigma/\mathrm{d}\Delta E$ | Stops before the $\varepsilon$ integral and reports its integrand at $K = 0$, times $4\gamma^2 a_0^2$. Contracting that same integrand against $\Delta E$ gives the stopping-power contribution |
+| $\mathrm{d}f/\mathrm{d}\Delta E(Q)$ | Skips the angular integral entirely and reports $2\Delta E\, S(Q, Q, 1)/Q^2$. Since $S$ never references $k_i$ or $k_f$ as physics, **the GOS carries no $E_0$** |
+| $\delta_l$ | Uses only the continuum solver, in the neutral atom's static field, and reports the phase of the asymptotic fit rather than a matrix element |
+
+Because they share the solvers, they also share the prescription's limits below —
+and the $\varepsilon$ integral's verification status. What is new in the EELS and
+GOS exits is the *shape*; the scale was already gated against Bote–Salvat.
 
 ## The pipeline
 

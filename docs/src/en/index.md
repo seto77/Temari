@@ -19,21 +19,28 @@ beyond the Julia standard library.
 !!! info "Status: early"
     The engine exists and is in production use — it generates the STEM-EDX
     ionization tables shipped with [ReciPro](https://github.com/seto77/ReciPro).
-    It is now split into the L0–L5 layer files, but it still fills exactly one
-    cell of the operator × exit table: screened Coulomb, $F(s, E_0)$. The
-    repository is being assembled around it.
+    It is split into the L0–L5 layer files, and four exits now sit on top of it:
+    $F(s, E_0)$, the EELS edge $\mathrm{d}\sigma/\mathrm{d}\Delta E$, the
+    generalized oscillator strength, and elastic phase shifts. The repository is
+    being assembled around them.
 
 ## What it computes today
 
-- **Inner-shell ionization form factors** $F(s, E_0)$ for K, L1, L2 and L3 —
-  relativistic $j$-resolved bound orbitals, relaxed core-hole continuum,
-  scalar-relativistic emitted electron
-- **Ionization cross sections** $\sigma(E_0)$ from the Bote–Salvat analytic
-  coefficients
+One engine, four exits. Everything below comes from the same self-consistent
+atom, the same relativistic bound orbitals and the same distorted continuum
+waves — they differ only in what is integrated out and what is reported.
+
+| Exit | Quantity | Command |
+| --- | --- | --- |
+| **Ionization form factor** | $F(s, E_0)$ for K, L1, L2, L3, plus $\sigma(E_0)$ from the Bote–Salvat coefficients | `<Z> <channel> <E0>` |
+| **EELS core-loss edge** | $\mathrm{d}\sigma/\mathrm{d}\Delta E$ and the inner-shell contribution to the stopping power | `edge` |
+| **Generalized oscillator strength** | $\mathrm{d}f/\mathrm{d}\Delta E(Q)$, the Bethe surface — **independent of $E_0$** | `gos` |
+| **Elastic phase shifts** | $\delta_l$ in the neutral atom's static field | `phase` |
 
 The form factor is normalized to $F(0) = 1$ and carries the delocalization of
 the inelastic image; the absolute scale is supplied by the cross section.
-See [The physics](physics.md) for the prescription and its known limits.
+See [The physics](physics.md) for the prescription and its known limits, and
+[the command-line reference](cli.md) for what each exit reports.
 
 ## Find by goal
 

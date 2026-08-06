@@ -45,7 +45,7 @@ noticeably longer than the ones after it — the result is cached
 Output:
 
 ```text
-Z=26 K @ 200.0 keV   処方: DHFS-KS23-Dirac-jsplit-fullrange-sym-v2
+Z=26 K @ 200.0 keV   出口: F(s) (EDX)   処方: DHFS-KS23-Dirac-jsplit-fullrange-sym-v2
 求積: QUICK (参考値)   スレッド: 4
 初回はこの元素の SCF を解くため時間がかかります (atom_cache_jl_*.jls に保存)...
   eps 32/32
@@ -96,7 +96,29 @@ julia -t auto src/ionization.jl 79 L3 300 --high --rel --json au_l3_300.json
 sections, the diagnostics and the model id — as a single JSON object. That file
 is the engine's contract with anything downstream, including the GUI.
 
-## 4. Optional: the browser GUI
+## 4. The other three exits
+
+The same atom, the same solvers — only the reporting differs. None of them needs
+anything you have not already run.
+
+```bash
+# EELS core-loss edge: dσ/dΔE and the stopping-power contribution.
+# Cheaper than the F(s) run: it evaluates K = 0 alone instead of a whole s grid.
+julia -t auto src/ionization.jl edge 26 K 200 --rel
+
+# Generalized oscillator strength df/dΔE(Q) — note there is no beam energy,
+# because the GOS does not depend on one. One run serves every E₀.
+julia -t auto src/ionization.jl gos 26 K
+
+# Elastic scattering phase shifts δ_l for a 100 eV electron on neutral iron.
+# Takes Z and an energy, not a channel — nothing is being ionized.
+julia -t auto src/ionization.jl phase 26 100
+```
+
+All three accept `--json`. What each one reports, and what not to ask of it, is
+in [the CLI reference](cli.md#the-edge-exit).
+
+## 5. Optional: the browser GUI
 
 ```bash
 julia -t auto src/gui.jl
