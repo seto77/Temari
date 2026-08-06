@@ -21,6 +21,7 @@ julia -t auto src/ionization.jl      <Z> <channel> <E0_keV> [--quick|--high] [--
 julia -t auto src/ionization.jl edge <Z> <channel> <E0_keV> [--quick|--high] [--rel] [--json <path>]
 julia -t auto src/ionization.jl gos  <Z> <channel>          [--quick|--high] [--rel] [--epsmax <Ha>] [--qmax <a0^-1>] [--json <path>]
 julia -t auto src/ionization.jl phase <Z> <eps_eV> [--lmax <N>] [--json <path>]
+julia -t auto src/ionization.jl fx   <Z> [--s s1 s2 ...] [--json <path>]
 ```
 
 ### Subcommands
@@ -33,6 +34,7 @@ julia -t auto src/ionization.jl phase <Z> <eps_eV> [--lmax <N>] [--json <path>]
 | `edge` | The **dσ/dΔE exit**: the EELS core-loss edge shape and the inner-shell stopping-power contribution, at K = 0. | cheaper than the above — one K node instead of the whole s grid |
 | `phase` | The **δ_l exit**: elastic scattering phase shifts in the neutral atom's static field. Takes `<Z> <ε_eV>`, not a channel. | seconds |
 | `gos` | The **GOS exit**: the generalized oscillator strength surface df/dΔE(Q). Takes `<Z> <channel>` and **no beam energy** — the GOS does not depend on one. | comparable to one F(s) run, and it serves every E₀ |
+| `fx` | The **scattering-factor exit**: f_x(s) for X-rays and f_e(s) for electrons. Takes `<Z>` alone — no channel, no energy. | the SCF, then milliseconds |
 
 `refcheck` reports but does not gate — it always exits 0. To gate it (as CI
 does), call the function and inspect the return value:
@@ -137,6 +139,45 @@ exponent.
 Same caveats as the F(s) exit apply: isolated atom, mean field, first Born,
 direct term only. The ε upper limit is a user choice here rather than a
 kinematic one, since nothing bounds it.
+
+### The `fx` exit
+
+```bash
+julia +1.11 -t auto src/ionization.jl fx 26 --json fe_factors.json
+```
+
+X-ray and electron atomic scattering factors, straight from the SCF charge
+density. No channel and no energy: nothing is being excited, so the operator is
+just the Fourier transform of the density.
+
+$$f_x(s) = \int 4\pi r^2 \rho(r)\, j_0(Kr)\, \mathrm{d}r, \qquad K = 4\pi s a_0$$
+
+with s = sinθ/λ in Å⁻¹ — the same s and the same K the F(s) exit uses. The
+electron factor follows by Mott–Bethe, f_e = 2(Z − f_x)/K² in a₀, reported in Å.
+`f_e` is `null` at s = 0, where it needs a limit for a neutral atom and diverges
+for an ion.
+
+**f_x(0) = Z exactly.** Getting there took removing a bias worth writing down:
+the SCF normalizes its orbitals with the trapezoid rule, which on the standard
+logarithmic grid carries a uniform relative error of 1.67×10⁻⁷. Integrating the
+resulting density with Simpson exposes it as a deficit of exactly Z × 1.67×10⁻⁷
+(measured: 1.0×10⁻⁶ for C, 4.33×10⁻⁶ for Fe, 1.32×10⁻⁵ for Au). This exit divides
+it out — a uniform scale, so the shape is untouched — and reports the correction
+as `norm_correction`. The F(s) exit is immune to the same bias because it reports
+a ratio.
+
+What this is and is not:
+
+- The density is **non-relativistic** HFS. For heavy elements the missing
+  relativistic contraction is the dominant error — around 7 % for Au at high s.
+- **Spherical and isolated.** No bonding, no aspherical valence redistribution.
+- **f_e is first Born.** For slow electrons or large angles off heavy atoms you
+  want distorted waves, which is what the `phase` exit's δ_l are for.
+- No anomalous dispersion f′, f″.
+
+Where it beats a fitted table: past s ≈ 3 Å⁻¹ a sum of Gaussians decays as
+exp(−bs²), but f_e really falls as s⁻². The parameterizations are simply out of
+range there; Mott–Bethe is not.
 
 ### The `phase` exit
 

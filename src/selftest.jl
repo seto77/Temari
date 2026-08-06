@@ -329,6 +329,28 @@ function selftest()
         @assert abs(d[end]) < abs(d[lo+1]) "T10 FAIL: δ_l が l→大 で 0 へ向かっていない"
     end
 
+    # ---- T12: 原子散乱因子 f_x(K) vs 水素 1s の厳密形 ----
+    # ρ = e^{-2r}/π のフーリエ変換は f_x(K) = [1+(K/2)²]⁻² と閉形式で書ける。
+    # SCF を経由せず解析密度を直接入れるので、検査対象は**変換と求積の機構だけ**。
+    # 対数格子・Simpson 重み (dr = r dt)・j₀ の実装がまとめて効く。
+    let dt = GRID_DT
+        t = log(1e-7) .+ dt .* (0:ceil(Int, (log(60.0) - log(1e-7)) / dt))
+        r = exp.(t)
+        rho = exp.(-2 .* r) ./ pi                  # 水素 1s の厳密密度
+        Ks = [0.0, 0.1, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0]
+        fx = xray_form_factor(r, dt, rho, Ks)
+        ex = [1.0 / (1.0 + (k / 2)^2)^2 for k in Ks]
+        worst = maximum(abs.(fx .- ex) ./ ex)
+        @printf("[T12] 原子散乱因子 f_x 水素 1s vs 厳密形 [1+(K/2)²]⁻²: max 相対誤差 = %.2e\n",
+                worst)
+        @assert worst < 1e-11 "T12 FAIL: f_x が厳密形と合わない"
+        @assert abs(fx[1] - 1.0) < 1e-13 "T12 FAIL: f_x(0) が電子数でない"
+        @assert issorted(fx; rev=true) "T12 FAIL: f_x が単調減少でない"
+        # Mott–Bethe: f_e = 2(Z−f_x)/K² は K→∞ で 2Z/K² (裸核) へ漸近する
+        fe_hi = mott_bethe_a0(1.0, fx[end], Ks[end])
+        @assert abs(fe_hi / (2.0 / Ks[end]^2) - 1.0) < 1e-4 "T12 FAIL: Mott–Bethe の裸核極限"
+    end
+
     @printf("%s\nALL PASS (%.0f s)\n%s\n", bar, time() - t_start, bar)
     return 0
 end

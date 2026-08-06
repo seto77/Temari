@@ -60,9 +60,9 @@ Temari puts the engine in the open and adds exits to it.
 
 ## What it computes
 
-One engine, four exits — the same self-consistent atom, the same relativistic
-bound orbitals and the same distorted continuum waves, differing only in what is
-integrated out and what is reported:
+One engine, five exits — the same self-consistent atom, the same relativistic
+bound orbitals and the same distorted continuum waves, differing only in the
+operator and in what is reported:
 
 - **Inner-shell ionization form factors** F(s, E₀) for K, L1, L2, L3 —
   relativistic j-resolved bound orbitals, relaxed core-hole continuum,
@@ -75,11 +75,14 @@ integrated out and what is reported:
   carries no beam energy at all, so one run serves every E₀ (`gos`)
 - **Elastic scattering phase shifts** δ_l in the neutral atom's static field
   (`phase`)
+- **Atomic scattering factors** f_x(s) for X-rays and f_e(s) for electrons,
+  computed from the charge density rather than read from a fitted table — which
+  also means they stay correct past s ≈ 3 Å⁻¹, where Gaussian parameterizations
+  decay exponentially and the real f_e falls as s⁻² (`fx`)
 
 Planned, in rough order (see the roadmap in 計画書.md):
 
-- X-ray and electron atomic scattering factors f_x(s) / f_e(s), Mott–Bethe,
-  Mott differential cross sections
+- Mott differential cross sections from the phase shifts (needs spin)
 - Double-differential d²σ/dΩdΔE, partial cross sections σ(β, Δ) for EELS
   quantification
 - Subshell photoionization cross sections σ_nl(ω) and asymmetry parameters β_nl

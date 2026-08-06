@@ -36,6 +36,7 @@ concatenating the files in include order reproduces a single-file build.
 | `l5_exit_eels.jl` | L5 | the dσ/dΔE exit — K = 0 only, reported as an edge shape plus the stopping-power contraction |
 | `l5_exit_phase.jl` | L5 | the δ_l exit — elastic phase shifts in the neutral atom's static field |
 | `l5_exit_gos.jl` | L5 | the GOS exit — df/dΔE(Q), the Bethe surface. No E₀ anywhere in it |
+| `l5_exit_fx.jl` | L5 | the scattering-factor exit — f_x(s) from the SCF density, f_e(s) through Mott–Bethe. The first exit with a different *operator*, so it uses only L0 and L1 |
 | `selftest.jl` | — | the T0–T9 ladder and `refcheck` |
 
 Only the `l5_exit_*.jl` files know what is being reported. A second exit is a
@@ -48,12 +49,12 @@ Every quantity in the roadmap is a choice of two independent things:
 
 **The operator** — what couples the initial and final state.
 
-| Operator | Probe | Gives |
-|---|---|---|
-| Screened Coulomb, first Born | fast electron | ionization F(s), GOS, EELS |
-| Dipole (length or velocity) | photon | photoionization σ_nl, β_nl, f′f″ |
-| Static potential (no transition) | elastic electron | phase shifts δ_l, Mott DCS |
-| Charge density Fourier transform | X-ray / elastic electron | f_x(s), f_e(s) |
+| Operator | Probe | Gives | Status |
+|---|---|---|---|
+| Screened Coulomb, first Born | fast electron | ionization F(s), GOS, EELS | **implemented** |
+| Static potential (no transition) | elastic electron | phase shifts δ_l, Mott DCS | **δ_l implemented**; the DCS needs spin |
+| Charge density Fourier transform | X-ray / elastic electron | f_x(s), f_e(s) | **implemented** |
+| Dipole (length or velocity) | photon | photoionization σ_nl, β_nl, f′f″ | not yet |
 
 **The exit** — what you integrate over and what you report.
 
@@ -66,11 +67,14 @@ Every quantity in the roadmap is a choice of two independent things:
 | σ(β, Δ) | θ < β and ΔE window | EELS quantification k-factor |
 | δ_l | — | phase shift per partial wave |
 
-The current implementation still fills exactly one cell of this table: screened
-Coulomb operator, F(s,E₀) exit. The two now live in separate files — the
-operator in L4, the exit in L5 — but they are not yet injectable: L5 calls the
-L4 routines by name rather than through a seam. Adding the second exit is what
-will force that seam to be real, so it is deliberately left until then.
+Three of the four operator rows are now filled, and the screened-Coulomb row
+carries four exits of its own. What made the later ones cheap is `eps_setup`:
+everything about one ε node that does not depend on the incident kinematics,
+factored out of `eps_worker`, so an exit only chooses its Q range. That is a real
+seam, though a narrow one — it separates *kinematics* from *reporting*, not
+operator from exit. L5 still calls the L4 routines by name. The scattering-factor
+exit sidesteps the question entirely: its operator needs no transition, so it
+reaches past L2–L4 and reads the L1 density directly.
 
 ## What is already computed and thrown away
 

@@ -84,6 +84,7 @@ include(joinpath(@__DIR__, "l5_exit_edx.jl"))   # 出口: F(s, E0)
 include(joinpath(@__DIR__, "l5_exit_eels.jl"))  # 出口: dσ/dΔE と阻止能寄与
 include(joinpath(@__DIR__, "l5_exit_phase.jl")) # 出口: 弾性散乱位相シフト δ_l
 include(joinpath(@__DIR__, "l5_exit_gos.jl"))   # 出口: 一般化振動子強度 (E0 非依存)
+include(joinpath(@__DIR__, "l5_exit_fx.jl"))    # 出口: 原子散乱因子 f_x(s) / f_e(s)
 include(joinpath(@__DIR__, "selftest.jl"))
 
 # ====================================================================
@@ -100,9 +101,53 @@ const USAGE = """
   julia -t auto ionization.jl gos  Z channel [--quick|--high] [--rel]
                                    [--epsmax Ha] [--qmax a0inv] [--json path]  # GOS 出口
                                    # E0 を取らない (GOS は E0 非依存)
+  julia -t auto ionization.jl fx   Z [--s s1 s2 ...] [--json path]  # 原子散乱因子 f_x/f_e
 
 opts: [--quick|--high] [--rel] [--s s1 s2 ...] [--json path]
       --s は F(s) 出口のみ (edge は K=0 の 1 点で、その分だけ安い)"""
+
+"fx サブコマンド: X 線 f_x(s) と電子線 f_e(s) の原子散乱因子"
+function main_fx(args)
+    length(args) >= 1 || error("Z を指定 (例: fx 26)")
+    z = parse(Int, args[1])
+    s_nodes = nothing
+    json_path = nothing
+    i = 2
+    while i <= length(args)
+        if args[i] == "--s"
+            s_nodes = Float64[]
+            while i + 1 <= length(args) && !startswith(args[i+1], "--")
+                push!(s_nodes, parse(Float64, args[i+1])); i += 1
+            end
+        elseif args[i] == "--json"
+            json_path = args[i+1]; i += 1
+        end
+        i += 1
+    end
+    println("初回はこの元素の SCF を解くため時間がかかります...")
+    o = compute_fx(z; s_nodes=s_nodes)
+    s = o["s_A_inv"]; fx = o["f_x"]; fe = o["f_e_A"]
+    @printf("\n%10s  %14s  %14s\n", "s [1/Å]", "f_x [e]", "f_e [Å]")
+    for i in 1:max(1, length(s) ÷ 15):length(s)
+        if fe[i] === nothing
+            @printf("%10.3f  %14.6f  %14s\n", s[i], fx[i], "— (s=0)")
+        else
+            @printf("%10.3f  %14.6f  %14.6f\n", s[i], fx[i], fe[i])
+        end
+    end
+    @printf("\nf_x(0) = %.10f (= Z、規格化補正後)\n", fx[1])
+    @printf("補正前の Simpson 積分 = %.10f (電子数 %.1f)。補正 %.3e = SCF の台形則規格化バイアス\n",
+            o["n_electrons_raw"], o["n_electrons_scf"], o["norm_correction"])
+    println("密度: ", o["density"])
+    println("注意: ", o["note"])
+    if json_path !== nothing
+        open(json_path, "w") do io
+            write_json(io, o); println(io)
+        end
+        println("\n$json_path に保存しました")
+    end
+    return 0
+end
 
 "gos サブコマンド: 一般化振動子強度 df/dΔE(Q)。E0 を取らない"
 function main_gos(args)
@@ -207,6 +252,7 @@ function main_(args)
     args[1] == "refcheck" && (refcheck(); return 0)
     args[1] == "phase" && return main_phase(args[2:end])   # 260806Cl: 弾性 δ_l 出口
     args[1] == "gos" && return main_gos(args[2:end])       # 260806Cl: GOS 出口
+    args[1] == "fx" && return main_fx(args[2:end])         # 260807Cl: 原子散乱因子
     edge_mode = args[1] == "edge"                # 260806Cl: EELS 出口
     edge_mode && (args = args[2:end])
     length(args) >= 3 || error("Z channel E0keV の 3 つを指定 (例: 26 K 200)")

@@ -28,6 +28,7 @@ Failures are assertions, so the command exits non-zero on a real failure.
 | T9 | The EELS exit: $\int \mathrm{d}\sigma/\mathrm{d}\Delta E \, \mathrm{d}\Delta E = \sigma$ as an identity, positivity, the edge as the maximum, phase space closing at the top, and a mean loss above the threshold | closure 1.5×10⁻¹⁶ |
 | T10 | Elastic phase shifts $\delta_l$ at high $l$ against the Born approximation $\tan\delta_l \approx -2k\int V j_l^2 r^2 \mathrm{d}r$, integrated from the same potential | max\|ratio − 1\| = 3.2 % |
 | T11 | The GOS at both limits for hydrogen 1s: as $Q \to 0$ against the exact continuum dipole strength $1 - \sum_n f_{1s \to np}$ (closed form, summed in-test), that the approach is $O(Q^2)$, and the Bethe sum rule $\int \mathrm{d}f/\mathrm{d}\Delta E \, \mathrm{d}\Delta E \to N$ at large $Q$ | dipole −0.00 %, $Q^2$ ratio 4.00, sum rule 0.998 |
+| T12 | The X-ray scattering factor of an exact hydrogen 1s density against the closed form $[1+(K/2)^2]^{-2}$, over K = 0…32, plus $f_x(0) = Z$, monotonicity, and the bare-nucleus limit of Mott–Bethe | max rel. 7.7×10⁻¹⁴ |
 
 T8 is the strongest structural check in the ladder: it exercises the entire
 relativistic code path and demands that it collapse onto an independently
@@ -57,9 +58,19 @@ is 10⁻⁵.
 Where published values exist: K-shell form factors agree with Oxley & Allen
 (2000) and with µSTEM to within 1 % for $s \le 1.25$ Å⁻¹.
 
-That comparison was performed locally during development. **Neither the
-published tables nor the GPL-code output is included in this repository**, in any
-form — see [CONTRIBUTING](https://github.com/seto77/Temari/blob/main/CONTRIBUTING.md).
+The scattering factors were checked the same way, against the standard analytic
+parameterizations for C, Si, Fe and Au. $f_x(s)$ agrees to 1–3 % for light and
+medium $Z$; for Au the gap widens to ~7 % at high $s$, in the direction and the
+place a non-relativistic density predicts — the missing relativistic contraction
+leaves the density too diffuse, so $f_x$ falls off too fast. Beyond
+$s \approx 3$ Å⁻¹ the comparison inverts: a sum of Gaussians decays as
+$\exp(-bs^2)$ while $f_e$ genuinely falls as $s^{-2}$, so the fits collapse and
+the Mott–Bethe value is the correct one.
+
+Both comparisons were performed locally during development. **Neither the
+published tables, the fitted coefficients, nor the GPL-code output is included in
+this repository**, in any form — see
+[CONTRIBUTING](https://github.com/seto77/Temari/blob/main/CONTRIBUTING.md).
 
 There is no external reference at all for the scalar-relativistic continuum
 correction itself. The v2 spot validation carries over to the non-relativistic
@@ -122,8 +133,14 @@ passes only on a newer Julia is not accepted — see
 
 ## Planned additions
 
-The **oscillator-strength sum rule**: $\int \mathrm{d}f/\mathrm{d}\Delta E \,
-\mathrm{d}\Delta E$ must converge to the occupancy (2 for K, 4 for L3). It is a
-strong self-check that works on quantities with no external reference, and its
-low-$Q$ deficit is a direct measure of the missing white-line strength. It
-becomes available with the GOS exit.
+The **oscillator-strength sum rule** arrived with the GOS exit and is T11 above:
+$\int \mathrm{d}f/\mathrm{d}\Delta E \, \mathrm{d}\Delta E$ converges to the
+occupancy at large $Q$, and its low-$Q$ value is the continuum dipole strength.
+What is still worth building on top of it is the intended *diagnostic* use: the
+deficit against the occupancy at low $Q$ is a direct measure of the missing
+white-line strength, which is the planned indirect route to a quantity an
+isolated atom cannot produce.
+
+Levinson's theorem for the phase shifts is the other one. It needs $\delta_l$
+unwrapped out of its principal value across an energy sweep, which is also the
+prerequisite for the Mott cross sections on the roadmap.

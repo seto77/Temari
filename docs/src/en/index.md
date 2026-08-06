@@ -19,16 +19,16 @@ beyond the Julia standard library.
 !!! info "Status: early"
     The engine exists and is in production use — it generates the STEM-EDX
     ionization tables shipped with [ReciPro](https://github.com/seto77/ReciPro).
-    It is split into the L0–L5 layer files, and four exits now sit on top of it:
+    It is split into the L0–L5 layer files, and five exits now sit on top of it:
     $F(s, E_0)$, the EELS edge $\mathrm{d}\sigma/\mathrm{d}\Delta E$, the
-    generalized oscillator strength, and elastic phase shifts. The repository is
-    being assembled around them.
+    generalized oscillator strength, elastic phase shifts, and atomic scattering
+    factors. The repository is being assembled around them.
 
 ## What it computes today
 
-One engine, four exits. Everything below comes from the same self-consistent
+One engine, five exits. Everything below comes from the same self-consistent
 atom, the same relativistic bound orbitals and the same distorted continuum
-waves — they differ only in what is integrated out and what is reported.
+waves — they differ only in the operator and in what is reported.
 
 | Exit | Quantity | Command |
 | --- | --- | --- |
@@ -36,6 +36,7 @@ waves — they differ only in what is integrated out and what is reported.
 | **EELS core-loss edge** | $\mathrm{d}\sigma/\mathrm{d}\Delta E$ and the inner-shell contribution to the stopping power | `edge` |
 | **Generalized oscillator strength** | $\mathrm{d}f/\mathrm{d}\Delta E(Q)$, the Bethe surface — **independent of $E_0$** | `gos` |
 | **Elastic phase shifts** | $\delta_l$ in the neutral atom's static field | `phase` |
+| **Atomic scattering factors** | $f_x(s)$ for X-rays and $f_e(s)$ for electrons, from the SCF density — first principles instead of a fitted table | `fx` |
 
 The form factor is normalized to $F(0) = 1$ and carries the delocalization of
 the inelastic image; the absolute scale is supplied by the cross section.
