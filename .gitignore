@@ -1,6 +1,8 @@
 # SCF キャッシュ (モデルを変えたら手で消すこと — キーに処方が入っていない)
 atom_cache_*.jls
 atom_cache_*.pkl
+# 書き込み中の一時ファイル (kill / GC ウェッジで取り残される)
+atom_cache_*.jls.tmp*
 
 # 生成テーブル・ビルド成果物
 prod*/
@@ -10,6 +12,10 @@ build/
 # Julia
 Manifest.toml
 /docs/build/
+
+# MkDocs (GitHub Pages のビルド成果物・キャッシュ。site は workflow が作る)
+/docs/site/
+/docs/.cache/
 
 # Python
 __pycache__/

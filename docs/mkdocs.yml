@@ -1,0 +1,140 @@
+# MkDocs Material configuration for the GitHub Pages documentation.
+# ReciPro (docs/mkdocs.yml) と同じ構成:
+#   - ソースは docs/src、出力は docs/site (git 管理外)、ビルドはリポジトリルートから
+#   - mkdocs-static-i18n (folder mode) で en を default = サイトルート、ja を /ja/ へ
+#   - 未訳ページは fallback_to_default で英語本文をローカライズ URL に生成し、
+#     overrides/main.html のバナーで「未訳」と明示する (ページ単位の増分翻訳)
+site_name: Temari
+site_description: Atomic scattering and excitation factors from first principles
+site_author: Yusuke Seto
+site_url: https://seto77.github.io/Temari/
+repo_url: https://github.com/seto77/Temari
+repo_name: seto77/Temari
+edit_uri: edit/main/docs/src/
+copyright: Copyright &copy; 2026 Yusuke SETO &mdash; MIT License
+
+docs_dir: src
+site_dir: site
+use_directory_urls: true
+
+theme:
+  name: material
+  language: en
+  custom_dir: overrides
+  icon:
+    logo: material/atom-variant
+    repo: fontawesome/brands/github
+  features:
+    - navigation.indexes
+    - navigation.footer
+    - navigation.top
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search:
+      lang:
+        - en
+        - ja
+  - i18n:
+      docs_structure: folder
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+        - locale: ja
+          name: 日本語
+          build: true
+          nav_translations:
+            Home: ホーム
+            Getting started: はじめに
+            Command-line reference: コマンドリファレンス
+            The physics: 物理 (処方)
+            Architecture: 層構造
+            Verification: 検証
+            Reproducibility: 再現性の規律
+            Performance: 性能
+            Roadmap: ロードマップ
+            Troubleshooting: トラブルシューティング
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - footnotes
+  - toc:
+      permalink: true
+      # 日本語見出しの slug を機能させる (pymdownx の Unicode slugify)
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.caret
+  - pymdownx.tilde
+  - pymdownx.mark
+  - pymdownx.keys
+  # architecture.md はリポジトリ側 (docs/architecture.md) が正本なので、
+  # サイトのページはそれを取り込むだけにする (二重管理を避ける)。
+  # base_path はリポジトリルートからのビルドと docs/ 内からのビルドの両方を通す。
+  - pymdownx.snippets:
+      base_path:
+        - docs
+        - .
+      check_paths: true
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+extra_javascript:
+  - assets/javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/seto77/Temari
+      name: Temari on GitHub
+    - icon: fontawesome/brands/github
+      link: https://github.com/seto77/ReciPro
+      name: ReciPro (the application that ships Temari-generated tables)
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Command-line reference: cli.md
+  - The physics: physics.md
+  - Architecture: architecture.md
+  - Verification: verification.md
+  - Reproducibility: reproducibility.md
+  - Performance: performance.md
+  - Roadmap: roadmap.md
+  - Troubleshooting: troubleshooting.md

@@ -1,0 +1,43 @@
+/* ヘッダーの背景をページ本体に合わせる (既定の blue grey をやめる)。
+   CSS 変数なのでライト/ダーク両方で本体背景に追従する。境界は薄い線で示す。 */
+.md-header,
+.md-tabs {
+  background-color: var(--md-default-bg-color);
+  color: var(--md-default-fg-color);
+}
+.md-header {
+  border-bottom: 0.05rem solid var(--md-default-fg-color--lightest);
+}
+.md-search__input {
+  background-color: var(--md-default-fg-color--lightest);
+}
+.md-search__input::placeholder,
+.md-search__icon {
+  color: var(--md-default-fg-color--light);
+}
+
+/* 表は数値が主役。行間を詰めすぎず、数式まじりでも読めるようにする。 */
+.md-typeset table:not([class]) {
+  font-size: 0.72rem;
+}
+.md-typeset table:not([class]) td,
+.md-typeset table:not([class]) th {
+  padding: 0.45em 0.9em;
+}
+
+/* 数値列 (右寄せ) 用のユーティリティ。Markdown 側で {: .num } を付けて使う。 */
+.md-typeset table:not([class]) td.num,
+.md-typeset .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* トップページの「層構造」ブロックのような ASCII 図が折り返さないようにする。 */
+.md-typeset pre > code {
+  overflow-x: auto;
+}
+
+.md-typeset img {
+  max-width: 100%;
+  height: auto;
+}
