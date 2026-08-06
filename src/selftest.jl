@@ -377,6 +377,13 @@ function selftest()
         @assert e_a < 1e-6 "T14 FAIL: Y⁰ が水素の Hartree 閉形式と合わない"
         @assert e_b < 1e-6 "T14 FAIL: Y² の遠方極限が ⟨r²⟩/r² でない"
         @assert e_c < 1e-13 "T14 FAIL: 1 電子系で自己相互作用が厳密に相殺しない"
+        # (d) 交換ホール規格化の根: Σ_k (2k+1)[3j(l k l';000)]² = 1。
+        #     厳密交換の角度係数はここから来るので、多重極和の正規化を間違えれば破れる
+        #     (threej000_sq は BigInt の閉形式なので厳密にゼロ誤差になるはず)
+        e_d = maximum(abs(sum((2k + 1) * threej000_sq(l, k, l2) for k in 0:(l+l2)) - 1.0)
+                      for l in 0:4, l2 in 0:4)
+        @printf("      3j 和則 Σ(2k+1)c^k = 1 (l,l'=0..4): 誤差 %.1e\n", e_d)
+        @assert e_d < 1e-14 "T14 FAIL: 3j 和則が成り立たない"
     end
 
     # ---- T13b: 交換係数が二重に掛かっていないこと ----
