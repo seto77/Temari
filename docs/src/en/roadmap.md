@@ -65,7 +65,7 @@ come first.
 | **P4** | Elastic side: $f_x(s)$, Mott–Bethe, Mott DCS; add the sum-rule check | |
 | **P5** | EELS quantification σ(β, Δ); systematic comparison against Egerton SIGMAK/SIGMAL and Hartree–Slater GOS | |
 | **P6** | Photon side: σ_nl, β_nl; comparison against xraylib | |
-| **P7** | M shell, full Dirac continuum | |
+| **P7** | M shell, full Dirac continuum | the bound side is done — `--dscf` solves the SCF itself from the Dirac equation; what remains is the *continuum* |
 
 P2 was deliberately unglamorous: pure code movement, so **bit identity was a
 hard requirement** — verified with `selftest`, `refcheck` (unchanged at

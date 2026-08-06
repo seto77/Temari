@@ -59,6 +59,7 @@ julia -e 'include("src/ionization.jl"); exit(refcheck() < 1e-5 ? 0 : 1)'
 | `--high` | HIGH quadrature: denser ε nodes, doubled angular quadrature, finer radial mesh. This is what production tables use. |
 | *(neither)* | The intermediate default (PROD). |
 | `--rel` | Scalar-relativistic continuum (model id `...DiracB-SRC...v3`). Without it, the continuum is non-relativistic (`...v2`). |
+| `--dscf` | Solve the atom's SCF from the **radial Dirac equation** rather than the Schrödinger one — every occupied orbital, resolved in κ, with the small component in the density. Appends `-DSCF` to the model id. Costs 2–3× the SCF time (once per element, then cached) and matters for heavy atoms: it moves σ_own/σ_Bote for Au L3 from 0.924 to 0.947. |
 | `--s s1 s2 ...` | Explicit s nodes in Å⁻¹, replacing the default grid. Consumes every following argument until the next `--`. F(s) exit only — `edge` evaluates K = 0 alone. |
 | `--json <path>` | Write the full result object to `<path>` as JSON. |
 
@@ -166,10 +167,18 @@ it out — a uniform scale, so the shape is untouched — and reports the correc
 as `norm_correction`. The F(s) exit is immune to the same bias because it reports
 a ratio.
 
+**The relativistic factor γ is deliberately not applied.** f_e here is the
+non-relativistic first-Born amplitude, the same convention Peng and
+Doyle–Turner tabulate in. The incident electron's γ = 1 + E/(m₀c²) belongs to
+whoever forms the crystal potential — ReciPro's `BetheMethod.getU` multiplies by
+it when building U, so applying it here as well would double-count.
+
 What this is and is not:
 
-- The density is **non-relativistic** HFS. For heavy elements the missing
-  relativistic contraction is the dominant error — around 7 % for Au at high s.
+- The density comes from the **full Dirac SCF** by default (`--nonrel` selects
+  the old non-relativistic HFS for comparison). This is what closed the heavy-
+  element gap: Au's f_x moves 10.8 % at s = 4 Å⁻¹, taking the disagreement with
+  the published parameterizations from ~7 % to ~1 %.
 - **Spherical and isolated.** No bonding, no aspherical valence redistribution.
 - **f_e is first Born.** For slow electrons or large angles off heavy atoms you
   want distorted waves, which is what the `phase` exit's δ_l are for.

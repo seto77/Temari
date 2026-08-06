@@ -102,7 +102,12 @@ function (p::RvSpline)(rr::Float64)
 end
 
 """HFS の自己無撞着場 (Python 版 SCFAtom)。収束すると rho / orbitals / eps /
-converged を持つ。latter_charge: Latter 尾の電荷 (中性 1、+1 イオン 2)。"""
+converged を持つ。latter_charge: Latter 尾の電荷 (中性 1、+1 イオン 2)。
+
+`relativistic = true` で **完全 Dirac SCF (DHFS)** になる (260807Cl 追加):
+軌道を (n, l, κ) ごとに動径 Dirac 方程式で解き、密度に**小成分を含める**。
+非相対論経路とは別物なので、`relativistic` フィールドで取り違えを防ぐ
+(ディスクキャッシュも別キー — l5_channel.jl の get_neutral を参照)。"""
 mutable struct SCFAtom
     z::Int
     occ::Vector{Tuple{Int,Int,Float64}}
@@ -113,6 +118,28 @@ mutable struct SCFAtom
     eps::Dict{Tuple{Int,Int},Float64}
     converged::Bool
     nel::Float64
+    relativistic::Bool
+end
+
+"""(n, l, q) の占有を Dirac の (n, l, κ, q) へ分ける。
+
+l > 0 の副殻は j = l∓1/2 の 2 本に割れ、κ = +l (j=l−1/2、縮退度 2l) と
+κ = −(l+1) (j=l+1/2、縮退度 2l+2)。閉殻・部分占有とも**縮退度に比例配分**する
+(自由原子の平均配置。球対称密度を作る DHFS の標準的な扱い)。
+l = 0 は κ = −1 のみ。"""
+function dirac_occupancy(occ::Vector{Tuple{Int,Int,Float64}})
+    out = Tuple{Int,Int,Int,Float64}[]
+    for (n, l, q) in occ
+        if l == 0
+            push!(out, (n, 0, -1, q))
+        else
+            gm = 2.0 * l                       # j = l−1/2 の 2j+1
+            gp = 2.0 * l + 2.0                 # j = l+1/2 の 2j+1
+            push!(out, (n, l, l, q * gm / (gm + gp)))
+            push!(out, (n, l, -(l + 1), q * gp / (gm + gp)))
+        end
+    end
+    return out
 end
 
 function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
@@ -120,7 +147,8 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                  rmax::Float64=SCF_RMAX, dt::Float64=GRID_DT,
                  beta::Float64=SCF_BETA, tol_rho::Float64=SCF_TOL_RHO,
                  tol_e::Float64=SCF_TOL_E, max_iter::Int=SCF_MAX_ITER,
-                 rho_init::Union{Nothing,Vector{Float64}}=nothing)
+                 rho_init::Union{Nothing,Vector{Float64}}=nothing,
+                 relativistic::Bool=false, c::Float64=C_LIGHT)
     n = ceil(Int, (log(rmax) - log(r0)) / dt)          # numpy.arange と同じ点数
     t = log(r0) .+ dt .* (0:n-1)
     r = exp.(t)
@@ -131,6 +159,9 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
     eps_prev = Dict{Tuple{Int,Int},Float64}()
     orbs = Dict{Tuple{Int,Int},Vector{Float64}}()
     eps_now = Dict{Tuple{Int,Int},Float64}()
+    # Dirac 経路の温間開始は κ まで含めた鍵で持つ (2p½ と 2p³ᐟ² は別の固有値)
+    eps_prev_k = Dict{Tuple{Int,Int,Int},Float64}()
+    eps_now_k = Dict{Tuple{Int,Int,Int},Float64}()
     drho = 0.0
     de = 0.0
     for _ in 1:max_iter
@@ -144,6 +175,52 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
         rho_new = zeros(length(r))
         eps_now = Dict{Tuple{Int,Int},Float64}()
         orbs = Dict{Tuple{Int,Int},Vector{Float64}}()
+        if relativistic
+            # ---- Dirac 経路 (260807Cl) --------------------------------------
+            # 軌道は (n, l, κ) で解き、密度は ρ = Σ q (G²+F²)/(4πr²)。
+            # **小成分を落とさない** — Au 1s では ∫F² が全体の ~9% を占める。
+            # eps_now/orbs には κ 平均を入れる (診断用。密度には使わない)
+            acc_e = Dict{Tuple{Int,Int},Float64}()
+            acc_q = Dict{Tuple{Int,Int},Float64}()
+            for (nq, lq, kap, q) in dirac_occupancy(occ)
+                q <= 0.0 && continue
+                key = (nq, lq)
+                kkey = (nq, lq, kap)
+                local E, G, F
+                solved = false
+                if haskey(eps_prev_k, kkey)            # 前回値を挟む窓で高速化
+                    lo = eps_prev_k[kkey] * 1.6 - 0.5
+                    hi = min(eps_prev_k[kkey] / 2.0, -1e-5)
+                    try
+                        E, G, F = dirac_orbital_on_grid(pot, z, r, dt;
+                                                        kappa=kap,
+                                                        n_nodes=nq - lq - 1,
+                                                        e_lo=lo, e_hi=hi, c=c)
+                        abs(E - hi) < 1e-5 * max(1.0, abs(hi)) &&
+                            error("hint bracket too low")
+                        solved = true
+                    catch err
+                        err isa ErrorException || rethrow()
+                    end
+                end
+                if !solved
+                    E, G, F = dirac_orbital_on_grid(pot, z, r, dt; kappa=kap,
+                                                    n_nodes=nq - lq - 1, c=c)
+                end
+                eps_now_k[kkey] = E
+                acc_e[key] = get(acc_e, key, 0.0) + q * E
+                acc_q[key] = get(acc_q, key, 0.0) + q
+                haskey(orbs, key) || (orbs[key] = zeros(length(r)))
+                @inbounds for i in eachindex(r)
+                    rho_new[i] += q * (G[i]^2 + F[i]^2) / (4.0 * pi * r[i]^2)
+                    orbs[key][i] += q * G[i]           # 診断用の占有加重和
+                end
+            end
+            for (key, s) in acc_e
+                eps_now[key] = s / acc_q[key]          # 占有加重の平均固有値
+            end
+            @goto after_orbitals
+        end
         for (nq, lq, q) in occ
             key = (nq, lq)
             local E, ub
@@ -179,20 +256,24 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                 rho_new[i] += q * ub[i]^2 / (4.0 * pi * r[i]^2)
             end
         end
+        @label after_orbitals
         drho = trapz(4.0 * pi .* r .* r .* abs.(rho_new .- rho), r)
         de = maximum(abs(eps_now[k] - get(eps_prev, k, 1e9)) / max(1.0, abs(eps_now[k]))
                      for k in keys(eps_now))
         rho .= (1.0 - beta) .* rho .+ beta .* rho_new  # 線形混合
         eps_prev = eps_now
+        eps_prev_k = eps_now_k
+        eps_now_k = Dict{Tuple{Int,Int,Int},Float64}()
         if drho < tol_rho && de < tol_e
             converged = true
             break
         end
     end
     if !converged
-        @printf("WARN: SCF Z=%d not fully converged (drho=%.1e, de=%.1e)\n", z, drho, de)
+        @printf("WARN: %sSCF Z=%d not fully converged (drho=%.1e, de=%.1e)\n",
+                relativistic ? "Dirac " : "", z, drho, de)
     end
-    return SCFAtom(z, occ, r, dt, rho, orbs, eps_now, converged, nel)
+    return SCFAtom(z, occ, r, dt, rho, orbs, eps_now, converged, nel, relativistic)
 end
 
 "収束密度から束縛軌道用ポテンシャル (静電+Slater 交換+Latter) を作る"
@@ -388,21 +469,25 @@ function _dirac_seg(r2::Vector{Float64}, v2::Vector{Float64}, E::Float64,
     return G, F
 end
 
-"""一般の (κ, 節数) の束縛 Dirac 解。戻り値 (E, r, u_large, frac_small)。
-検証は selftest T6 (点核 Coulomb の Sommerfeld 厳密解と照合)。"""
-function solve_dirac_bound(pot_V, z::Int; kappa::Int=-1, n_nodes::Int=0,
-                           r0::Float64=GRID_R0, rmax::Float64=BOUND_RMAX,
-                           dt::Float64=GRID_DT, tol::Float64=EIG_TOL)
+"""束縛 Dirac 解の本体。戻り値 `(E, r2, G, F)` — **規格化前**の 2 成分を、
+遠方を切り詰めた格子 r2 の上で返す。
+
+`e_lo`/`e_hi` は固有値の挟み込み窓 (SCF の温間開始用。既定は広域)。
+`c` は光速で、既定は物理値。**c を大きくすると非相対論極限へ連続的に退化する**ので、
+Dirac SCF が Schrödinger SCF へ落ちることの検証 (selftest T13) に使う。"""
+function _dirac_gf(pot_V, z::Int, kappa::Int, n_nodes::Int, r0::Float64,
+                   rmax::Float64, dt::Float64, tol::Float64,
+                   e_lo::Union{Nothing,Float64}, e_hi::Float64, c::Float64)
     n = ceil(Int, (log(rmax) - log(r0)) / dt)
     t = log(r0) .+ dt .* (0:n-1)
     r = exp.(t)
     v = pot_V.(r)
-    c = C_LIGHT
     kap = Float64(kappa)
     gam = sqrt(kap * kap - (z / c)^2)          # 原点冪 G ~ r^γ (点核)
 
     shoot(E) = _dirac_shoot(E, r, v, kap, c, gam, z)
-    E = bisect_nodes(shoot, -1.2 * z * z - 20.0, -1e-4, n_nodes, tol)
+    lo = e_lo === nothing ? -1.2 * z * z - 20.0 : e_lo
+    E = bisect_nodes(shoot, lo, e_hi, n_nodes, tol)
 
     # 最終波動関数: 両側積分して接続 (詳細は Python 版コメント)
     lam = sqrt(max(-2.0 * E * (1.0 + E / (2.0 * c * c)), 1e-12))
@@ -431,10 +516,50 @@ function solve_dirac_bound(pot_V, z::Int; kappa::Int=-1, n_nodes::Int=0,
     scale = Gin[i_m] != 0 ? Gout[i_m] / Gin[i_m] : 1.0
     G = vcat(Gout[1:i_m-1], Gin[i_m:end] .* scale)
     F = vcat(Fout[1:i_m-1], Fin[i_m:end] .* scale)
+    return E, r2, G, F
+end
+
+"""一般の (κ, 節数) の束縛 Dirac 解。戻り値 (E, r, u_large, frac_small)。
+`u_large` は**大成分のみ**で ∫G²dr = 1 に規格化したもの (電離処方の始状態)。
+検証は selftest T6 (点核 Coulomb の Sommerfeld 厳密解と照合)。"""
+function solve_dirac_bound(pot_V, z::Int; kappa::Int=-1, n_nodes::Int=0,
+                           r0::Float64=GRID_R0, rmax::Float64=BOUND_RMAX,
+                           dt::Float64=GRID_DT, tol::Float64=EIG_TOL,
+                           e_lo::Union{Nothing,Float64}=nothing,
+                           e_hi::Float64=-1e-4, c::Float64=C_LIGHT)
+    E, r2, G, F = _dirac_gf(pot_V, z, kappa, n_nodes, r0, rmax, dt, tol,
+                            e_lo, e_hi, c)
     norm2 = trapz(G .* G .+ F .* F, r2)        # 全ノルム ∫(G²+F²)dr
     frac_small = trapz(F .* F, r2) / norm2     # 小成分の割合 ≈ (Zα/2)² (診断)
     u = G ./ sqrt(trapz(G .* G, r2))           # 大成分のみで再規格化 (処方)
     return E, r2, u, frac_small
+end
+
+"""Dirac 軌道を**呼び出し側の全格子** `r_full` 上へ、2 成分規格化
+∫(G²+F²)dr = 1 で返す (Dirac SCF の密度用)。戻り値 `(E, G, F)`。
+
+`solve_dirac_bound` との違いは 2 つ:
+  * 遠方の切り詰め分を 0 で埋めて、SCF 格子と同じ長さに揃える
+  * **小成分を含めて**規格化する。電離処方の始状態は大成分のみで規格化するが、
+    電荷密度は ρ = Σ q (G²+F²)/(4πr²) なので小成分を落とせない
+    (Au 1s では ∫F² が全体の ~9% を占める)"""
+function dirac_orbital_on_grid(pot_V, z::Int, r_full::Vector{Float64}, dt::Float64;
+                               kappa::Int=-1, n_nodes::Int=0,
+                               tol::Float64=EIG_TOL,
+                               e_lo::Union{Nothing,Float64}=nothing,
+                               e_hi::Float64=-1e-4, c::Float64=C_LIGHT)
+    E, r2, G, F = _dirac_gf(pot_V, z, kappa, n_nodes, r_full[1],
+                            r_full[end] * (1.0 + 1e-12), dt, tol, e_lo, e_hi, c)
+    s = 1.0 / sqrt(trapz(G .* G .+ F .* F, r2))
+    nf = length(r_full)
+    n2 = length(r2)
+    n2 <= nf || error("dirac grid longer than the SCF grid ($n2 > $nf)")
+    Gf = zeros(nf); Ff = zeros(nf)
+    @inbounds for i in 1:n2
+        Gf[i] = G[i] * s
+        Ff[i] = F[i] * s
+    end
+    return E, Gf, Ff
 end
 
 # ====================================================================

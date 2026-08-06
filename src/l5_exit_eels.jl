@@ -69,11 +69,11 @@ F(s) 出口と同じ処方・同じソルバを使い、K = 0 の 1 点だけを
 F(s) 出口と同じ診断 (`diag`) と Bote–Salvat の σ を持つ。"""
 function compute_edge(z::Int, tag::String, e0_keV::Float64;
                       settings=PROD_SETTINGS, verbose::Bool=true,
-                      rel_continuum::Bool=false,
+                      rel_continuum::Bool=false, dirac_scf::Bool=false,
                       rel_override::Union{Nothing,RelCont}=nothing)
     t0 = time()
     ch = prepare_channel(z, tag, e0_keV; rel_continuum=rel_continuum,
-                         rel_override=rel_override)
+                         dirac_scf=dirac_scf, rel_override=rel_override)
     N, diag = compute_NK(ch.ion_pot, ch.r_b, ch.u_b, ch.E_th, ch.T0, [0.0], z;
                          n1=settings.n1, n2=settings.n2, n3=settings.n3,
                          l_cap=settings.l_cap, n_x=settings.n_x,

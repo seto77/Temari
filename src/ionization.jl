@@ -101,9 +101,11 @@ const USAGE = """
   julia -t auto ionization.jl gos  Z channel [--quick|--high] [--rel]
                                    [--epsmax Ha] [--qmax a0inv] [--json path]  # GOS 出口
                                    # E0 を取らない (GOS は E0 非依存)
-  julia -t auto ionization.jl fx   Z [--s s1 s2 ...] [--json path]  # 原子散乱因子 f_x/f_e
+  julia -t auto ionization.jl fx   Z [--s ...] [--nonrel] [--json path]  # 原子散乱因子
+                                   # 既定は完全 Dirac SCF 密度。--nonrel で比較用の非相対論
 
-opts: [--quick|--high] [--rel] [--s s1 s2 ...] [--json path]
+opts: [--quick|--high] [--rel] [--dscf] [--s s1 s2 ...] [--json path]
+      --dscf = 完全 Dirac SCF (DHFS)。重元素で効く (Au L3 で σ_own/Bote 0.924→0.947)
       --s は F(s) 出口のみ (edge は K=0 の 1 点で、その分だけ安い)"""
 
 "fx サブコマンド: X 線 f_x(s) と電子線 f_e(s) の原子散乱因子"
@@ -125,7 +127,7 @@ function main_fx(args)
         i += 1
     end
     println("初回はこの元素の SCF を解くため時間がかかります...")
-    o = compute_fx(z; s_nodes=s_nodes)
+    o = compute_fx(z; s_nodes=s_nodes, relativistic=!("--nonrel" in args))
     s = o["s_A_inv"]; fx = o["f_x"]; fe = o["f_e_A"]
     @printf("\n%10s  %14s  %14s\n", "s [1/Å]", "f_x [e]", "f_e [Å]")
     for i in 1:max(1, length(s) ÷ 15):length(s)
@@ -157,6 +159,7 @@ function main_gos(args)
     quick = "--quick" in args
     high = "--high" in args
     rel = "--rel" in args
+    dscf = "--dscf" in args
     eps_max = nothing
     q_max = nothing
     json_path = nothing
@@ -176,7 +179,7 @@ function main_gos(args)
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
             "   スレッド: ", Threads.nthreads(), "   (E0 非依存)")
     o = compute_gos(z, tag; settings=settings, eps_max_Ha=eps_max, q_max=q_max,
-                    rel_continuum=rel)
+                    rel_continuum=rel, dirac_scf=dscf)
     q = o["q_a0inv"]; fs = o["f_sum"]; occ = o["occupancy"]
     @printf("\n完了 (%.0f s)  ΔE ノード %d 点 × Q %d 点   ε 上端 = %.1f eV\n",
             o["elapsed_s"], length(o["dE_eV"]), length(q),
@@ -262,6 +265,7 @@ function main_(args)
     quick = "--quick" in args
     high = "--high" in args                     # 260804Cl 強化求積 (v3 テーブル用)
     rel = "--rel" in args                       # 260804Cl スカラー相対論連続状態
+    dscf = "--dscf" in args                     # 260807Cl 完全 Dirac SCF
     s_nodes = nothing
     json_path = nothing
     i = 4
@@ -285,9 +289,9 @@ function main_(args)
             "   スレッド: ", Threads.nthreads())
     println("初回はこの元素の SCF を解くため時間がかかります (atom_cache_jl_*.jls に保存)...")
     o = edge_mode ?
-        compute_edge(z, tag, e0; settings=settings, rel_continuum=rel) :
+        compute_edge(z, tag, e0; settings=settings, rel_continuum=rel, dirac_scf=dscf) :
         compute_channel(z, tag, e0; settings=settings, s_nodes=s_nodes,
-                        rel_continuum=rel)
+                        rel_continuum=rel, dirac_scf=dscf)
     @printf("\n完了 (%.0f s)   E_bound = %.1f eV (小成分ノルム比 %.4f)\n",
             o["elapsed_s"], o["E_bound_eV"], o["small_component_fraction"])
     if edge_mode

@@ -351,6 +351,34 @@ function selftest()
         @assert abs(fe_hi / (2.0 / Ks[end]^2) - 1.0) < 1e-4 "T12 FAIL: Mott–Bethe の裸核極限"
     end
 
+    # ---- T13: 完全 Dirac SCF (DHFS) ----
+    # 2 本立て。粗い格子 (dt=8e-3) で足りる — 見ているのは相対論の有無という
+    # 大きな効果で、格子由来の差はその 2 桁下。
+    #  (a) 構造: c を 100 倍にすると Dirac SCF は非相対論 SCF へ退化しなければ
+    #      ならない (T8 と同じ思想。相対論項は (Z/c)² なので 1e-4 に落ちる)
+    #  (b) 物理: 1s 固有値が **実験の K 吸収端** (bote_salvat.json、既に同梱) と
+    #      合うこと。非相対論では Fe で 0.9% 外すので、有無がそのまま出る
+    let z = 26, dtc = 8e-3, kw = (latter_charge=1.0, dt=dtc, tol_rho=1e-5, tol_e=1e-6)
+        a_nr = SCFAtom(z, ORBITALS[z]; kw...)
+        a_rel = SCFAtom(z, ORBITALS[z]; relativistic=true, kw...)
+        a_inf = SCFAtom(z, ORBITALS[z]; relativistic=true, c=C_LIGHT * 100.0, kw...)
+        @assert a_nr.converged && a_rel.converged && a_inf.converged "T13 FAIL: SCF 未収束"
+        w = simpson_weights(length(a_nr.r), dtc) .* a_nr.r
+        dens_diff(a, b) = sum(4pi .* a.r .^ 2 .* abs.(a.rho .- b.rho) .* w) / a.nel
+        d_inf = dens_diff(a_inf, a_nr)             # c→∞: 消えるべき
+        d_phys = dens_diff(a_rel, a_nr)            # 物理の c: 残るべき (本物の効果)
+        ex = -bote_edge_eV(z, 1) / HARTREE_EV      # 実験の K 端 [Ha]
+        r_nr = a_nr.eps[(1, 0)] / ex
+        r_rel = a_rel.eps[(1, 0)] / ex
+        @printf("[T13] Dirac SCF (Z=%d): c→∞ 密度差 %.2e (消える) / 物理 c %.2e (残る)\n",
+                z, d_inf, d_phys)
+        @printf("      1s 固有値 / 実験 K 端: 非相対論 %.5f → Dirac %.5f\n", r_nr, r_rel)
+        @assert d_inf < 5e-5 "T13 FAIL: c→∞ で非相対論へ退化しない"
+        @assert d_phys > 100 * d_inf "T13 FAIL: 物理の c で相対論効果が出ていない"
+        @assert abs(r_rel - 1.0) < 5e-3 "T13 FAIL: Dirac 1s が実験 K 端と合わない"
+        @assert abs(r_rel - 1.0) < abs(r_nr - 1.0) / 5 "T13 FAIL: 非相対論より改善していない"
+    end
+
     @printf("%s\nALL PASS (%.0f s)\n%s\n", bar, time() - t_start, bar)
     return 0
 end

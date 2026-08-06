@@ -55,7 +55,7 @@ The chapter numbering below is the chapter numbering in the source.
 
 | Chapter | Step | Prescription |
 | --- | --- | --- |
-| 2 | Neutral-atom field | SCF Hartree–Fock–Slater with Slater exchange and the Latter tail correction |
+| 2 | Neutral-atom field | SCF Hartree–Fock–Slater with Slater exchange and the Latter tail correction. Optionally a **full Dirac SCF** (`--dscf`): every occupied orbital solved from the radial Dirac equation, resolved in κ, with the small component kept in the density. Decisive for heavy elements — it moves Au's $f_x$ by 10.8 % at $s = 4$ Å⁻¹ and brings the 1s eigenvalue onto the experimental K edge (0.9908 → 1.00004) |
 | 4 | Initial state | Radial Dirac equation solved in that field; the large component is $u_{nl}$. K/L1/L2/L3 are resolved in $j$ through $\kappa$, and renormalized to $\int G^2 \mathrm{d}r = 1$ |
 | 5 | Final-state field | The core hole is opened and the ion is re-converged (relaxed core-hole SCF), plus a Kohn–Sham (2/3) static exchange — the distorted-wave approximation |
 | 3 | Continuum state | Three-segment Numerov integration, asymptotically matched to Coulomb functions for energy normalization $\langle\varepsilon\vert\varepsilon'\rangle = \delta(\varepsilon - \varepsilon')$; the partial wave with the same $l$ as the initial state is Gram–Schmidt orthogonalized against it |

@@ -25,9 +25,10 @@
 # 解ける) が、**イオンでは Z_net − f_x(0) = 正味電荷 ≠ 0 なので f_e は s⁻² で発散する**。
 #
 # ---- 限界 ----------------------------------------------------------------
-#   * ρ は L1 の HFS (Slater 交換 + Latter 補正) の**非相対論**密度。重元素では
-#     相対論的収縮が入らないぶん f_x が ~1% ずれる (Z≳50 で顕著)。相対論密度に
-#     するには第 4 章の Dirac 解を全占有軌道について解き直す必要がある (未実施)
+#   * ρ は既定で **完全 Dirac SCF (DHFS)** の密度 (260807Cl。`relativistic=false`
+#     で従来の非相対論 HFS)。相対論的収縮は重元素で決定的で、Au の f_x を高 s で
+#     10.8% 動かす。非相対論のままだと公開パラメータ化に対して高 s で ~7% 外し、
+#     Dirac にすると ~1% まで縮む (docs/src/en/verification.md)
 #   * 球対称・孤立原子。結合による非球対称成分 (価電子の再配置) は入らない
 #   * f_e は第 1 Born。低速電子や重元素の大角では歪曲波 (Mott 断面積、P4 の後半)
 #     でないと足りない — そこは `phase` 出口の δ_l から作る
@@ -87,10 +88,10 @@ mott_bethe_a0(z_net::Float64, fx::Float64, K::Float64) = 2.0 * (z_net - fx) / (K
   "norm_correction"  掛けた一様補正 −1 (期待値 +Z×1.67e-7 / Z ≈ 1.67e-7)
 """
 function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
-                    verbose::Bool=true)
+                    relativistic::Bool=true, verbose::Bool=true)
     s_nodes === nothing && (s_nodes = collect(0.0:0.1:6.0))
     issorted(s_nodes) || error("s_nodes は昇順で")
-    a = get_neutral(z)
+    a = get_neutral(z; relativistic=relativistic)
     a.converged || error("Z=$z の中性 SCF が未収束")
     K = 4.0 * pi .* s_nodes .* BOHR_ANG            # s [Å⁻¹] → K [a₀⁻¹] (F(s) と同規約)
     # 台形則規格化のバイアスを除く (上のコメント参照)。一様スケールなので形は不変
@@ -109,6 +110,12 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
         "n_electrons_scf" => a.nel, "norm_correction" => corr - 1.0,
         "s_A_inv" => s_nodes, "q_a0inv" => K,
         "f_x" => fx, "f_e_A" => fe,
-        "density" => "HFS (Slater exchange + Latter tail), 非相対論・球対称",
-        "note" => "f_e は第 1 Born (Mott–Bethe)。歪曲波ではない")
+        "relativistic" => a.relativistic,
+        "density" => a.relativistic ?
+                     "DHFS (完全 Dirac SCF、小成分込み) + Slater 交換 + Latter 尾、球対称" :
+                     "HFS (Slater 交換 + Latter 尾)、非相対論・球対称",
+        "note" => "f_e は第 1 Born (Mott–Bethe) の**非相対論** f_e。" *
+                  "入射電子の γ = 1 + E/(m₀c²) は掛けていない — Peng/Doyle–Turner と" *
+                  "同じ規約で、消費側 (ReciPro の BetheMethod.getU など) が掛ける。" *
+                  "ここで掛けると二重計上になる")
 end

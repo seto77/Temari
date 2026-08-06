@@ -335,8 +335,12 @@ const _cache = Dict{Tuple,Any}()
 
 # 260804Cl 変更: Serialization 形式は Julia 版間で非互換 (1.12 の書いた .jls を
 # 1.11 が読むと "newer version" エラー)。版並行運用のためファイル名に版を含める
+# 260807Cl: SCFAtom に relativistic フィールドを足したのでスキーマ版 v2 を導入。
+# 旧 v1 ファイルは読まれずに残る (無害。消したければ手で消す)
+const CACHE_SCHEMA = "v2"
 cache_file(key::Tuple) =
-    "atom_cache_jl$(VERSION.major)$(VERSION.minor)_" * join(string.(key), "_") * ".jls"
+    "atom_cache_$(CACHE_SCHEMA)_jl$(VERSION.major)$(VERSION.minor)_" *
+    join(string.(key), "_") * ".jls"
 # cache_file(key::Tuple) = "atom_cache_jl_" * join(string.(key), "_") * ".jls"
 
 function cache_put(key::Tuple, obj)
@@ -353,8 +357,15 @@ function disk_cached(builder, key::Tuple)
     haskey(_cache, key) && return _cache[key]
     fname = cache_file(key)
     if isfile(fname)
-        _cache[key] = deserialize(fname)
-        return _cache[key]
+        # 読めない .jls (構造体の定義変更・書きかけ) は捨てて作り直す。
+        # 黙って古い型を使うより、作り直す方が常に正しい (遅いだけ)
+        try
+            _cache[key] = deserialize(fname)
+            return _cache[key]
+        catch err
+            @printf("WARN: キャッシュ %s を読めないので作り直します (%s)\n",
+                    fname, typeof(err))
+        end
     end
     return cache_put(key, builder())
 end
@@ -362,36 +373,50 @@ end
 function build_neutral(z::Int; kw...)
     t0 = time()
     a = SCFAtom(z, ORBITALS[z]; latter_charge=1.0, kw...)
-    @printf("[SCF] neutral Z=%d: %.0fs converged=%s\n", z, time() - t0, a.converged)
+    @printf("[SCF%s] neutral Z=%d: %.0fs converged=%s\n",
+            a.relativistic ? "/Dirac" : "", z, time() - t0, a.converged)
     return a
 end
 
 "内殻 (n,l) から電子を 1 個抜いた配置の SCF (relaxed core-hole。j は区別しない)"
-function build_ion(z::Int, shell::Tuple{Int,Int}; kw...)
+function build_ion(z::Int, shell::Tuple{Int,Int}; relativistic::Bool=false, kw...)
     t0 = time()
-    neutral = get_neutral(z)
+    neutral = get_neutral(z; relativistic=relativistic)
     occ = [(n, l, q - ((n, l) == shell ? 1.0 : 0.0)) for (n, l, q) in ORBITALS[z]]
     nel = sum(q for (_, _, q) in occ)
-    a = SCFAtom(z, occ; latter_charge=2.0,
+    a = SCFAtom(z, occ; latter_charge=2.0, relativistic=relativistic,
                 rho_init=neutral.rho .* (nel / neutral.nel), kw...)
-    @printf("[SCF] ion Z=%d hole@%s: %.0fs converged=%s\n", z, shell, time() - t0,
-            a.converged)
+    @printf("[SCF%s] ion Z=%d hole@%s: %.0fs converged=%s\n",
+            relativistic ? "/Dirac" : "", z, shell, time() - t0, a.converged)
     return a
 end
 
-get_neutral(z::Int) = disk_cached(() -> build_neutral(z), ("n", z))
-get_ion(z::Int, shell) = disk_cached(() -> build_ion(z, shell),
-                                     ("i", z, shell[1], shell[2]))
+"""中性原子の SCF (キャッシュ付き)。`relativistic=true` で完全 Dirac SCF。
+
+⚠ 相対論版と非相対論版は**別のキャッシュキー** (`"nrel"` / `"n"`) に分ける。
+同じ鍵にすると、片方で作った密度をもう片方が黙って読んで結果だけが狂う。"""
+get_neutral(z::Int; relativistic::Bool=false) =
+    relativistic ?
+    disk_cached(() -> build_neutral(z; relativistic=true), ("nrel", z)) :
+    disk_cached(() -> build_neutral(z), ("n", z))
+get_ion(z::Int, shell; relativistic::Bool=false) =
+    relativistic ?
+    disk_cached(() -> build_ion(z, shell; relativistic=true),
+                ("irel", z, shell[1], shell[2])) :
+    disk_cached(() -> build_ion(z, shell), ("i", z, shell[1], shell[2]))
 
 "SCF の収束を保証 (未収束なら混合を弱めて再試行、それでも駄目なら停止)"
-function ensure_converged(z::Int, shell)
+function ensure_converged(z::Int, shell; relativistic::Bool=false)
+    rl = relativistic
     for (kind, key, rebuild) in (
-            ("neutral", ("n", z), () -> build_neutral(z; beta=SCF_RETRY.beta,
-                                                      max_iter=SCF_RETRY.max_iter)),
-            ("ion", ("i", z, shell[1], shell[2]),
-             () -> build_ion(z, shell; beta=SCF_RETRY.beta,
+            ("neutral", (rl ? "nrel" : "n", z),
+             () -> build_neutral(z; relativistic=rl, beta=SCF_RETRY.beta,
+                                 max_iter=SCF_RETRY.max_iter)),
+            ("ion", (rl ? "irel" : "i", z, shell[1], shell[2]),
+             () -> build_ion(z, shell; relativistic=rl, beta=SCF_RETRY.beta,
                              max_iter=SCF_RETRY.max_iter)))
-        a = kind == "neutral" ? get_neutral(z) : get_ion(z, shell)
+        a = kind == "neutral" ? get_neutral(z; relativistic=rl) :
+            get_ion(z, shell; relativistic=rl)
         a.converged && continue
         println("  [scf-retry] Z=$z $kind not converged -> beta=0.08, max_iter=400")
         isfile(cache_file(key)) && rm(cache_file(key))
@@ -415,7 +440,7 @@ F(s) 出口 (`compute_channel`) も EELS 出口 (`compute_edge`) もここまで
   `rel`          放出電子のスカラー相対論設定 (nothing = 非相対論)
 """
 function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
-                         rel_continuum::Bool=false,
+                         rel_continuum::Bool=false, dirac_scf::Bool=false,
                          rel_override::Union{Nothing,RelCont}=nothing)
     haskey(CHANNELS, tag) || error("unknown channel $tag (K/L1/L2/L3)")
     shell, j_lower, occ_init, subshell = CHANNELS[tag]
@@ -425,9 +450,9 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
     e0_keV === nothing || e0_keV > eth_keV ||
         error("E0=$(e0_keV) keV は $tag 端 $(eth_keV) keV 以下 (σ=0)")
 
-    ensure_converged(z, shell)
-    neutral = get_neutral(z)
-    ion = get_ion(z, shell)
+    ensure_converged(z, shell; relativistic=dirac_scf)
+    neutral = get_neutral(z; relativistic=dirac_scf)
+    ion = get_ion(z, shell; relativistic=dirac_scf)
 
     # ---- 始状態: 同じ HFS 場の中の Dirac 大成分 (第 4 章) ----
     n_b, l_b = shell
@@ -449,8 +474,9 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
             E_th=eth_keV * 1000.0 / HARTREE_EV,     # keV → Ha
             T0=(e0_keV === nothing ? nothing : e0_keV * 1000.0 / HARTREE_EV),
             E_b=E_b, r_b=r_b, u_b=u_b, frac_small=frac_small,
-            ion_pot=ion_pot, rel=rel,
-            model_id=(rel === nothing ? MODEL_ID : MODEL_ID_REL))
+            ion_pot=ion_pot, rel=rel, dirac_scf=dirac_scf,
+            model_id=(rel === nothing ? MODEL_ID : MODEL_ID_REL) *
+                     (dirac_scf ? "-DSCF" : ""))
 end
 
 "入射エネルギーを伴わない準備 (GOS のように E0 非依存な出口用)"

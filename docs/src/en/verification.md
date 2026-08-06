@@ -29,6 +29,7 @@ Failures are assertions, so the command exits non-zero on a real failure.
 | T10 | Elastic phase shifts $\delta_l$ at high $l$ against the Born approximation $\tan\delta_l \approx -2k\int V j_l^2 r^2 \mathrm{d}r$, integrated from the same potential | max\|ratio − 1\| = 3.2 % |
 | T11 | The GOS at both limits for hydrogen 1s: as $Q \to 0$ against the exact continuum dipole strength $1 - \sum_n f_{1s \to np}$ (closed form, summed in-test), that the approach is $O(Q^2)$, and the Bethe sum rule $\int \mathrm{d}f/\mathrm{d}\Delta E \, \mathrm{d}\Delta E \to N$ at large $Q$ | dipole −0.00 %, $Q^2$ ratio 4.00, sum rule 0.998 |
 | T12 | The X-ray scattering factor of an exact hydrogen 1s density against the closed form $[1+(K/2)^2]^{-2}$, over K = 0…32, plus $f_x(0) = Z$, monotonicity, and the bare-nucleus limit of Mott–Bethe | max rel. 7.7×10⁻¹⁴ |
+| T13 | The Dirac SCF: that raising $c$ by 100× collapses it onto the non-relativistic SCF density, that the physical $c$ leaves a much larger difference, and that the 1s eigenvalue lands on the **experimental** K edge from the bundled Bote–Salvat table | c→∞ 2.2×10⁻⁵ vs physical 7.3×10⁻³; 1s/edge 0.9908 → 1.00004 |
 
 T8 is the strongest structural check in the ladder: it exercises the entire
 relativistic code path and demands that it collapse onto an independently
@@ -59,11 +60,15 @@ Where published values exist: K-shell form factors agree with Oxley & Allen
 (2000) and with µSTEM to within 1 % for $s \le 1.25$ Å⁻¹.
 
 The scattering factors were checked the same way, against the standard analytic
-parameterizations for C, Si, Fe and Au. $f_x(s)$ agrees to 1–3 % for light and
-medium $Z$; for Au the gap widens to ~7 % at high $s$, in the direction and the
-place a non-relativistic density predicts — the missing relativistic contraction
-leaves the density too diffuse, so $f_x$ falls off too fast. Beyond
-$s \approx 3$ Å⁻¹ the comparison inverts: a sum of Gaussians decays as
+parameterizations for C, Si, Fe and Au. With the non-relativistic density
+$f_x(s)$ agreed to 1–3 % for light and medium $Z$ but drifted to ~7 % for Au at
+high $s$ — in exactly the direction a missing relativistic contraction predicts,
+the density too diffuse and $f_x$ falling off too fast. **The full Dirac SCF
+closes that gap: Au now agrees to ~1 % at high $s$** (the correction moves $f_x$
+by 10.8 % at $s = 4$ Å⁻¹). What remains is the ~1 % from Slater local exchange
+against the Hartree–Fock the parameterizations are fitted to.
+
+Beyond $s \approx 3$ Å⁻¹ the comparison inverts: a sum of Gaussians decays as
 $\exp(-bs^2)$ while $f_e$ genuinely falls as $s^{-2}$, so the fits collapse and
 the Mott–Bethe value is the correct one.
 
