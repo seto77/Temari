@@ -351,13 +351,27 @@ function selftest()
         @assert abs(fe_hi / (2.0 / Ks[end]^2) - 1.0) < 1e-4 "T12 FAIL: Mott–Bethe の裸核極限"
     end
 
+    # ---- T13b: 交換係数が二重に掛かっていないこと ----
+    # 260807Cl に実際にやらかした事故の回帰テスト。`slater_vx` に X_ALPHA を
+    # 畳み込んだ結果、終状態ポテンシャル (第 5 章、KS 2/3) が (2/3)·α になり、
+    # 電離側だけが黙って別の処方になった。slater_vx は**素の Slater 形**であるべきで、
+    # α は SCF 側で、2/3 は終状態側で、それぞれ呼び出し側が掛ける。
+    let rho = 0.3
+        pure = -1.5 * (3.0 * rho / pi)^(1.0 / 3.0)
+        @printf("[T13b] slater_vx は素の Slater 形 (α 非依存): %.6f\n", slater_vx(rho))
+        @assert isapprox(slater_vx(rho), pure; rtol=1e-14) "T13b FAIL: slater_vx に係数が畳み込まれている"
+    end
+
     # ---- T13: 完全 Dirac SCF (DHFS) ----
     # 2 本立て。粗い格子 (dt=8e-3) で足りる — 見ているのは相対論の有無という
     # 大きな効果で、格子由来の差はその 2 桁下。
     #  (a) 構造: c を 100 倍にすると Dirac SCF は非相対論 SCF へ退化しなければ
     #      ならない (T8 と同じ思想。相対論項は (Z/c)² なので 1e-4 に落ちる)
-    #  (b) 物理: 1s 固有値が **実験の K 吸収端** (bote_salvat.json、既に同梱) と
-    #      合うこと。非相対論では Fe で 0.9% 外すので、有無がそのまま出る
+    #  (b) 物理: 1s の**相対論シフト** ΔE/|E| が水素様の (Z_eff·α_fs)²/4 と合うこと。
+    #      ⚠ 「1s 固有値が実験 K 端と一致するか」は**交換係数 α に強く依存する**ので
+    #      ゲートにしない (α=1 だと Fe で 1.00002 だが α=2/3 では 0.9856)。一方
+    #      **シフトそのものは α にほぼ依存しない** (内殻の効果。実測 0.00918 vs 0.00923)
+    #      ので、相対論の実装を見るならこちらが正しい量。端との比は参考表示に留める。
     let z = 26, dtc = 8e-3, kw = (latter_charge=1.0, dt=dtc, tol_rho=1e-5, tol_e=1e-6)
         a_nr = SCFAtom(z, ORBITALS[z]; kw...)
         a_rel = SCFAtom(z, ORBITALS[z]; relativistic=true, kw...)
@@ -367,16 +381,22 @@ function selftest()
         dens_diff(a, b) = sum(4pi .* a.r .^ 2 .* abs.(a.rho .- b.rho) .* w) / a.nel
         d_inf = dens_diff(a_inf, a_nr)             # c→∞: 消えるべき
         d_phys = dens_diff(a_rel, a_nr)            # 物理の c: 残るべき (本物の効果)
+        e_nr = a_nr.eps[(1, 0)]
+        e_rel = a_rel.eps[(1, 0)]
+        shift = (e_rel - e_nr) / abs(e_rel)        # 相対論シフト (負 = より深く束縛)
+        est = ((z - 0.3) / C_LIGHT)^2 / 4          # 水素様 1s: ΔE/|E| = (Z_eff α_fs)²/4
         ex = -bote_edge_eV(z, 1) / HARTREE_EV      # 実験の K 端 [Ha]
-        r_nr = a_nr.eps[(1, 0)] / ex
-        r_rel = a_rel.eps[(1, 0)] / ex
         @printf("[T13] Dirac SCF (Z=%d): c→∞ 密度差 %.2e (消える) / 物理 c %.2e (残る)\n",
                 z, d_inf, d_phys)
-        @printf("      1s 固有値 / 実験 K 端: 非相対論 %.5f → Dirac %.5f\n", r_nr, r_rel)
+        @printf("      1s 相対論シフト %.5f / 水素様推定 %.5f = %.3f (期待 ~1)\n",
+                -shift, est, -shift / est)
+        @printf("      1s 固有値 / 実験 K 端: %.5f → %.5f (参考。絶対値は交換係数 α に依存)\n",
+                e_nr / ex, e_rel / ex)
         @assert d_inf < 5e-5 "T13 FAIL: c→∞ で非相対論へ退化しない"
         @assert d_phys > 100 * d_inf "T13 FAIL: 物理の c で相対論効果が出ていない"
-        @assert abs(r_rel - 1.0) < 5e-3 "T13 FAIL: Dirac 1s が実験 K 端と合わない"
-        @assert abs(r_rel - 1.0) < abs(r_nr - 1.0) / 5 "T13 FAIL: 非相対論より改善していない"
+        @assert shift < 0 "T13 FAIL: 相対論で 1s が深くなっていない"
+        @assert 0.85 < -shift / est < 1.25 "T13 FAIL: 1s 相対論シフトが水素様推定と合わない"
+        @assert abs(e_rel / ex - 1) < abs(e_nr / ex - 1) "T13 FAIL: 実験 K 端から遠ざかった"
     end
 
     @printf("%s\nALL PASS (%.0f s)\n%s\n", bar, time() - t_start, bar)
@@ -396,7 +416,7 @@ function refcheck()
         # 既定が DSCF になっても、ここは処方を揃えないと意味を失う
         o = compute_channel(z, tag, Float64(c["e0_keV"]);
                             settings=QUICK_SETTINGS, s_nodes=s, verbose=false,
-                            dirac_scf=false)
+                            dirac_scf=false, x_alpha=1.0)
         dF = maximum(abs.(o["F"] .- Float64.(c["F"])))
         dN0 = abs(o["N0"] / Float64(c["N0"]) - 1.0)
         dE = abs(o["E_bound_eV"] / Float64(c["E_bound_eV"]) - 1.0)

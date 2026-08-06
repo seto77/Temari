@@ -175,8 +175,7 @@ function main_gos(args)
         i += 1
     end
     settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
-    println("Z=$z $tag   出口: GOS df/dΔE(Q)   処方: ",
-            (rel ? MODEL_ID_REL : MODEL_ID) * (dscf ? "-DSCF" : ""))
+    println("Z=$z $tag   出口: GOS df/dΔE(Q)   処方: ", model_id_of(rel, dscf))
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
             "   スレッド: ", Threads.nthreads(), "   (E0 非依存)")
     o = compute_gos(z, tag; settings=settings, eps_max_Ha=eps_max, q_max=q_max,
@@ -285,7 +284,7 @@ function main_(args)
     end
     settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
     println("Z=$z $tag @ $e0 keV   出口: ", edge_mode ? "dσ/dΔE (EELS)" : "F(s) (EDX)",
-            "   処方: ", (rel ? MODEL_ID_REL : MODEL_ID) * (dscf ? "-DSCF" : ""))
+            "   処方: ", model_id_of(rel, dscf))
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
             "   スレッド: ", Threads.nthreads())
     println("初回はこの元素の SCF を解くため時間がかかります (atom_cache_jl_*.jls に保存)...")

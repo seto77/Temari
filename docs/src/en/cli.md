@@ -59,7 +59,7 @@ julia -e 'include("src/ionization.jl"); exit(refcheck() < 1e-5 ? 0 : 1)'
 | `--high` | HIGH quadrature: denser ε nodes, doubled angular quadrature, finer radial mesh. This is what production tables use. |
 | *(neither)* | The intermediate default (PROD). |
 | `--rel` | Scalar-relativistic continuum (model id `...DiracB-SRC...v3`). Without it, the continuum is non-relativistic (`...v2`). |
-| `--dscf` | Solve the atom's SCF from the **radial Dirac equation** rather than the Schrödinger one — every occupied orbital, resolved in κ, with the small component in the density. Appends `-DSCF` to the model id. Costs 2–3× the SCF time (once per element, then cached) and matters for heavy atoms: it moves σ_own/σ_Bote for Au L3 from 0.924 to 0.947. |
+| `--nodscf` | Solve the atom's SCF from the Schrödinger equation instead of the **radial Dirac** one, which is the default — every occupied orbital, resolved in κ, with the small component in the density. Removes `-DSCF` from the model id. The Dirac SCF costs 2–3× the SCF time (once per element, then cached) and matters for heavy atoms: it moves σ_own/σ_Bote for Au L3 from 0.924 to 0.947. |
 | `--s s1 s2 ...` | Explicit s nodes in Å⁻¹, replacing the default grid. Consumes every following argument until the next `--`. F(s) exit only — `edge` evaluates K = 0 alone. |
 | `--json <path>` | Write the full result object to `<path>` as JSON. |
 

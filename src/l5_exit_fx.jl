@@ -88,10 +88,11 @@ mott_bethe_a0(z_net::Float64, fx::Float64, K::Float64) = 2.0 * (z_net - fx) / (K
   "norm_correction"  掛けた一様補正 −1 (期待値 +Z×1.67e-7 / Z ≈ 1.67e-7)
 """
 function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
-                    relativistic::Bool=true, verbose::Bool=true)
+                    relativistic::Bool=true, x_alpha::Float64=X_ALPHA,
+                    verbose::Bool=true)
     s_nodes === nothing && (s_nodes = collect(0.0:0.1:6.0))
     issorted(s_nodes) || error("s_nodes は昇順で")
-    a = get_neutral(z; relativistic=relativistic)
+    a = get_neutral(z; relativistic=relativistic, x_alpha=x_alpha)
     a.converged || error("Z=$z の中性 SCF が未収束")
     K = 4.0 * pi .* s_nodes .* BOHR_ANG            # s [Å⁻¹] → K [a₀⁻¹] (F(s) と同規約)
     # 台形則規格化のバイアスを除く (上のコメント参照)。一様スケールなので形は不変

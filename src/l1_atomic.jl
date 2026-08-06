@@ -85,21 +85,47 @@ end
 # Xα の交換係数。α = 1 が Slater (交換ホールの平均)、α = 2/3 が Kohn–Sham
 # (LDA 交換エネルギー汎関数の変分微分)。
 #
-# ⚠ 現在 α = 1 だが、これは**測定上は最良でない** (260807Cl 実測)。SCF の α を
-# 振って f_x を公開パラメータ化 (相対論的 HF にフィットされたもの) と比べた
-# RMS 相対差 [%]:
-#     α      Z=6    Z=14   Z=26   Z=79
-#     1.000  4.51   1.94   1.44   0.72   ← 現行。全元素で最悪
-#     0.850  2.85   1.12   0.77   0.43
-#     0.750  2.36   0.92   0.43   0.33   ← 最良 (Schwarz の Xα 最適値域)
-#     0.667  2.62   1.14   0.43   0.36   ← Kohn–Sham
-# α を 1 から 2/3 へ動かすと Z≥14 で残差が 1/2〜1/3 になる。しかも**終状態側は
-# 既に 2/3 を使っている** (第 5 章) ので、SCF 側だけ 1 なのは内部的にも非対称。
-# 変更は処方の変更 (model_id が変わる) なので作者判断待ち。
+# ⚠ α = 1 (Slater) のまま。**下げるべきかは未決**で、証拠が観測量ごとに割れている
+# (260807Cl 実測。α は引数化してあるので出口ごとに変えることも、後で動かすこともできる)。
 #
-# ⚠ 値を変えるときは atom_cache_* を必ず消すこと — キャッシュキーに α は入っていない。
+# (1) f_x を公開パラメータ化 (相対論的 HF にフィット) と比べた RMS 相対差 [%]
+#     α      Z=6    Z=14   Z=26   Z=79
+#     1.000  4.51   1.94   1.44   0.72   ← 現行。**全元素で最悪**
+#     0.750  2.36   0.92   0.43   0.33   ← 最良
+#     0.667  2.62   1.14   0.43   0.36
+#     → 密度そのものを見る f_x は低い α を強く支持する
+#
+# (2) σ_own/σ_Bote の |比−1| 平均 (C K / Fe K / Au L3)
+#     α=1.000: 0.0725  ← 最良
+#     α=0.750: 0.0841
+#     α=0.667: 0.0880
+#     → 電離側は **α=1 を支持** し、下げると Bote から離れる
+#
+# (3) 1s 固有値 / 実験 K 端: α=1 で C 1.00005 / Fe 1.00002 / Au 1.00058、
+#     α=2/3 では 0.936 / 0.986 / 0.995 → **α=1 を支持**
+#
+# つまり「密度は 0.75、電離と固有値は 1」で**トレードオフ**であり、α ひとつでは
+# 両立しない。Slater の α=1 + Latter 補正は固有値を束縛エネルギーに合わせるように
+# 出来ており、α≈0.7 は HF の密度を再現する値 — 目標が違うので当然でもある。
+# 終状態が 2/3 なのと SCF が 1 なのは非対称に見えるが、その組み合わせは
+# 外部参照に対して実測で選ばれたもの (第 5 章のコメント)。
+#
+# ⚠ 履歴上の注意: この (2) は最初、**交換係数を slater_vx に畳み込んだバグ**
+#   (終状態が (2/3)·α になっていた) のせいで逆の符号に出ていた。バグ修正後の再測定が
+#   上の値。selftest T13b がこの事故の回帰テスト。
+#
+# 次の一手は α を動かすことではなく、**自己相互作用補正**のように両方を同時に
+# 改善しうる処方の改良 (炭素の 2.4-4.5% が示しているのもそこ)。
+#
+# α を変えたら atom_cache_* は自動で分かれる (キャッシュキーに xa_tag が入る)
 const X_ALPHA = 1.0
-slater_vx(rho::Float64) = X_ALPHA * (-1.5 * (3.0 * max(rho, 0.0) / pi)^(1.0 / 3.0))
+# ⚠ slater_vx 自体は **α を含まない素の Slater 形**。α は呼び出し側で掛ける。
+# 畳み込むと終状態の KS(2/3) 交換 (第 5 章) が (2/3)·α になって二重に効く
+# (260807Cl に実際にやらかした)。SCF は X_ALPHA、終状態は 2/3 で独立。
+slater_vx(rho::Float64) = -1.5 * (3.0 * max(rho, 0.0) / pi)^(1.0 / 3.0)
+
+"交換係数をキャッシュキーと処方 ID に載せるための短いタグ (α=2/3 → \"xa67\")"
+xa_tag(a::Float64) = "xa" * string(round(Int, a * 100))
 
 """r·V(r) を ln r でスプラインし、グリッド外は漸近値 asym に落とす callable
 (Python 版 _rv_spline)。V でなく r·V を補間するのは原点発散を避けるため。"""
@@ -136,6 +162,7 @@ mutable struct SCFAtom
     converged::Bool
     nel::Float64
     relativistic::Bool
+    x_alpha::Float64         # 使った交換係数 (取り違え防止。キャッシュキーにも入る)
 end
 
 """(n, l, q) の占有を Dirac の (n, l, κ, q) へ分ける。
@@ -165,7 +192,8 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                  beta::Float64=SCF_BETA, tol_rho::Float64=SCF_TOL_RHO,
                  tol_e::Float64=SCF_TOL_E, max_iter::Int=SCF_MAX_ITER,
                  rho_init::Union{Nothing,Vector{Float64}}=nothing,
-                 relativistic::Bool=false, c::Float64=C_LIGHT)
+                 relativistic::Bool=false, c::Float64=C_LIGHT,
+                 x_alpha::Float64=X_ALPHA)
     n = ceil(Int, (log(rmax) - log(r0)) / dt)          # numpy.arange と同じ点数
     t = log(r0) .+ dt .* (0:n-1)
     r = exp.(t)
@@ -185,7 +213,7 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
         vh = hartree(r, rho)
         veff_b = similar(r)                            # V_eff に Latter を掛けた場
         @inbounds for i in eachindex(r)
-            veff_b[i] = min(-z / r[i] + vh[i] + slater_vx(rho[i]),
+            veff_b[i] = min(-z / r[i] + vh[i] + x_alpha * slater_vx(rho[i]),
                             -latter_charge / r[i])
         end
         pot = RvSpline(r, veff_b .* r, -latter_charge)
@@ -290,7 +318,8 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
         @printf("WARN: %sSCF Z=%d not fully converged (drho=%.1e, de=%.1e)\n",
                 relativistic ? "Dirac " : "", z, drho, de)
     end
-    return SCFAtom(z, occ, r, dt, rho, orbs, eps_now, converged, nel, relativistic)
+    return SCFAtom(z, occ, r, dt, rho, orbs, eps_now, converged, nel, relativistic,
+                   x_alpha)
 end
 
 "収束密度から束縛軌道用ポテンシャル (静電+Slater 交換+Latter) を作る"
@@ -298,7 +327,7 @@ function V_bound_callable(a::SCFAtom; latter_charge::Float64=1.0)
     vh = hartree(a.r, a.rho)
     veff = similar(a.r)
     @inbounds for i in eachindex(a.r)
-        veff[i] = min(-a.z / a.r[i] + vh[i] + slater_vx(a.rho[i]),
+        veff[i] = min(-a.z / a.r[i] + vh[i] + a.x_alpha * slater_vx(a.rho[i]),
                       -latter_charge / a.r[i])
     end
     return RvSpline(a.r, veff .* a.r, -latter_charge)

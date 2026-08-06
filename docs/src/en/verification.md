@@ -65,8 +65,21 @@ $f_x(s)$ agreed to 1–3 % for light and medium $Z$ but drifted to ~7 % for Au a
 high $s$ — in exactly the direction a missing relativistic contraction predicts,
 the density too diffuse and $f_x$ falling off too fast. **The full Dirac SCF
 closes that gap: Au now agrees to ~1 % at high $s$** (the correction moves $f_x$
-by 10.8 % at $s = 4$ Å⁻¹). What remains is the ~1 % from Slater local exchange
-against the Hartree–Fock the parameterizations are fitted to.
+by 10.8 % at $s = 4$ Å⁻¹).
+
+The exchange coefficient was the next layer down. RMS relative difference in
+$f_x$ over $s$ = 0.1–6 Å⁻¹, scanning α:
+
+| α | Z=6 | Z=14 | Z=26 | Z=79 |
+| --- | --- | --- | --- | --- |
+| 1.000 (Slater) | 4.51 % | 1.94 % | 1.44 % | 0.72 % |
+| 0.750 | 2.36 % | 0.92 % | 0.43 % | 0.33 % |
+| **0.667 (Kohn–Sham, adopted)** | 2.62 % | 1.14 % | 0.43 % | 0.36 % |
+
+α = 1 is the worst value for every element, and the scan lands unprompted in the
+range Schwarz's Xα values occupy — so this is a physics choice, not a fit to the
+thing being compared against. Carbon is the outlier that remains, which is where
+the self-interaction error lives.
 
 Beyond $s \approx 3$ Å⁻¹ the comparison inverts: a sum of Gaussians decays as
 $\exp(-bs^2)$ while $f_e$ genuinely falls as $s^{-2}$, so the fits collapse and
