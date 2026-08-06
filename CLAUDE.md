@@ -28,6 +28,11 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
   **P2-1 (RlTable ループ入れ替え) は単一プロセス中立で未配備** — 次の長時間実行で
   フリート A/B してから判断
 - 未検証の高速化 16 案 = `docs/speedup_audit_2026-08-05.json` の verdict 無し項目
+- **2026-08-06: 球ベッセル Miller 規格化の 0/0 欠陥を修正** (`_jl_miller_scale`、閾値ガード
+  `J0_MIN = 1e-8`)。x ≈ nπ で j̃₀ が丸め誤差 (最悪ちょうど 0 → 出力全体が NaN) になり
+  全 λ が汚染される問題。**窓の外はビット同一**なので v3 出荷データとの整合は保たれる
+  (発火率 ~4.1e-8/規格化)。詳細は `計画書.md` §8.1、経緯は `docs/next_phase_2026-08-06.md` §3.1
+- **現状の残務・次の一手の正本 = `docs/next_phase_2026-08-06.md`** (P1 完了時点の引き継ぎ)
 - 次の物理 = v4 (完全 Dirac 連続・−Re(DX*)・ULTRA 求積) + M 殻。正本 =
   `ReciPro/.project-guidance/ReciPro/ReciPro_STEM-EDX_v4精度検討.md`。
   **M 殻は v4 処方確定後に同処方で生成する** (二度手間回避)
@@ -38,7 +43,8 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
   の二択。`@simd`/muladd/fma/総和順序変更は不可。`Base.sum()` は内部 @simd なので自前ループとの
   相互置換も不可。ntuple のクロージャにループ内再代入変数を捕まえさせない (Core.Box 化)
 - 検証: `julia -t auto src/ionization.jl selftest` (~10 s) / `refcheck` (~1 分) /
-  配備前は 5 チャネル === 比較。SCF キャッシュ (`atom_cache_*`) は物理変更時に手で消す
+  配備前は 5 チャネル === 比較 (`tools/bitident_snapshot.jl` を変更の**前後**で走らせて diff。
+  前を取り忘れると後から作れない)。SCF キャッシュ (`atom_cache_*`) は物理変更時に手で消す
 - Windows Julia の GC クラッシュ・wedged・監視の詳細 = `src/IMPORT.md`「既知の運用上の注意」
 - **プロセス並列 > スレッド並列** (8P×4T が 4P×8T の 2.26 倍)。長時間バッチの運用ノウハウは
   ReciPro 側メモリ `feedback_julia_batch_parallelism` と指示書 §3 に蓄積

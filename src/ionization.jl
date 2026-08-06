@@ -351,11 +351,44 @@ function (sp::Pchip)(xq::Float64)
     return h00 * y[i] + h10 * h * m[i] + h01 * y[i+1] + h11 * h * m[i+1]
 end
 
+# 260806Cl 修正: Miller 規格化の 0/0 ガード ------------------------------------
+# Miller の下方漸化は任意スケールの生値 j̃_l を返すので、既知の j_0 = sin(x)/x に
+# 合わせて全体を規格化する。ところが j_0 は x = nπ で零になり、そこでは生値 j̃_0 も
+# 「打ち消し残りの丸め誤差」そのものになる。係数 = j_0/j̃_0 は 0/0 の形になり、
+# **全 λ が同じ係数で汚染される**。相対誤差は ~ε_mach/|sin x| で効く
+# (実測: |x−nπ| = 0 で 0.06〜1.9 = 破綻、1e-9 で 1e-7、1e-6 で 5e-10)。
+#
+# 対策 = 閾値ガード。|j_0| が J0_MIN を切る窓でだけ j_1 = (j_0 − cos x)/x に
+# 乗り換える。j_0 と j_1 は x > 0 で同時に零にならず、x ≈ nπ では |j_1| ≈ 1/x と
+# 条件が良い (相対誤差 ~ε_mach)。
+#
+# ★ビット同一性: 窓の外は演算列が旧実装 `(sin(x)/x)/out[1]` と完全に一致するので
+#   **ビット同一**。壊れていた窓の中だけが変わる (§6「決定論バグの修正はビット互換に
+#   優先する」)。計画書 §8.1 の原案「j_0 と j_1 の大きい方で規格化」は全域で選択が
+#   変わり得てビット同一を広く失うため採らない。
+#
+# ★閾値: 窓の境界での相対誤差は ε_mach/(J0_MIN·x)。Miller 経路は x ≤ lmax+10 かつ
+#   |j_0| < J0_MIN は x ≳ π でしか起きないので、J0_MIN = 1e-8 で誤差 ≤ 7e-9 —
+#   求積精度 1e-6 の 2 桁下、物理許容 1e-10 と同オーダー。窓幅は |x−nπ| < 1e-8·x で
+#   被弾率 ~1e-7/評価。
+const J0_MIN = 1e-8
+
+"""Miller 生値 (raw0 = j̃_0, raw1 = j̃_1) を真の j_l に合わせる規格化係数。
+
+スカラー版 `sph_jl_all!` と 8 レーン版 `_jl8_miller!` が**共にこの関数を通る**ので、
+両者のビット一致は構造的に保証される (`tools/verify_simd_bessel.jl` で確認)。
+"""
+@inline function _jl_miller_scale(x::Float64, raw0::Float64, raw1::Float64)
+    j0 = sin(x) / x
+    abs(j0) >= J0_MIN && return j0 / raw0     # 通常経路 (旧実装とビット同一)
+    return ((j0 - cos(x)) / x) / raw1         # j_0 ≈ 0 の窓: j_1 で規格化
+end
+
 """球ベッセル関数 j_l(x) を l = 0..lmax まで一括計算して out に格納。
 
 x > lmax なら上方漸化 (安定域)。それ以外は Miller の下方漸化 +
-j_0 = sin(x)/x での規格化。scipy spherical_jn との差は ~1e-13 級
-(selftest T0 で照合)。
+j_0 = sin(x)/x での規格化 (j_0 ≈ 0 の窓は j_1、`_jl_miller_scale` 参照)。
+scipy spherical_jn との差は ~1e-13 級 (selftest T0 で照合)。
 """
 function sph_jl_all!(out::AbstractVector, lmax::Int, x::Float64)
     if x < 1e-12                           # j_l(0) = δ_l0
@@ -376,7 +409,7 @@ function sph_jl_all!(out::AbstractVector, lmax::Int, x::Float64)
         end
         return out
     end
-    # Miller: 十分高い次数から下方漸化し、j_0 で規格化
+    # Miller: 十分高い次数から下方漸化し、j_0 (窓内は j_1) で規格化
     M = lmax + 20 + ceil(Int, sqrt(40.0 * (lmax + 1)))
     jp = 0.0
     jc = 1e-30
@@ -394,7 +427,9 @@ function sph_jl_all!(out::AbstractVector, lmax::Int, x::Float64)
             end
         end
     end
-    scale = (sin(x) / x) / out[1]
+    # ループ終了時 (l=1 の後): jc = j̃_0 = out[1]、jp = j̃_1。途中リスケールは
+    # jc/jp/out を同時に縮小するので、両者は常に同じスケールに乗っている。
+    scale = _jl_miller_scale(x, out[1], jp)
     out .*= scale
     return out
 end
@@ -407,7 +442,8 @@ end
 # ★ビット同一性の設計 (スカラー版 sph_jl_all! と演算列を完全に一致させる):
 #   - 漸化は c/X*jc - jp の順 (div→mul→sub)。muladd/fma は丸めが変わるので不可
 #   - リスケールはレーン別マスク乗算。非該当レーンは ×1.0 = 恒等 (丸め誤差ゼロ)
-#   - 規格化 (sin(x)/x)/j0 もレーンごとにスカラーと同式
+#   - 規格化はレーンごとに `_jl_miller_scale` を呼ぶ (スカラー版と同一の関数。
+#     j_0 ≈ 0 の窓での j_1 乗り換えもレーン独立に同じ判定で起きる)
 #   - よってスカラー版と全ビット一致する (検証スクリプトで === を確認)
 #
 # ★ntuple のクロージャに「ループ内で再代入される変数」を捕捉させないこと。
@@ -424,7 +460,8 @@ const _T8 = NTuple{8,Float64}
     (abs(v[1]) > t) | (abs(v[2]) > t) | (abs(v[3]) > t) | (abs(v[4]) > t) |
     (abs(v[5]) > t) | (abs(v[6]) > t) | (abs(v[7]) > t) | (abs(v[8]) > t)
 @inline _mask8(v::_T8) = ntuple(j -> ifelse(abs(v[j]) > 1e250, 1e-200, 1.0), Val(8))
-@inline _scale8(X::_T8, j0::_T8) = ntuple(j -> (sin(X[j]) / X[j]) / j0[j], Val(8))
+@inline _scale8(X::_T8, r0::_T8, r1::_T8) =
+    ntuple(j -> _jl_miller_scale(X[j], r0[j], r1[j]), Val(8))
 @inline _j0_8(X::_T8) = ntuple(j -> sin(X[j]) / X[j], Val(8))
 @inline _j1_8(X::_T8) = ntuple(j -> sin(X[j]) / X[j]^2 - cos(X[j]) / X[j], Val(8))
 # 260805Cl 修正: 8 点グループの構築も引数渡しヘルパ経由にする。従来の
@@ -480,8 +517,9 @@ function _jl8_miller!(tab::Vector{Float64}, tile::Int, off::Int, lmax::Int, X::_
                 end
             end
         end
-        j0 = _ld8(p0)
-        s = _scale8(X, j0)
+        # r0 = j̃_0 (テーブル先頭)、jp = j̃_1 (ループ終了時の値。スカラー版と同じ)
+        r0 = _ld8(p0)
+        s = _scale8(X, r0, jp)
         for k in 1:lmax+1
             qp = p0 + (k - 1) * st
             _st8(qp, _mul8(_ld8(qp), s))
@@ -2658,6 +2696,29 @@ PureCoulomb() = PureCoulomb(1.0)
 V_for(p::PureCoulomb, eps) = r -> -1.0 / r
 r_match_for(p::PureCoulomb, eps; kw...) = 30.0
 
+"""T0c 用の高精度参照: BigFloat 512 bit で Miller 下方漸化 → j_0 で規格化。
+
+Float64 版と同じアルゴリズムだが、規格化の悪条件 (~ε/|sin x|) が 512 bit では
+2^-512/1e-16 ≈ 1e-138 に埋もれるので、x ≈ nπ でも参照値として使える。
+桁あふれの心配が無い (BigFloat の指数域) ので途中リスケールも不要。
+外部データを持ち込まずに済むのが利点 (公開リポの制約)。
+"""
+function _jl_bigfloat_ref(lmax::Int, x::Float64)
+    setprecision(BigFloat, 512) do
+        X = BigFloat(x)
+        M = lmax + 60 + ceil(Int, sqrt(200.0 * (lmax + 1)))
+        jp = zero(BigFloat)
+        jc = BigFloat(1) / BigFloat(10)^30
+        out = zeros(BigFloat, lmax + 1)
+        for l in M:-1:1
+            jm = (2l + 1) / X * jc - jp
+            jp, jc = jc, jm
+            l - 1 <= lmax && (out[l] = jm)
+        end
+        return Float64.(out .* ((sin(X) / X) / out[1]))
+    end
+end
+
 function selftest()
     t_start = time()
     bar = "="^64
@@ -2694,6 +2755,36 @@ function selftest()
     end
     @printf("[T0b] Coulomb F,G vs mpmath: max 誤差 = %.2e (|F|, G/F, Wronskian)\n", worst)
     @assert worst < 1e-10 "T0b FAIL"
+
+    # ---- T0c: 球ベッセルの零点近傍 — Miller 規格化ガードの回帰テスト ----
+    # j_0(x) ≈ 0 (x ≈ nπ) で規格化係数 j_0/j̃_0 が 0/0 になる欠陥 (計画書 §8.1)。
+    # 誤差は ~ε_mach/|sin x| で効くので、ガード発火域とその外で別々に見る。
+    # 判定量は「j_l 族の自然な大きさ (~1/x) で割った誤差」= R 積分に効く量。
+    # 規格化を j_1 に乗り換えた窓では j_0 単体の**相対**精度は保証されない
+    # (絶対誤差 ~ε/x。値自体が ~1e-17 なので R 積分には無影響)。
+    worst_g, worst_p, n_g, n_p = 0.0, 0.0, 0, 0
+    for n in (1, 2, 3, 5, 8, 12),
+        d in (0.0, 1e-12, -1e-12, 1e-9, -1e-9, 1e-6, -1e-6),
+        lmax in (0, 1, 40)
+
+        x = n * pi + d
+        x <= lmax + 10 || continue                 # Miller 経路のみが対象
+        got = zeros(lmax + 1)
+        sph_jl_all!(got, lmax, x)
+        ref = _jl_bigfloat_ref(lmax, x)
+        sc = max(maximum(abs, ref), 1.0 / x)
+        e = maximum(abs.(got .- ref)) / sc
+        if abs(sin(x) / x) < J0_MIN                # ガード発火 (j_1 で規格化)
+            worst_g = max(worst_g, e); n_g += 1
+        else                                       # 通常経路 (旧実装とビット同一)
+            worst_p = max(worst_p, e); n_p += 1
+        end
+    end
+    @printf("[T0c] 球ベッセル x≈nπ: ガード発火 %d 例 max %.2e / 非発火 %d 例 max %.2e\n",
+            n_g, worst_g, n_p, worst_p)
+    @assert n_g > 0 && n_p > 0 "T0c: 両経路を踏んでいない (テストが無効)"
+    @assert worst_g < 1e-12 "T0c FAIL (ガード発火域)"
+    @assert worst_p < 1e-8 "T0c FAIL (窓の外: ε/(J0_MIN·x) の上界を超過)"
 
     # ---- T1: 水素 1s。E = −0.5 Ha, u = 2r e^{−r} ----
     E, r_b, u_b = solve_bound(coulomb_V(1.0), 0, 0)
