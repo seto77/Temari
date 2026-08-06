@@ -10,6 +10,43 @@
 # S(Q,Q',ε) = q_nl Σ_{l'}(2l'+1) Σ_λ(2λ+1) [3j(λ,l,l';000)]² R R' P_λ(cosΘ)
 # R_{l'λ}(Q) = ∫ u_{εl'} j_λ(Qr) u_{nl} dr。l=0 で教科書の K 殻式に厳密退化。
 
+"""一般の Wigner 3j 記号 (整数角運動量のみ) の Racah 式。BigInt 有理数 + 平方根で
+評価するので、階乗のオーバーフローも桁落ちも無い。
+
+    3j(j1 j2 j3; m1 m2 m3) = (−1)^(j1−j2−m3) √Δ √Π Σ_t (−1)^t / (分母の階乗の積)
+    Δ = (j1+j2−j3)!(j1−j2+j3)!(−j1+j2+j3)! / (j1+j2+j3+1)!
+    Π = (j1+m1)!(j1−m1)!(j2+m2)!(j2−m2)!(j3+m3)!(j3−m3)!
+
+厳密交換の**同一副殻・同一 m** の自己項に必要 (`d_selfsum`)。m=0 の場合は
+`threej000_sq` と一致しなければならず、selftest T17 で照合する。"""
+function wigner3j(j1::Int, j2::Int, j3::Int, m1::Int, m2::Int, m3::Int)
+    (m1 + m2 + m3 == 0) || return 0.0
+    (abs(m1) <= j1 && abs(m2) <= j2 && abs(m3) <= j3) || return 0.0
+    (j3 >= abs(j1 - j2) && j3 <= j1 + j2) || return 0.0
+    ft(k) = factorial(big(k))
+    Δ = ft(j1 + j2 - j3) * ft(j1 - j2 + j3) * ft(-j1 + j2 + j3) // ft(j1 + j2 + j3 + 1)
+    Π = ft(j1 + m1) * ft(j1 - m1) * ft(j2 + m2) * ft(j2 - m2) *
+        ft(j3 + m3) * ft(j3 - m3)
+    tlo = max(0, j2 - j3 - m1, j1 - j3 + m2)
+    thi = min(j1 + j2 - j3, j1 - m1, j2 + m2)
+    s = zero(Rational{BigInt})
+    for t in tlo:thi
+        d = ft(t) * ft(j3 - j2 + m1 + t) * ft(j3 - j1 - m2 + t) *
+            ft(j1 + j2 - j3 - t) * ft(j1 - m1 - t) * ft(j2 + m2 - t)
+        s += (isodd(t) ? -1 : 1) // d
+    end
+    s == 0 && return 0.0
+    sgn = isodd(j1 - j2 - m3) ? -1.0 : 1.0
+    return sgn * sqrt(Float64(Δ * Π)) * Float64(s)
+end
+
+"""D_k(l) = Σ_m [3j(l k l; −m, 0, m)]²。
+
+厳密交換の**同一副殻の自己項** (m = m′) に掛かる角度因子。球平均のために m の
+選び方を平均すると、⟨n(m)n(m′)⟩ = f² + δ_{mm′}(f − f²) となり、この δ 部分に
+D_k が付く。k=0 では 3j が m について対角で D_0(l) = 1 (解析的)。"""
+d_selfsum(k::Int, l::Int) = sum(wigner3j(l, k, l, -m, 0, m)^2 for m in -l:l)
+
 """[3j(l1,l2,l3;0,0,0)]² の Racah 閉形式。有理数 (BigInt) で厳密に評価
 (float の階乗は l≳73 でオーバーフロー — 本番 l_cap=96 はその領域)。"""
 function threej000_sq(l1::Int, l2::Int, l3::Int)

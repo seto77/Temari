@@ -142,6 +142,30 @@ function exchange_gk(P::Vector{Vector{Float64}}, l::Vector{Int},
     return trapz(P[a] .* P[b] .* y ./ r, r)          # G^k(ab)
 end
 
+"""厳密交換の係数 W^k_{ab}。E_x = −(1/2) Σ_{ab} Σ_k c^k(l_a,l_b) W^k_{ab} G^k(ab)。
+
+第 1 項 q_a q_b / 2 が平均配置 (占有を先に平均する扱い) の係数。第 2 項が
+**整数占有の自己項補正** (260807Cl)。
+
+由来: 球平均のために「どの m を占めるか」の選び方を平均すると、同一副殻では
+⟨n(m)n(m′)⟩ = f² + δ_{mm′}(f − f²) となる。**⟨n²⟩ = ⟨n⟩ であって ⟨n⟩² ではない**
+— 占有は整数だから。この δ 部分に付く角度因子は
+D_k(l) = Σ_m [3j(l k l;−m,0,m)]² = **1/(2k+1)** (l に依らない。`d_selfsum` で確認)。
+不偏スピンの f = q/(2(2l+1)) を入れて整理すると補正は
+
+    δ_{ab} [ (2l_a+1) q_a − q_a²/2 ] / (2k+1)
+
+**この 1 項で 3 つが同時に正しくなる**:
+  * 1 電子 (q=1, l=0): W⁰ = 1 → E_x = −F⁰/2 = 厳密な自己相互作用の完全相殺
+  * 閉殻 (q = 2(2l+1)): 補正 = 0 (既に整数占有なので何も変わらない)
+  * 開殻の遠方漸近: V_x·r → −1 (補正前は −q/(2(2l+1)))
+スピン分極は不要 — Σ_σ(f^σ − f^σ²) は同じ q なら分極の仕方に依らないため。"""
+function exchange_weight(k::Int, a::Int, b::Int, q::Vector{Float64}, l::Vector{Int})
+    w = 0.5 * q[a] * q[b]
+    a == b && (w += ((2 * l[a] + 1) * q[a] - 0.5 * q[a]^2) / (2k + 1))
+    return w
+end
+
 function exchange_energy_x(P::Vector{Vector{Float64}}, q::Vector{Float64},
                            l::Vector{Int}, r::AbstractVector{Float64})
     ex = 0.0
@@ -149,7 +173,8 @@ function exchange_energy_x(P::Vector{Vector{Float64}}, q::Vector{Float64},
         for k in 0:(l[a]+l[b])
             c = threej000_sq(l[a], k, l[b])
             c == 0.0 && continue
-            ex -= 0.25 * q[a] * q[b] * c * exchange_gk(P, l, r, a, b, k)
+            ex -= 0.5 * c * exchange_weight(k, a, b, q, l) *
+                  exchange_gk(P, l, r, a, b, k)
         end
     end
     return ex
@@ -175,7 +200,9 @@ function orbital_exchange_weights(P::Vector{Vector{Float64}}, q::Vector{Float64}
             c = threej000_sq(l[a], k, l[b])
             c == 0.0 && continue
             y = ykr(k, P[a], P[b], r)
-            @. w[a] -= 0.5 * q[b] * c * P[a] * P[b] * y / r
+            # u_{x,a}P_a = (1/(2q_a)) δE_x/δP_a = −(1/q_a) Σ_b Σ_k c^k W^k_{ab} P_b Y^k/r
+            f = c * exchange_weight(k, a, b, q, l) / q[a]
+            @. w[a] -= f * P[a] * P[b] * y / r
         end
     end
     return w

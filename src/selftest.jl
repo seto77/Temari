@@ -402,6 +402,12 @@ function selftest()
         vh2 = hartree(r, 2 .* P1s .^ 2 ./ (4pi .* r .^ 2))
         sel = r .< 25.0
         e_a = maximum(abs.(vx2[sel] .+ vh2[sel] ./ 2)) / maximum(abs.(vh2))
+        # 1 電子 (q=1) は**一般式から**厳密な完全相殺が出なければならない
+        # (整数占有の自己項補正が入って初めて成立する。補正前は −V_H/2 だった)
+        vx1 = slater_exchange_potential([P1s], [1.0], [0], r)
+        vh1 = hartree(r, P1s .^ 2 ./ (4pi .* r .^ 2))
+        e_a1 = maximum(abs.(vx1[sel] .+ vh1[sel])) / maximum(abs.(vh1))
+        @assert e_a1 < 1e-13 "T15 FAIL: 1 電子で厳密交換が Hartree を完全相殺しない"
         # 閉殻原子 (Ne) の漸近と E_x の突合
         at = SCFAtom(10, ORBITALS[10]; latter_charge=1.0)
         ks = sort(collect(keys(at.orbitals)))
@@ -428,11 +434,11 @@ function selftest()
     # ---- T16: 軌道交換ポテンシャルの係数と、KLI / 開殻の漸近 ----
     # 段階 3。u_{x,a} には規約由来の 1/2 が付く (δE/δP_a = 2q_aε_aP_a)。落とすと
     # Slater ポテンシャルと 2 倍食い違うので、恒等式 **Σ_a q_a ū_a = 2E_x** で固定する。
-    # あわせて、平均配置の漸近が閉殻でのみ −1/r になることを 2 元素で明示する:
-    #   V_x·r → −q_h/(2(2l_h+1))   (h = 最外殻)
-    # Ne (2p⁶ 閉) は −1、C (2p² 開) は −1/3。**これが炭素が全測定で最悪だった理由**で、
-    # 交換の汎関数ではなく球平均・分数占有という枠組みの限界 (診断書の案 B/C)。
-    for (z, want) in ((10, -1.0), (6, -1.0 / 3.0))
+    # あわせて **整数占有の自己項補正 (exchange_weight の第 2 項) が効いていること**を、
+    # 遠方漸近 V_x·r → −1 で確認する。補正前は −q_h/(2(2l_h+1)) で、C (2p²) は −1/3、
+    # Au (6s¹) は −1/2 にしかならなかった。**閉殻・開殻を問わず −1 になるのが要点**で、
+    # これが Latter 補正を捨てられる根拠 (docs/exchange_diagnosis_2026-08-07.md)。
+    for (z, want) in ((10, -1.0), (6, -1.0), (79, -1.0))
         at = SCFAtom(z, ORBITALS[z]; latter_charge=1.0)
         ks = sort(collect(keys(at.orbitals)))
         P = [at.orbitals[k] for k in ks]
