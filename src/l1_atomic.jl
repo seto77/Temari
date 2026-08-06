@@ -155,22 +155,79 @@ function exchange_energy_x(P::Vector{Vector{Float64}}, q::Vector{Float64},
     return ex
 end
 
-function slater_exchange_potential(P::Vector{Vector{Float64}}, q::Vector{Float64},
-                                   l::Vector{Int}, r::AbstractVector{Float64})
-    num = zeros(length(r))
+"""軌道 a の交換ポテンシャルに動径密度を掛けたもの w_a(r) ≡ P_a(r)² u_{x,a}(r)。
+
+軌道方程式に入る交換ポテンシャルは、規格化の Lagrange 条件 δE/δP_a = 2q_aε_aP_a から
+
+    u_{x,a}(r) P_a(r) = (1/(2q_a)) δE_x/δP_a(r)
+                      = −(1/2) Σ_b q_b Σ_k c^k(l_a,l_b) P_b(r) Y^k(ab;r)/r
+
+⚠ **1/2 を落とすと Slater ポテンシャルと 2 倍食い違う。** 恒等式
+Σ_a q_a ū_{x,a} = 2E_x (ū = ∫P²u dr) がこの係数を固定する (selftest T16)。
+
+⚠ u_{x,a} 自体は P_a の節で 0/0 になる。**必要なのは常に P_a² u_{x,a} の形**
+(Slater ポテンシャルの分子も ū_a も) なので、割り算を経由せずこの量を返す。"""
+function orbital_exchange_weights(P::Vector{Vector{Float64}}, q::Vector{Float64},
+                                  l::Vector{Int}, r::AbstractVector{Float64})
+    w = [zeros(length(r)) for _ in eachindex(P)]
     for a in eachindex(P), b in eachindex(P)
         for k in 0:(l[a]+l[b])
             c = threej000_sq(l[a], k, l[b])
             c == 0.0 && continue
             y = ykr(k, P[a], P[b], r)
-            @. num -= 0.5 * q[a] * q[b] * c * P[a] * P[b] * y / r
+            @. w[a] -= 0.5 * q[b] * c * P[a] * P[b] * y / r
         end
     end
-    den = zeros(length(r))
-    for a in eachindex(P)
-        @. den += q[a] * P[a]^2
-    end
+    return w
+end
+
+"動径密度 ρ̃(r) = Σ_a q_a P_a(r)² (= 4πr²ρ)"
+radial_density(P::Vector{Vector{Float64}}, q::Vector{Float64}) =
+    sum(q[a] .* P[a] .^ 2 for a in eachindex(P))
+
+function slater_exchange_potential(P::Vector{Vector{Float64}}, q::Vector{Float64},
+                                   l::Vector{Int}, r::AbstractVector{Float64})
+    w = orbital_exchange_weights(P, q, l, r)
+    num = sum(q[a] .* w[a] for a in eachindex(P))
+    den = radial_density(P, q)
     return @. num / max(den, 1e-300)
+end
+
+"""KLI 近似の厳密交換ポテンシャル (Krieger–Li–Iafrate 1992)。
+
+    V_x^KLI(r) = V_x^S(r) + (1/ρ̃(r)) Σ_a q_a P_a(r)² Δ_a,   Δ_a = V̄_{x,a} − ū_{x,a}
+
+定数 Δ_a は自己無撞着条件 V̄_{x,j} = ∫P_j² V_x^KLI dr から
+
+    Σ_a (δ_{ja} − M_{ja}) Δ_a = S_j − ū_{x,j},
+    M_{ja} = ∫ q_a P_j² P_a² / ρ̃ dr,  S_j = ∫ P_j² V_x^S dr
+
+で決まる。Σ_a M_{ja} = 1 なので系は 1 次元だけ不定 — **最外殻の Δ を 0 に固定**する
+のが KLI の処方で、これが遠方漸近を −1/r に保つ (`i_homo` で指定)。
+
+`i_homo` を省略すると固有値 `eps_orb` が最大 (最も浅い) 軌道を採る。"""
+function kli_exchange_potential(P::Vector{Vector{Float64}}, q::Vector{Float64},
+                                l::Vector{Int}, r::AbstractVector{Float64},
+                                eps_orb::Vector{Float64};
+                                i_homo::Union{Nothing,Int}=nothing)
+    n = length(P)
+    w = orbital_exchange_weights(P, q, l, r)
+    rho = radial_density(P, q)
+    vs = [q[a] * w[a] for a in eachindex(P)]
+    v_slater = sum(vs) ./ max.(rho, 1e-300)
+    ubar = [trapz(w[a], r) for a in 1:n]                  # ∫P_a² u_a dr
+    S = [trapz(P[a] .^ 2 .* v_slater, r) for a in 1:n]
+    h = i_homo === nothing ? argmax(eps_orb) : i_homo
+    idx = [a for a in 1:n if a != h]                      # Δ_homo = 0 で固定
+    Δ = zeros(n)
+    if !isempty(idx)
+        M = [trapz(q[b] .* P[a] .^ 2 .* P[b] .^ 2 ./ max.(rho, 1e-300), r)
+             for a in idx, b in idx]
+        rhs = [S[a] - ubar[a] for a in idx]
+        Δ[idx] = (I - M) \ rhs
+    end
+    corr = sum(q[a] * Δ[a] .* P[a] .^ 2 for a in 1:n) ./ max.(rho, 1e-300)
+    return v_slater .+ corr, v_slater, Δ
 end
 
 "Slater 局所交換 −(3/2)(3ρ/π)^(1/3)"

@@ -425,6 +425,33 @@ function selftest()
         @assert e_c < 1e-6 "T15 FAIL: E_x の 2 経路が食い違う"
     end
 
+    # ---- T16: 軌道交換ポテンシャルの係数と、KLI / 開殻の漸近 ----
+    # 段階 3。u_{x,a} には規約由来の 1/2 が付く (δE/δP_a = 2q_aε_aP_a)。落とすと
+    # Slater ポテンシャルと 2 倍食い違うので、恒等式 **Σ_a q_a ū_a = 2E_x** で固定する。
+    # あわせて、平均配置の漸近が閉殻でのみ −1/r になることを 2 元素で明示する:
+    #   V_x·r → −q_h/(2(2l_h+1))   (h = 最外殻)
+    # Ne (2p⁶ 閉) は −1、C (2p² 開) は −1/3。**これが炭素が全測定で最悪だった理由**で、
+    # 交換の汎関数ではなく球平均・分数占有という枠組みの限界 (診断書の案 B/C)。
+    for (z, want) in ((10, -1.0), (6, -1.0 / 3.0))
+        at = SCFAtom(z, ORBITALS[z]; latter_charge=1.0)
+        ks = sort(collect(keys(at.orbitals)))
+        P = [at.orbitals[k] for k in ks]
+        qv = [first(x[3] for x in at.occ if (x[1], x[2]) == k) for k in ks]
+        lv = [k[2] for k in ks]
+        ep = [at.eps[k] for k in ks]
+        w = orbital_exchange_weights(P, qv, lv, at.r)
+        ident = sum(qv[i] * trapz(w[i], at.r) for i in eachindex(P)) /
+                (2 * exchange_energy_x(P, qv, lv, at.r))
+        vk, vs, Δ = kli_exchange_potential(P, qv, lv, at.r, ep)
+        i20 = findmin(abs.(at.r .- 20.0))[2]
+        asy = vk[i20] * at.r[i20]
+        @printf("[T16] Z=%2d: Σq·ū/2E_x = %.10f / KLI 漸近 r·V = %+.5f (予測 %+.4f) / Δ_HOMO = %.1e\n",
+                z, ident, asy, want, abs(Δ[argmax(ep)]))
+        @assert abs(ident - 1.0) < 1e-9 "T16 FAIL: u_x の 1/2 係数が違う (Σq·ū = 2E_x)"
+        @assert abs(asy - want) < 0.01 "T16 FAIL: 漸近が −q_h/(2(2l_h+1))/r でない"
+        @assert abs(Δ[argmax(ep)]) < 1e-14 "T16 FAIL: KLI が Δ_HOMO = 0 を守っていない"
+    end
+
     # ---- T13b: 交換係数が二重に掛かっていないこと ----
     # 260807Cl に実際にやらかした事故の回帰テスト。`slater_vx` に X_ALPHA を
     # 畳み込んだ結果、終状態ポテンシャル (第 5 章、KS 2/3) が (2/3)·α になり、
