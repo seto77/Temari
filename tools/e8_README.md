@@ -46,8 +46,8 @@ ie 単独添字: `dNde[ie, :]` / `match_resid[ie]` / `ortho[ie]` / `l_used[ie]`
 ## 待ち伏せの回し方 (⚠ フリート A/B 完了・許可後)
 
 ```powershell
-powershell -File tools\e8_stakeout.ps1                 # 16P×2T, 2 標的 (Z6 K E275 + Z38 L3 E40) を 8+8, 2h 上限
-powershell -File tools\e8_stakeout.ps1 -Targets "38:L3:40" -Workers 8 -MaxHours 0.5
+pwsh -File tools\e8_stakeout.ps1                 # 16P×2T, 2 標的 (Z6 K E275 + Z38 L3 E40) を 8+8, 2h 上限
+pwsh -File tools\e8_stakeout.ps1 -Targets "38:L3:40" -Workers 8 -MaxHours 0.5
 ```
 
 - 標的は `-Targets "Z:ch:E0[,Z:ch:E0...]"` でラウンドロビン配分。既定は
