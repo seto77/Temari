@@ -12,11 +12,11 @@ These quantities exist inside the current call graph and are discarded before
 returning. Exposing them is output plumbing, not physics — which is why they
 come first.
 
-| Quantity | Where it already is |
-| --- | --- |
-| **EELS core-loss dσ/dΔE** | The `diag.dNde` matrix (ε node × K node). Its K = 0 column, times $4\gamma^2 a_0^2$, *is* the parallel-illumination dσ/dε. |
-| **Elastic phase shifts $\delta_l$** | The continuum solver least-squares fits the tail to $u \approx a F_l + b G_l$. Then $\delta_l = \mathrm{atan2}(b, a)$. |
-| **Inner-shell stopping power** | One contraction of `diag.dNde` with the ε quadrature weights. |
+| Quantity | Where it already is | Status |
+| --- | --- | --- |
+| **EELS core-loss dσ/dΔE** | The `diag.dNde` matrix (ε node × K node). Its K = 0 column, times $4\gamma^2 a_0^2$, *is* the parallel-illumination dσ/dε. | **done** — `edge` subcommand |
+| **Inner-shell stopping power** | One contraction of `diag.dNde` with the ε quadrature weights. | **done** — reported by `edge` |
+| **Elastic phase shifts $\delta_l$** | The continuum solver least-squares fits the tail to $u \approx a F_l + b G_l$. Then $\delta_l = \mathrm{atan2}(b, a)$. | next — the fit keeps only $\sqrt{a^2+b^2}$ today, so $(a, b)$ has to be retained |
 
 ## Small to medium effort
 

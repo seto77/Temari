@@ -17,16 +17,18 @@ dependency order, plus the command line. There is no Julia `module`, so
 ```text
 julia -t auto src/ionization.jl selftest
 julia -t auto src/ionization.jl refcheck
-julia -t auto src/ionization.jl <Z> <channel> <E0_keV> [--quick|--high] [--rel] [--s ...] [--json <path>]
+julia -t auto src/ionization.jl      <Z> <channel> <E0_keV> [--quick|--high] [--rel] [--s ...] [--json <path>]
+julia -t auto src/ionization.jl edge <Z> <channel> <E0_keV> [--quick|--high] [--rel] [--json <path>]
 ```
 
 ### Subcommands
 
 | Subcommand | What it does | Time |
 | --- | --- | --- |
-| `selftest` | The analytic ladder T0–T8. Failures are assertions; a non-zero exit is a real failure. | ~10 s |
+| `selftest` | The analytic ladder T0–T9. Failures are assertions; a non-zero exit is a real failure. | ~10 s |
 | `refcheck` | Compares against `src/reference_values.json`, the values produced by the independent Python implementation. Prints `WORST vs Python`. | ~1 min |
-| *(none)* | Compute one channel: `<Z> <channel> <E0_keV>`. | seconds to minutes |
+| *(none)* | The **F(s, E₀) exit**: compute one channel on an s grid. | seconds to minutes |
+| `edge` | The **dσ/dΔE exit**: the EELS core-loss edge shape and the inner-shell stopping-power contribution, at K = 0. | cheaper than the above — one K node instead of the whole s grid |
 
 `refcheck` reports but does not gate — it always exits 0. To gate it (as CI
 does), call the function and inspect the return value:
@@ -51,7 +53,7 @@ julia -e 'include("src/ionization.jl"); exit(refcheck() < 1e-5 ? 0 : 1)'
 | `--high` | HIGH quadrature: denser ε nodes, doubled angular quadrature, finer radial mesh. This is what production tables use. |
 | *(neither)* | The intermediate default (PROD). |
 | `--rel` | Scalar-relativistic continuum (model id `...DiracB-SRC...v3`). Without it, the continuum is non-relativistic (`...v2`). |
-| `--s s1 s2 ...` | Explicit s nodes in Å⁻¹, replacing the default grid. Consumes every following argument until the next `--`. |
+| `--s s1 s2 ...` | Explicit s nodes in Å⁻¹, replacing the default grid. Consumes every following argument until the next `--`. F(s) exit only — `edge` evaluates K = 0 alone. |
 | `--json <path>` | Write the full result object to `<path>` as JSON. |
 
 The two model ids are printed at the start of every run and stored in the JSON
@@ -63,6 +65,36 @@ output; they identify the prescription, not the quadrature.
 the small-component norm fraction, both cross sections, the elapsed time, the
 model id, and the `diag` block with the convergence diagnostics. This file is
 the engine's contract with everything downstream — the GUI reads nothing else.
+
+### The `edge` exit
+
+```bash
+julia +1.11 -t auto src/ionization.jl edge 26 K 200 --rel --json fe_k_edge.json
+```
+
+Same prescription, same solvers, same diagnostics as the F(s) run — only the
+reporting differs. Instead of collapsing the emitted-electron energy ε and
+normalizing in K, it reports the integrand itself at K = 0:
+
+| Key | Meaning |
+| --- | --- |
+| `dE_eV` | Energy loss ΔE = E_th + ε on the ε quadrature nodes, ascending |
+| `dsdE_nm2_per_eV` | dσ/dΔE in nm²/eV |
+| `quad_weight_eV` | The quadrature weights, so that Σ w · dσ/dΔE reproduces σ |
+| `stopping_nm2_eV` | ∫ ΔE dσ/dΔE dΔE — this channel's contribution to the stopping power, per atom. Multiply by the atomic number density to get dE/dx. |
+| `mean_loss_eV` | ∫ΔE dσ / σ, necessarily above the edge |
+| `sigma_closure_rel` | Relative mismatch between Σ w · dσ/dΔE and σ_own, a numerical check on an identity. Expect ~10⁻¹⁶. |
+
+Two things to know before using the numbers. The ε nodes are placed to make the
+*integral* converge quickly, not to draw a curve — they cluster hard at the edge
+and stretch to ΔE = T₀ — which is why the weights are shipped alongside the
+values. And the normalization inherits exactly the verification status of
+`sigma_own_nm2`: what is new here is the shape, not the scale.
+
+This is an isolated atom in a mean field, first Born, one inner-shell channel.
+There are no multiplets and no solid-state density of states, so the near-edge
+structure (ELNES) is outside the model; the smooth tail from roughly 20 eV above
+the edge is what it is for.
 
 ### Threads
 

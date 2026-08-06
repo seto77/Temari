@@ -41,6 +41,7 @@ direct–exchange 干渉項 −Re(DX*) なし / 孤立原子 (化学状態依存
     julia -t auto ionization.jl selftest             # 解析解に対する自己検証
     julia -t auto ionization.jl 26 K 200 --quick     # Fe K 殻 @200 kV (粗い求積)
     julia -t auto ionization.jl 79 L3 300 --json out.json
+    julia -t auto ionization.jl edge 26 K 200        # EELS 出口 dσ/dΔE (K=0 のみ)
 
 `-t auto` で ε ノードがスレッド並列になります (Python 版の multiprocessing
 に相当。省略すると逐次)。初回はその元素の SCF を解き、atom_cache_jl_*.jls
@@ -78,20 +79,34 @@ include(joinpath(@__DIR__, "l1_atomic.jl"))
 include(joinpath(@__DIR__, "l2_continuum.jl"))
 include(joinpath(@__DIR__, "l3_radial.jl"))
 include(joinpath(@__DIR__, "l4_angular.jl"))
-include(joinpath(@__DIR__, "l5_exit_edx.jl"))
+include(joinpath(@__DIR__, "l5_channel.jl"))    # 出口に依らない基盤
+include(joinpath(@__DIR__, "l5_exit_edx.jl"))   # 出口: F(s, E0)
+include(joinpath(@__DIR__, "l5_exit_eels.jl"))  # 出口: dσ/dΔE と阻止能寄与
 include(joinpath(@__DIR__, "selftest.jl"))
 
 # ====================================================================
 # 第 10 章  コマンドライン
 # ====================================================================
 
+const USAGE = """
+使い方:
+  julia -t auto ionization.jl selftest
+  julia -t auto ionization.jl refcheck
+  julia -t auto ionization.jl      Z channel E0keV [opts]   # F(s) 出口 (EDX)
+  julia -t auto ionization.jl edge Z channel E0keV [opts]   # dσ/dΔE 出口 (EELS)
+
+opts: [--quick|--high] [--rel] [--s s1 s2 ...] [--json path]
+      --s は F(s) 出口のみ (edge は K=0 の 1 点で、その分だけ安い)"""
+
 function main_(args)
     if isempty(args)
-        println("使い方: julia -t auto ionization.jl selftest | refcheck | Z channel E0keV [--quick|--high] [--rel] [--s ...] [--json path]")
+        println(USAGE)
         return 1
     end
     args[1] == "selftest" && return selftest()
     args[1] == "refcheck" && (refcheck(); return 0)
+    edge_mode = args[1] == "edge"                # 260806Cl: EELS 出口
+    edge_mode && (args = args[2:end])
     length(args) >= 3 || error("Z channel E0keV の 3 つを指定 (例: 26 K 200)")
     z = parse(Int, args[1])
     tag = uppercase(args[2])
@@ -116,17 +131,31 @@ function main_(args)
         i += 1
     end
     settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
-    println("Z=$z $tag @ $e0 keV   処方: ", rel ? MODEL_ID_REL : MODEL_ID)
+    println("Z=$z $tag @ $e0 keV   出口: ", edge_mode ? "dσ/dΔE (EELS)" : "F(s) (EDX)",
+            "   処方: ", rel ? MODEL_ID_REL : MODEL_ID)
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
             "   スレッド: ", Threads.nthreads())
     println("初回はこの元素の SCF を解くため時間がかかります (atom_cache_jl_*.jls に保存)...")
-    o = compute_channel(z, tag, e0; settings=settings, s_nodes=s_nodes,
+    o = edge_mode ?
+        compute_edge(z, tag, e0; settings=settings, rel_continuum=rel) :
+        compute_channel(z, tag, e0; settings=settings, s_nodes=s_nodes,
                         rel_continuum=rel)
     @printf("\n完了 (%.0f s)   E_bound = %.1f eV (小成分ノルム比 %.4f)\n",
             o["elapsed_s"], o["E_bound_eV"], o["small_component_fraction"])
-    @printf("\n%10s  %15s\n", "s [1/Å]", "F(s)")
-    for (s, F) in zip(o["s_nodes_A_inv"], o["F"])
-        @printf("%10.3f  %15.8e\n", s, F)
+    if edge_mode
+        @printf("\n%12s  %18s\n", "ΔE [eV]", "dσ/dΔE [nm²/eV]")
+        for (dE, ds) in zip(o["dE_eV"], o["dsdE_nm2_per_eV"])
+            @printf("%12.2f  %18.8e\n", dE, ds)
+        end
+        @printf("\n阻止能寄与 ∫ΔE dσ/dΔE dΔE = %.6e nm²·eV  (平均損失 %.1f eV)\n",
+                o["stopping_nm2_eV"], o["mean_loss_eV"])
+        @printf("σ の閉包検査 |Σw·dσ/dΔE − σ_own|/σ_own = %.2e (恒等式。~1e-15 が期待値)\n",
+                o["sigma_closure_rel"])
+    else
+        @printf("\n%10s  %15s\n", "s [1/Å]", "F(s)")
+        for (s, F) in zip(o["s_nodes_A_inv"], o["F"])
+            @printf("%10.3f  %15.8e\n", s, F)
+        end
     end
     @printf("\nσ (Bote–Salvat, 出荷値)   = %.6e nm²\n", o["sigma_bote_nm2"])
     @printf("σ (自前 N0, 健全性の目安) = %.6e nm²  (比 %.4f%s)\n", o["sigma_own_nm2"],

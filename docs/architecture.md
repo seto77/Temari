@@ -31,11 +31,14 @@ concatenating the files in include order reproduces a single-file build.
 | `l2_continuum.jl` | L2 | `ContinuumSet` — distorted waves, energy normalization, Coulomb matching, orthogonalization, the scalar-relativistic option |
 | `l3_radial.jl` | L3 | `RlTable` — the multipole integrals and their PCHIP interpolation |
 | `l4_angular.jl` | L4 | 3j symbols, Legendre recursion, MDFF assembly |
-| `l5_exit_edx.jl` | L5 | the ε quadrature, the per-ε driver, the N(K) contraction, Bote–Salvat absolute cross sections, the (Z, shell, E₀) pipeline |
-| `selftest.jl` | — | the T0–T8 ladder and `refcheck` |
+| `l5_channel.jl` | L5 | everything an exit shares: the channel table, the SCF/Dirac caches, `prepare_channel`, the ε quadrature, the per-ε driver, the N(K) contraction, Bote–Salvat absolute cross sections |
+| `l5_exit_edx.jl` | L5 | the F(s, E₀) exit — K on an s grid, reported as N(K)/N(0) |
+| `l5_exit_eels.jl` | L5 | the dσ/dΔE exit — K = 0 only, reported as an edge shape plus the stopping-power contraction |
+| `selftest.jl` | — | the T0–T9 ladder and `refcheck` |
 
-Only `l5_exit_edx.jl` knows what is being reported. A second exit is a file
-next to it, not a change to anything below.
+Only the `l5_exit_*.jl` files know what is being reported. A second exit is a
+file next to them, not a change to anything below: `l5_exit_eels.jl` was added
+without touching L0–L4 at all.
 
 ## The two axes that vary
 
@@ -74,7 +77,7 @@ returning. Exposing them is an output-plumbing change, not physics:
 
 - **`diag.dNde`** — an (ε node × K node) matrix. Its K = 0 column, times
   4γ²a₀², is the parallel-illumination EELS dσ/dε. Edge shapes for essentially
-  no work.
+  no work. **Exposed** as the `edge` subcommand (`l5_exit_eels.jl`).
 - **The asymptotic fit coefficients** — the continuum solver least-squares fits
   the tail to u ≈ a·F_l + b·G_l. The elastic phase shift is δ_l = atan2(b, a).
 - **The ε quadrature weights** alongside `dNde` — one contraction gives the
@@ -100,6 +103,15 @@ Two rules, learned the hard way:
    always allowed. `@simd` reductions, reassociation, and fast-math are not —
    they may only be introduced together with a full table regeneration, and
    must be declared in the dataset manifest.
+
+   A corollary worth knowing: the final contraction `N = dNde' * we` is a BLAS
+   `gemv`, and **its reduction order depends on the shape of the matrix**. Ask
+   for one K node and you get N(0) one ULP away from the value the same run
+   produces when you ask for seventeen — the per-ε physics (`dNde[:, 1]`) is
+   bit-identical either way, and summing those same numbers by hand reproduces
+   both. This is deterministic shape dependence, not the load-dependent
+   nondeterminism discussed under E8. It does not touch the shipped tables,
+   which are always generated on the same s grid.
 2. **Measure, do not assume.** Several plausible optimizations measured at or
    near 1.0× on this workload: hoisting a reciprocal out of a recurrence
    (latency-bound dependency chain), `--heap-size-hint` (the live set is small,

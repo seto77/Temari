@@ -170,6 +170,23 @@ function selftest()
     @printf("[T5] H K σ @100 keV: 自前=%.4e nm²  Bote=%.4e nm²  比=%.3f\n", sig, ref, sig / ref)
     @assert 0.85 < sig / ref < 1.15 "T5 FAIL"
 
+    # ---- T9: EELS 出口 dσ/dΔE (T5 の計算を再利用。追加コストなし) ----
+    # 新しい物理ではなく「ε で潰す前の被積分関数」を報告する出口なので、
+    # 検査は (a) 恒等式 ∫dσ/dΔE dΔE = σ_own が数値的に閉じること、
+    # (b) 形が物理的に成立すること (正値・端で最大・上端で位相空間消滅)、
+    # (c) 平均損失が閾値以上、の 3 点。絶対値は T5 が Bote に対して既に見ている。
+    ee = eels_from_NK(N, diag, E_th, T0)
+    dsd = ee.dsdE_nm2_per_eV
+    @printf("[T9] EELS 出口 (H K @100 keV): 閉包 %.2e / 平均損失 %.1f eV (端 %.1f eV) / 阻止能寄与 %.3e nm²·eV\n",
+            ee.sigma_closure_rel, ee.mean_loss_eV, E_th * HARTREE_EV,
+            ee.stopping_nm2_eV)
+    @assert ee.sigma_closure_rel < 1e-12 "T9 FAIL: σ の閉包が壊れている"
+    @assert all(>(0.0), dsd) "T9 FAIL: dσ/dΔE に非正値"
+    @assert argmax(dsd) == 1 "T9 FAIL: 端直上が最大でない"
+    @assert dsd[end] < 1e-3 * dsd[1] "T9 FAIL: 上端 (k_f→0) で位相空間が消えていない"
+    @assert issorted(ee.dE_eV) && ee.dE_eV[1] >= E_th * HARTREE_EV "T9 FAIL: ΔE 格子"
+    @assert ee.mean_loss_eV > E_th * HARTREE_EV "T9 FAIL: 平均損失 < 閾値"
+
     # ---- T6: 点核 Dirac vs Sommerfeld 厳密解 (縮退・微細構造分裂も確認) ----
     println("[T6] 点核 Dirac vs 厳密解:")
     c = C_LIGHT
