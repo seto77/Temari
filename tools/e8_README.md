@@ -75,7 +75,7 @@ pwsh -File tools\e8_stakeout.ps1 -Targets "38:L3:40" -Workers 8 -MaxHours 0.5
 | `eps_sha`/`we_sha` が相違 | 上流: 求積ノード生成 (`gl01` → `eigvals(SymTridiagonal)` = LAPACK stev) が非決定 | LAPACK 呼び出しの単離再現 |
 | (a) 特定 ε スライス (`slice_sha[ie]`) のみ相違 | **ノード内部起因** — eps_worker 内のワークスペース共有 or スレッド併走時の副作用 (第二容疑者リスト参照) | 相違 ie の eps 値で単離再現、eps_worker 内の更なる計装 |
 | (b) 全スライス一致・`N_hex` のみ相違 | **縮約の文脈依存丸め** — `N = dNde' * we` (BLAS dgemv 'T')。dgemv 自体は決定的だが、実行文脈で丸めの経路が変わる | gemv を index-order 固定の自前ループへ置換 (ビット同一の新基準を再定義して全再検証) |
-| (b1) 上記 ∧ ポインタ整列 (`dNde_ptr_mod64/4096`・`we_ptr_mod64`・`N_ptr_mod64`) も相違 | **整列依存仮説の強い証拠** — フリート負荷下の GC 配置揺れ → 先頭整列変化 → SIMD カーネルの peeling 経路変化 (「単発は決定論・負荷時のみ」と整合) | 整列を人工的に振った単離再現 (オフセット付き view/手動確保) で確定 |
+| (b1) 上記 ∧ ポインタ整列 (`dNde_ptr_mod64/4096`・`we_ptr_mod64`・`N_ptr_mod64`) も相違 | **整列依存仮説の強い証拠** — フリート負荷下の GC 配置揺れ → 先頭整列変化 → SIMD カーネルの peeling 経路変化 (「単発は決定論・負荷時のみ」と整合)。機構候補: Julia 1.10+ の **concurrent sweep** では解放ページのプール返却タイミングが負荷依存になり、**同一の割り当て列でもアドレス/整列が変わりうる** (上流 #62162 = concurrent sweep の ABA レースと同じ機構圏) | 整列を人工的に振った単離再現 (オフセット付き view/手動確保) で確定 |
 | (b2) 上記 ∧ 整列は同一 | BLAS スレッド分割による部分和結合位置の変化 / その他 | `blas_threads` 固定・OPENBLAS_NUM_THREADS=1 での再現試験 |
 | (c) スライスも N も一致・F.hex のみ相違 | `F = N ./ N[1]` は決定的要素演算 → ほぼあり得ない = **メモリ破壊系** (既知の Windows GC クラッシュの同族) | 即エスカレーション。--gcthreads=1 有無、Julia 版間比較 |
 

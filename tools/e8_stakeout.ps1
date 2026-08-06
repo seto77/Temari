@@ -17,6 +17,8 @@ param(
     [int]$MaxPasses = 200,
     [double]$MaxHours = 2.0,
     [string]$JuliaChannel = "+1.11",
+    # "1" なら --gcthreads=1 を付ける。"" = 付けない (既定 gcthreads = フリップ実績の形)
+    [string]$GcThreads = "",
     [string]$OutRoot = "$env:TEMP\e8_stakeout"
 )
 $ErrorActionPreference = "Stop"
@@ -29,8 +31,10 @@ foreach ($t in ($Targets -split ",")) {
     $f = $t -split ":"
     $targetList += ,@([int]$f[0], $f[1].ToUpper(), [double]$f[2])
 }
+$gcArgs = @()
+if ($GcThreads -ne "") { $gcArgs = @("--gcthreads=$GcThreads") }
 "run root: $root"
-"workers : $Workers x t$ThreadsPer (BELOW_NORMAL)   targets: $Targets   limits: $MaxPasses passes/worker, $MaxHours h"
+"workers : $Workers x t$ThreadsPer (BELOW_NORMAL, gcthreads=$(if ($GcThreads -ne '') { $GcThreads } else { 'default' }))   targets: $Targets   limits: $MaxPasses passes/worker, $MaxHours h"
 
 # ---- ワーカ起動 (ラウンドロビンで標的を配分、優先度 BELOW_NORMAL) ----
 $procs = @()
@@ -43,8 +47,8 @@ for ($w = 1; $w -le $Workers; $w++) {
     $p = Start-Process julia -PassThru -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $root ("w{0:D2}.out.log" -f $w)) `
         -RedirectStandardError  (Join-Path $root ("w{0:D2}.err.log" -f $w)) `
-        -ArgumentList @($JuliaChannel, "-t", "$ThreadsPer", "--gcthreads=1",
-                        $workerJl, $wd, "$($tgt[0])", $tgt[1], "$($tgt[2])", "$MaxPasses")
+        -ArgumentList (@($JuliaChannel, "-t", "$ThreadsPer") + $gcArgs +
+                       @($workerJl, $wd, "$($tgt[0])", $tgt[1], "$($tgt[2])", "$MaxPasses"))
     try { $p.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal } catch {}
     $procs += $p
 }
