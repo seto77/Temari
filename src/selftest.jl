@@ -391,8 +391,12 @@ function refcheck()
         z = Int(c["z"])
         tag = c["channel"]
         s = Float64.(c["s_A_inv"])
+        # ⚠ dirac_scf=false で固定。refcheck は「Julia 実装が Python 実装の
+        # **同じ処方**を再現するか」を見る検査で、参照値は非相対論 SCF で作られている。
+        # 既定が DSCF になっても、ここは処方を揃えないと意味を失う
         o = compute_channel(z, tag, Float64(c["e0_keV"]);
-                            settings=QUICK_SETTINGS, s_nodes=s, verbose=false)
+                            settings=QUICK_SETTINGS, s_nodes=s, verbose=false,
+                            dirac_scf=false)
         dF = maximum(abs.(o["F"] .- Float64.(c["F"])))
         dN0 = abs(o["N0"] / Float64(c["N0"]) - 1.0)
         dE = abs(o["E_bound_eV"] / Float64(c["E_bound_eV"]) - 1.0)

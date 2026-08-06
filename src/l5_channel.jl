@@ -440,7 +440,7 @@ F(s) 出口 (`compute_channel`) も EELS 出口 (`compute_edge`) もここまで
   `rel`          放出電子のスカラー相対論設定 (nothing = 非相対論)
 """
 function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
-                         rel_continuum::Bool=false, dirac_scf::Bool=false,
+                         rel_continuum::Bool=false, dirac_scf::Bool=true,
                          rel_override::Union{Nothing,RelCont}=nothing)
     haskey(CHANNELS, tag) || error("unknown channel $tag (K/L1/L2/L3)")
     shell, j_lower, occ_init, subshell = CHANNELS[tag]

@@ -20,7 +20,7 @@ function compute_channel(z::Int, tag::String, e0_keV::Float64;
                          settings=PROD_SETTINGS,
                          s_nodes::Union{Nothing,Vector{Float64}}=nothing,
                          verbose::Bool=true,
-                         rel_continuum::Bool=false, dirac_scf::Bool=false,
+                         rel_continuum::Bool=false, dirac_scf::Bool=true,
                          rel_override::Union{Nothing,RelCont}=nothing)
     # rel_continuum=true: 放出電子をスカラー相対論で解く (第 3.5 章、モデル v3)。
     # rel_override: T8 の c→∞ 極限テスト等で RelCont を直接注入する診断用

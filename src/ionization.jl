@@ -104,8 +104,8 @@ const USAGE = """
   julia -t auto ionization.jl fx   Z [--s ...] [--nonrel] [--json path]  # 原子散乱因子
                                    # 既定は完全 Dirac SCF 密度。--nonrel で比較用の非相対論
 
-opts: [--quick|--high] [--rel] [--dscf] [--s s1 s2 ...] [--json path]
-      --dscf = 完全 Dirac SCF (DHFS)。重元素で効く (Au L3 で σ_own/Bote 0.924→0.947)
+opts: [--quick|--high] [--rel] [--nodscf] [--s s1 s2 ...] [--json path]
+      SCF は既定で完全 Dirac (DHFS)。--nodscf で旧来の非相対論 SCF (比較用)
       --s は F(s) 出口のみ (edge は K=0 の 1 点で、その分だけ安い)"""
 
 "fx サブコマンド: X 線 f_x(s) と電子線 f_e(s) の原子散乱因子"
@@ -159,7 +159,7 @@ function main_gos(args)
     quick = "--quick" in args
     high = "--high" in args
     rel = "--rel" in args
-    dscf = "--dscf" in args
+    dscf = !("--nodscf" in args)
     eps_max = nothing
     q_max = nothing
     json_path = nothing
@@ -175,7 +175,8 @@ function main_gos(args)
         i += 1
     end
     settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
-    println("Z=$z $tag   出口: GOS df/dΔE(Q)   処方: ", rel ? MODEL_ID_REL : MODEL_ID)
+    println("Z=$z $tag   出口: GOS df/dΔE(Q)   処方: ",
+            (rel ? MODEL_ID_REL : MODEL_ID) * (dscf ? "-DSCF" : ""))
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
             "   スレッド: ", Threads.nthreads(), "   (E0 非依存)")
     o = compute_gos(z, tag; settings=settings, eps_max_Ha=eps_max, q_max=q_max,
@@ -265,7 +266,7 @@ function main_(args)
     quick = "--quick" in args
     high = "--high" in args                     # 260804Cl 強化求積 (v3 テーブル用)
     rel = "--rel" in args                       # 260804Cl スカラー相対論連続状態
-    dscf = "--dscf" in args                     # 260807Cl 完全 Dirac SCF
+    dscf = !("--nodscf" in args)                # 260807Cl 完全 Dirac SCF (既定)
     s_nodes = nothing
     json_path = nothing
     i = 4
@@ -284,7 +285,7 @@ function main_(args)
     end
     settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
     println("Z=$z $tag @ $e0 keV   出口: ", edge_mode ? "dσ/dΔE (EELS)" : "F(s) (EDX)",
-            "   処方: ", rel ? MODEL_ID_REL : MODEL_ID)
+            "   処方: ", (rel ? MODEL_ID_REL : MODEL_ID) * (dscf ? "-DSCF" : ""))
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
             "   スレッド: ", Threads.nthreads())
     println("初回はこの元素の SCF を解くため時間がかかります (atom_cache_jl_*.jls に保存)...")

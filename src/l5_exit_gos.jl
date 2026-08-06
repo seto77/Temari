@@ -109,7 +109,7 @@ function compute_gos(z::Int, tag::String;
                      eps_max_Ha::Union{Nothing,Float64}=nothing,
                      q_min::Float64=0.05, q_max::Union{Nothing,Float64}=nothing,
                      n_q_out::Int=48, verbose::Bool=true,
-                     rel_continuum::Bool=false, dirac_scf::Bool=false)
+                     rel_continuum::Bool=false, dirac_scf::Bool=true)
     t0 = time()
     ch = prepare_channel(z, tag; rel_continuum=rel_continuum, dirac_scf=dirac_scf)
     eps_max = eps_max_Ha === nothing ? 10.0 * ch.E_th : eps_max_Ha
