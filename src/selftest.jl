@@ -386,6 +386,45 @@ function selftest()
         @assert e_d < 1e-14 "T14 FAIL: 3j 和則が成り立たない"
     end
 
+    # ---- T15: 平均配置の厳密交換 (Slater ポテンシャル) ----
+    # 段階 2。角度係数 c^k = [3j]² と正規化 (1/4, 1/2) を、解析的に要求される
+    # 3 つの性質で固定する。どれか 1 つでも係数を間違えれば破れる。
+    #  (a) 単一 s 軌道・占有 2 (He 型): V_x^S = −V_H/2 (自己相互作用のみ除去)
+    #  (b) **閉殻の遠方漸近 V_x^S·r → −1**。厳密交換の交換ホールが電子 1 個分である
+    #      ことの直接の帰結で、これが成り立つから Latter 補正が要らなくなる
+    #  (c) E_x を「直接和」と「(1/2)∫ρV_x^S」の 2 通りで計算して一致すること
+    #      (別々に書いた 2 実装の突合)
+    let dt = GRID_DT
+        t = log(1e-7) .+ dt .* (0:ceil(Int, (log(60.0) - log(1e-7)) / dt))
+        r = exp.(t)
+        P1s = 2 .* r .* exp.(-r)
+        vx2 = slater_exchange_potential([P1s], [2.0], [0], r)
+        vh2 = hartree(r, 2 .* P1s .^ 2 ./ (4pi .* r .^ 2))
+        sel = r .< 25.0
+        e_a = maximum(abs.(vx2[sel] .+ vh2[sel] ./ 2)) / maximum(abs.(vh2))
+        # 閉殻原子 (Ne) の漸近と E_x の突合
+        at = SCFAtom(10, ORBITALS[10]; latter_charge=1.0)
+        ks = sort(collect(keys(at.orbitals)))
+        P = [at.orbitals[k] for k in ks]
+        q = [first(x[3] for x in at.occ if (x[1], x[2]) == k) for k in ks]
+        lv = [k[2] for k in ks]
+        vx = slater_exchange_potential(P, q, lv, at.r)
+        i20 = findmin(abs.(at.r .- 20.0))[2]
+        e_b = abs(vx[i20] * at.r[i20] + 1.0)
+        ex_direct = exchange_energy_x(P, q, lv, at.r)
+        dens = zeros(length(at.r))
+        for a in eachindex(P)
+            @. dens += q[a] * P[a]^2
+        end
+        ex_pot = 0.5 * trapz(dens .* vx, at.r)
+        e_c = abs(ex_pot / ex_direct - 1.0)
+        @printf("[T15] 厳密交換: He 型 −V_H/2 %.2e / Ne 漸近 V_x·r+1 %.2e / E_x 2 経路 %.2e (E_x=%.4f Ha)\n",
+                e_a, e_b, e_c, ex_direct)
+        @assert e_a < 1e-13 "T15 FAIL: 単一 s 軌道 (q=2) で −V_H/2 にならない"
+        @assert e_b < 5e-3 "T15 FAIL: 閉殻の漸近が −1/r でない (角度係数か正規化)"
+        @assert e_c < 1e-6 "T15 FAIL: E_x の 2 経路が食い違う"
+    end
+
     # ---- T13b: 交換係数が二重に掛かっていないこと ----
     # 260807Cl に実際にやらかした事故の回帰テスト。`slater_vx` に X_ALPHA を
     # 畳み込んだ結果、終状態ポテンシャル (第 5 章、KS 2/3) が (2/3)·α になり、

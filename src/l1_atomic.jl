@@ -112,6 +112,67 @@ function ykr(k::Int, Pa::AbstractVector{Float64}, Pb::AbstractVector{Float64},
     return @. inner / r^k + r^(k + 1) * outer
 end
 
+"""平均配置 (球平均・スピン非分極) の**厳密交換**エネルギーと Slater ポテンシャル。
+
+`P` は軌道の動径関数 (∫P²dr = 1)、`q` は占有数、`l` は方位量子数、`r` は対数格子。
+
+多重極展開とスピン和・磁気量子数和を実行すると
+
+    E_x = −(1/4) Σ_{a,b} q_a q_b Σ_k c^k(l_a,l_b) G^k(ab),   c^k = [3j(l_a k l_b;000)]²
+    G^k(ab) = ∫ P_a P_b Y^k(ab;r)/r dr
+
+**検算**: Ne の 2p⁶ に入れると −3F⁰ − 1.2F² となり、標準の平均配置公式
+E_ee = (q(q−1)/2)[F⁰ − (2l+1)/(4l+1)Σ_{k>0}c^k F^k] から Hartree (q²/2)F⁰ を
+引いた値と厳密に一致する。
+
+Slater ポテンシャルは交換エネルギー密度を密度で割ったもの V_x^S = 2ε_x/ρ:
+
+    V_x^S(r) = −(1/2) Σ_{ab} q_a q_b Σ_k c^k P_a P_b Y^k(ab;r) / ( r Σ_a q_a P_a² )
+
+⚠ **平均配置の限界**: 閉じた副殻では正しいが、開殻では自己相互作用を取り切れない。
+単一 s 軌道 (占有 q) に入れると V_x^S = −(q/2)Y⁰/r で、q=2 (閉) では厳密に
+−V_H/2 = 正解だが、q=1 では −V_H/2 と半分にしかならない (正解は −V_H)。
+遠方漸近も V_x^S·r → −q_h/(2(2l_h+1)) となり、**最外殻が閉じているときだけ −1** に
+なる。これは交換の汎関数ではなく枠組み (スピン非分極・分数占有) 側の欠陥で、
+解消にはスピン分極が要る (docs/exchange_diagnosis_2026-08-07.md の案 B)。
+"""
+function exchange_gk(P::Vector{Vector{Float64}}, l::Vector{Int},
+                     r::AbstractVector{Float64}, a::Int, b::Int, k::Int)
+    y = ykr(k, P[a], P[b], r)
+    return trapz(P[a] .* P[b] .* y ./ r, r)          # G^k(ab)
+end
+
+function exchange_energy_x(P::Vector{Vector{Float64}}, q::Vector{Float64},
+                           l::Vector{Int}, r::AbstractVector{Float64})
+    ex = 0.0
+    for a in eachindex(P), b in eachindex(P)
+        for k in 0:(l[a]+l[b])
+            c = threej000_sq(l[a], k, l[b])
+            c == 0.0 && continue
+            ex -= 0.25 * q[a] * q[b] * c * exchange_gk(P, l, r, a, b, k)
+        end
+    end
+    return ex
+end
+
+function slater_exchange_potential(P::Vector{Vector{Float64}}, q::Vector{Float64},
+                                   l::Vector{Int}, r::AbstractVector{Float64})
+    num = zeros(length(r))
+    for a in eachindex(P), b in eachindex(P)
+        for k in 0:(l[a]+l[b])
+            c = threej000_sq(l[a], k, l[b])
+            c == 0.0 && continue
+            y = ykr(k, P[a], P[b], r)
+            @. num -= 0.5 * q[a] * q[b] * c * P[a] * P[b] * y / r
+        end
+    end
+    den = zeros(length(r))
+    for a in eachindex(P)
+        @. den += q[a] * P[a]^2
+    end
+    return @. num / max(den, 1e-300)
+end
+
 "Slater 局所交換 −(3/2)(3ρ/π)^(1/3)"
 # Xα の交換係数。α = 1 が Slater (交換ホールの平均)、α = 2/3 が Kohn–Sham
 # (LDA 交換エネルギー汎関数の変分微分)。
