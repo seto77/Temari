@@ -351,6 +351,34 @@ function selftest()
         @assert abs(fe_hi / (2.0 / Ks[end]^2) - 1.0) < 1e-4 "T12 FAIL: Mott–Bethe の裸核極限"
     end
 
+    # ---- T14: 動径 Slater 関数 Y^k と、自己相互作用の厳密な相殺 ----
+    # 厳密交換 (KLI/OEP) へ進む段階 1 の検査。水素 1s (P = 2r e^{−r}) に対して
+    #  (a) Y⁰(11;r)/r = その軌道の Hartree ポテンシャル。閉じた形 1/r − e^{−2r}(1+1/r)
+    #  (b) Y^k の遠方極限 Y^k → ⟨r^k⟩/r^k。水素 1s は ⟨r²⟩ = 3 で厳密
+    #  (c) **1 電子系では厳密交換が Hartree を丸ごと打ち消す**。Slater ポテンシャルは
+    #      軌道が 1 本なら −Y⁰/r なので、V_H + V_x が機械精度でゼロになること。
+    #      これが成り立たなければ、この先の交換の議論は全部無意味になる
+    let dt = GRID_DT
+        t = log(1e-7) .+ dt .* (0:ceil(Int, (log(60.0) - log(1e-7)) / dt))
+        r = exp.(t)
+        P = 2 .* r .* exp.(-r)                   # 水素 1s (厳密)
+        vh_y = ykr(0, P, P, r) ./ r
+        ex = @. 1 / r - exp(-2r) * (1 + 1 / r)
+        sel = r .< 25.0                          # 端の丸め (P ~ 1e-22) は除く
+        e_a = maximum(abs.(vh_y[sel] .- ex[sel]) ./ abs.(ex[sel]))
+        y2 = ykr(2, P, P, r)
+        e_b = abs(y2[end] * r[end]^2 / 3.0 - 1.0)   # ⟨r²⟩ = 3
+        # (c) 1 電子 (占有 1) の密度から作った Hartree と、Slater 交換 −Y⁰/r
+        rho1 = P .^ 2 ./ (4pi .* r .^ 2)
+        resid = hartree(r, rho1) .- vh_y         # = V_H − Y⁰/r、厳密にゼロのはず
+        e_c = maximum(abs.(resid)) / maximum(abs.(vh_y))
+        @printf("[T14] Slater 関数 Y^k: Hartree 閉形式 %.2e / ⟨r²⟩ 極限 %.2e / 自己相互作用の相殺 %.2e\n",
+                e_a, e_b, e_c)
+        @assert e_a < 1e-6 "T14 FAIL: Y⁰ が水素の Hartree 閉形式と合わない"
+        @assert e_b < 1e-6 "T14 FAIL: Y² の遠方極限が ⟨r²⟩/r² でない"
+        @assert e_c < 1e-13 "T14 FAIL: 1 電子系で自己相互作用が厳密に相殺しない"
+    end
+
     # ---- T13b: 交換係数が二重に掛かっていないこと ----
     # 260807Cl に実際にやらかした事故の回帰テスト。`slater_vx` に X_ALPHA を
     # 畳み込んだ結果、終状態ポテンシャル (第 5 章、KS 2/3) が (2/3)·α になり、

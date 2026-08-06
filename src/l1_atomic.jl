@@ -81,6 +81,37 @@ function hartree(r::AbstractVector, rho::AbstractVector)
     return q ./ r .+ outer
 end
 
+# ==== 260807Cl 追加: 厳密交換の材料 (KLI/OEP へ向けた段階 1) ================
+# docs/exchange_diagnosis_2026-08-07.md の結論を受けた作業。局所交換の「強さ」を
+# スカラー α で合わせるのをやめ、厳密交換を局所ポテンシャルとして表す道へ進む。
+# 本段階では**その材料である動径 Slater 関数だけ**を作り、解析解で検査する。
+
+"""動径 Slater 関数 Y^k(ab; r) = r ∫₀^∞ (r_<^k / r_>^{k+1}) P_a(s) P_b(s) ds。
+
+`P = u = r·R` (動径関数)。`r` は**対数等間隔**格子、`dt` はその刻み。
+分けて書くと
+
+    Y^k(r) = r^(−k) ∫₀^r s^k P_a P_b ds  +  r^(k+1) ∫_r^∞ s^(−k−1) P_a P_b ds
+
+厳密交換 (Hartree–Fock / OEP) の全ての項がこの関数で書ける。**k=0 かつ a=b のとき
+Y⁰(aa;r)/r はその軌道自身が作る Hartree ポテンシャル**、すなわち自己相互作用そのもの
+なので、1 電子系では厳密交換がこれを丸ごと打ち消さねばならない (selftest T14)。
+
+⚠ 内側の項は r^(−k) と r^(k+1) という大きな因子を掛けるので、格子内端 (1e-7) と
+  大きな k では桁が振れる。k ≤ 8 程度までを想定 (r^(−8) ~ 1e56 で Float64 の範囲内)。"""
+function ykr(k::Int, Pa::AbstractVector{Float64}, Pb::AbstractVector{Float64},
+             r::AbstractVector{Float64})
+    n = length(r)
+    f = Pa .* Pb
+    inner = cumtrapz(f .* r .^ k, r)             # ∫₀^r s^k P_a P_b ds
+    g = f ./ r .^ (k + 1)
+    outer = zeros(n)                             # ∫_r^∞ s^(−k−1) P_a P_b ds
+    @inbounds for i in n-1:-1:1
+        outer[i] = outer[i+1] + 0.5 * (g[i] + g[i+1]) * (r[i+1] - r[i])
+    end
+    return @. inner / r^k + r^(k + 1) * outer
+end
+
 "Slater 局所交換 −(3/2)(3ρ/π)^(1/3)"
 # Xα の交換係数。α = 1 が Slater (交換ホールの平均)、α = 2/3 が Kohn–Sham
 # (LDA 交換エネルギー汎関数の変分微分)。
