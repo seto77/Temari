@@ -12,9 +12,8 @@
 param(
     [int]$Workers = 16,
     [int]$ThreadsPer = 2,
-    [int]$Z = 6,
-    [string]$Channel = "K",
-    [double]$E0 = 275.0,
+    # "Z:ch:E0" のカンマ区切り。ワーカへラウンドロビン配分 (16 ワーカ 2 標的 → 8+8)
+    [string]$Targets = "6:K:275,38:L3:40",
     [int]$MaxPasses = 200,
     [double]$MaxHours = 2.0,
     [string]$JuliaChannel = "+1.11",
@@ -25,18 +24,28 @@ $repo = Split-Path $PSScriptRoot -Parent
 $workerJl = Join-Path $repo "tools\e8_worker.jl"
 $root = Join-Path $OutRoot ("e8_" + (Get-Date -Format "yyyyMMdd_HHmmss"))
 New-Item -ItemType Directory -Force $root | Out-Null
+$targetList = @()
+foreach ($t in ($Targets -split ",")) {
+    $f = $t -split ":"
+    $targetList += ,@([int]$f[0], $f[1].ToUpper(), [double]$f[2])
+}
 "run root: $root"
-"workers : $Workers x t$ThreadsPer   target: Z=$Z $Channel E0=$E0   limits: $MaxPasses passes/worker, $MaxHours h"
+"workers : $Workers x t$ThreadsPer (BELOW_NORMAL)   targets: $Targets   limits: $MaxPasses passes/worker, $MaxHours h"
 
-# ---- ワーカ起動 ----
+# ---- ワーカ起動 (ラウンドロビンで標的を配分、優先度 BELOW_NORMAL) ----
 $procs = @()
+$wdKey = @{}
 for ($w = 1; $w -le $Workers; $w++) {
-    $wd = Join-Path $root ("w{0:D2}" -f $w)
+    $tgt = $targetList[($w - 1) % $targetList.Count]
+    $key = "Z$($tgt[0])_$($tgt[1])_E0$($tgt[2])"
+    $wd = Join-Path $root ("w{0:D2}_{1}" -f $w, $key)
+    $wdKey[$wd] = $key
     $p = Start-Process julia -PassThru -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $root ("w{0:D2}.out.log" -f $w)) `
         -RedirectStandardError  (Join-Path $root ("w{0:D2}.err.log" -f $w)) `
         -ArgumentList @($JuliaChannel, "-t", "$ThreadsPer", "--gcthreads=1",
-                        $workerJl, $wd, "$Z", $Channel, "$E0", "$MaxPasses")
+                        $workerJl, $wd, "$($tgt[0])", $tgt[1], "$($tgt[2])", "$MaxPasses")
+    try { $p.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal } catch {}
     $procs += $p
 }
 "launched $($procs.Count) workers (pids: $($procs.Id -join ','))"
@@ -52,10 +61,31 @@ function Stop-AllWorkers([object[]]$procs, [string]$root) {
     }
 }
 
-function Get-UlpDiff([string]$hexA, [string]$hexB) {
-    $a = [System.Convert]::ToUInt64($hexA, 16)
-    $b = [System.Convert]::ToUInt64($hexB, 16)
-    if ($a -ge $b) { return $a - $b } else { return $b - $a }
+# 相違ノードの分布 (ULP = ビットパターンの UInt64 距離、rel = |Δ|/max(|a|,|b|)) を
+# 印字する。相殺増幅 (小さい値のノードだけ rel が跳ねる) の検証用。
+function Show-DiffStats([string[]]$hexA, [string[]]$hexB, [string]$label) {
+    $n = [Math]::Min($hexA.Count, $hexB.Count)
+    $rows = @()
+    $maxUlp = [uint64]0; $iMaxUlp = -1
+    $maxRel = 0.0; $iMaxRel = -1
+    for ($i = 0; $i -lt $n; $i++) {
+        if ($hexA[$i] -eq $hexB[$i]) { continue }
+        $ua = [System.Convert]::ToUInt64($hexA[$i], 16)
+        $ub = [System.Convert]::ToUInt64($hexB[$i], 16)
+        $ulp = if ($ua -ge $ub) { $ua - $ub } else { $ub - $ua }
+        $va = [System.BitConverter]::UInt64BitsToDouble($ua)
+        $vb = [System.BitConverter]::UInt64BitsToDouble($ub)
+        $den = [Math]::Max([Math]::Abs($va), [Math]::Abs($vb))
+        $rel = if ($den -gt 0) { [Math]::Abs($va - $vb) / $den } else { 0.0 }
+        if ($ulp -gt $maxUlp) { $maxUlp = $ulp; $iMaxUlp = $i }
+        if ($rel -gt $maxRel) { $maxRel = $rel; $iMaxRel = $i }
+        $rows += ("    {0}#{1}  ref={2} bad={3}  |dULP|={4}  rel={5:E2}  (ref={6:E6})" -f
+                  $label, $i, $hexA[$i], $hexB[$i], $ulp, $rel, $va)
+    }
+    if ($rows.Count -eq 0) { "  $label : 相違なし"; return }
+    "  $label 相違 $($rows.Count)/$n 点   maxULP=$maxUlp @#$iMaxUlp   maxRel=$('{0:E2}' -f $maxRel) @#$iMaxRel"
+    $rows | Select-Object -First 60
+    if ($rows.Count -gt 60) { "    ... (残り $($rows.Count - 60) 点は省略)" }
 }
 
 function Compare-Sidecars([string]$refPass, [string]$badPass) {
@@ -87,6 +117,7 @@ function Compare-Sidecars([string]$refPass, [string]$badPass) {
         $Nb = $jb.N_hex -split ","
         $nK = [Math]::Min($Nr.Count, $Nb.Count)
         for ($i = 0; $i -lt $nK; $i++) { if ($Nr[$i] -ne $Nb[$i]) { $nDiff++ } }
+        if ($nDiff -gt 0) { Show-DiffStats $Nr $Nb "N" }
         if ($diffSlices.Count -gt 0) {
             "  判定 (a): ε スライス相違 → ノード内部起因 (eps_worker 内のワークスペース/BLAS 疑い)"
             "    相違 ε ノード (1-based, $($diffSlices.Count)/$($jr.ne)): $($diffSlices -join ',')"
@@ -109,10 +140,10 @@ function Compare-Sidecars([string]$refPass, [string]$badPass) {
     }
 }
 
-# ---- 監視ループ ----
+# ---- 監視ループ (標的ごとに参照パスを持つ) ----
 $deadline = (Get-Date).AddHours($MaxHours)
-$refPass = $null
-$refF = $null
+$refPass = @{}
+$refF = @{}
 $seen = @{}
 $nCompared = 0
 $mismatch = $false
@@ -123,32 +154,31 @@ while ($true) {
         $pass = $dm.DirectoryName
         if ($seen.ContainsKey($pass)) { continue }
         $seen[$pass] = $true
+        $wd = Split-Path $pass -Parent
+        $key = $wdKey[$wd]
+        if ($null -eq $key) { $key = "?" }
         $f = Get-Content (Join-Path $pass "F.hex")
-        if ($null -eq $refF) { $refF = $f; $refPass = $pass; continue }
+        if (-not $refF.ContainsKey($key)) { $refF[$key] = $f; $refPass[$key] = $pass; continue }
         $nCompared++
+        $rF = $refF[$key]
         $diffIdx = @()
-        for ($i = 0; $i -lt [Math]::Min($refF.Count, $f.Count); $i++) {
-            if ($refF[$i] -ne $f[$i]) { $diffIdx += $i }
+        for ($i = 0; $i -lt [Math]::Min($rF.Count, $f.Count); $i++) {
+            if ($rF[$i] -ne $f[$i]) { $diffIdx += $i }
         }
-        if ($refF.Count -ne $f.Count) { $diffIdx += -1 }
+        if ($rF.Count -ne $f.Count) { $diffIdx += -1 }
         if ($diffIdx.Count -gt 0) {
             $mismatch = $true
             ""
             "================ MISMATCH DETECTED ================"
-            "ref : $refPass"
+            "target: $key"
+            "ref : $($refPass[$key])"
             "bad : $pass"
-            "F 相違点 (0-based): $($diffIdx.Count)/$($refF.Count)"
-            foreach ($i in ($diffIdx | Select-Object -First 8)) {
-                if ($i -ge 0) {
-                    $ulp = Get-UlpDiff $refF[$i] $f[$i]
-                    "  s#$i  ref=$($refF[$i])  bad=$($f[$i])  |dULP|=$ulp"
-                }
-            }
-            $n0r = Get-Content (Join-Path $refPass "N0.hex")
+            Show-DiffStats $rF $f "F"
+            $n0r = Get-Content (Join-Path $refPass[$key] "N0.hex")
             $n0b = Get-Content (Join-Path $pass "N0.hex")
             "N0: $(if ($n0r -eq $n0b) { 'IDENTICAL' } else { "DIFFER ($n0r vs $n0b)" })"
             ""
-            Compare-Sidecars $refPass $pass
+            Compare-Sidecars $refPass[$key] $pass
             break
         }
     }

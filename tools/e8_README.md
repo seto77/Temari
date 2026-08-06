@@ -46,9 +46,16 @@ ie 単独添字: `dNde[ie, :]` / `match_resid[ie]` / `ortho[ie]` / `l_used[ie]`
 ## 待ち伏せの回し方 (⚠ フリート A/B 完了・許可後)
 
 ```powershell
-powershell -File tools\e8_stakeout.ps1                 # 16P×2T, Z=6 K E0=275, 2h 上限
-powershell -File tools\e8_stakeout.ps1 -Workers 8 -MaxHours 0.5 -MaxPasses 50
+powershell -File tools\e8_stakeout.ps1                 # 16P×2T, 2 標的 (Z6 K E275 + Z38 L3 E40) を 8+8, 2h 上限
+powershell -File tools\e8_stakeout.ps1 -Targets "38:L3:40" -Workers 8 -MaxHours 0.5
 ```
+
+- 標的は `-Targets "Z:ch:E0[,Z:ch:E0...]"` でラウンドロビン配分。既定は
+  Z=6 K E0=275 (初出のフリップ実例) + Z=38 L3 E0=40 (A/B ab_20260806_091107 で
+  捕獲された増幅フリップ maxULP~1.66e10 / maxRel 2.35e-6 の条件) の 2 本立て
+- ワーカは BELOW_NORMAL 優先度で起動 (作者のマシン使用と共存)
+- フリップ報告には F と N の相違ノード分布 (|dULP| と rel) が含まれ、
+  相殺増幅 (小さい F ノードだけ rel が跳ねる) をその場で検証できる
 
 - ワーカ: `julia +1.11 -t 2 --gcthreads=1 tools/e8_worker.jl <wdir> 6 K 275 <maxp>`
   — 本番行と同一条件 (HIGH_SETTINGS + S_GRID 161 点 + rel_continuum=true) を反復
