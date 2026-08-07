@@ -83,6 +83,7 @@ include(joinpath(@__DIR__, "l5_channel.jl"))    # 出口に依らない基盤
 include(joinpath(@__DIR__, "l5_exit_edx.jl"))   # 出口: F(s, E0)
 include(joinpath(@__DIR__, "l5_exit_eels.jl"))  # 出口: dσ/dΔE と阻止能寄与
 include(joinpath(@__DIR__, "l5_exit_phase.jl")) # 出口: 弾性散乱位相シフト δ_l
+include(joinpath(@__DIR__, "l5_exit_mott.jl"))  # 出口: Mott 弾性断面積 (P4)
 include(joinpath(@__DIR__, "l5_exit_gos.jl"))   # 出口: 一般化振動子強度 (E0 非依存)
 include(joinpath(@__DIR__, "l5_exit_fx.jl"))    # 出口: 原子散乱因子 f_x(s) / f_e(s)
 include(joinpath(@__DIR__, "selftest.jl"))
@@ -98,6 +99,8 @@ const USAGE = """
   julia -t auto ionization.jl      Z channel E0keV [opts]   # F(s) 出口 (EDX)
   julia -t auto ionization.jl edge Z channel E0keV [opts]   # dσ/dΔE 出口 (EELS)
   julia -t auto ionization.jl phase Z epsEV [--lmax N] [--json path]  # δ_l 出口 (弾性)
+  julia -t auto ionization.jl mott  Z epsEV [--lmax N] [--xapot] [--json path]
+                                   # Mott 弾性断面積 dσ/dΩ・σ_el・σ_tr・Sherman (P4)
   julia -t auto ionization.jl gos  Z channel [--quick|--high] [--rel]
                                    [--epsmax Ha] [--qmax a0inv] [--json path]  # GOS 出口
                                    # E0 を取らない (GOS は E0 非依存)
@@ -230,6 +233,52 @@ function main_gos(args)
     return 0
 end
 
+"mott サブコマンド: 相対論的弾性散乱断面積 dσ/dΩ・σ_el・σ_tr・Sherman 関数 (P4)"
+function main_mott(args)
+    length(args) >= 2 || error("Z と ε[eV] を指定 (例: mott 79 10000)")
+    z = parse(Int, args[1])
+    eps_eV = parse(Float64, args[2])
+    l_max = nothing
+    json_path = nothing
+    i = 3
+    while i <= length(args)
+        if args[i] == "--lmax"
+            l_max = parse(Int, args[i+1]); i += 1
+        elseif args[i] == "--json"
+            json_path = args[i+1]; i += 1
+        end
+        i += 1
+    end
+    # --xapot: 標的の Xα 交換を散乱ポテンシャルに足す (比較用。既定は純静電)
+    sp = "--xapot" in args ? :xalpha : :static
+    println("初回はこの元素の SCF を解くため時間がかかります...")
+    o = compute_mott(z, eps_eV; l_max=l_max, exchange=parse_exchange(args),
+                     scat_pot=sp)
+    th = o["theta_deg"]; d = o["dcs_a0_2_sr"]; s = o["sherman"]
+    @printf("\n%8s  %16s  %12s\n", "θ [deg]", "dσ/dΩ [a₀²/sr]", "S(θ)")
+    for i in 1:max(1, length(th) ÷ 18):length(th)
+        @printf("%8.1f  %16.6e  %12.5f\n", th[i], d[i], s[i])
+    end
+    @printf("\nσ_el = %.6e a₀²  (部分波和 %.6e、閉包 %.2e)\n",
+            o["sigma_el_a0_2"], o["sigma_el_pw"], o["closure_rel"])
+    @printf("σ_tr = %.6e a₀²   max|S| = %.4f (θ = %.1f deg)\n",
+            o["sigma_tr_a0_2"], o["max_sherman"], th[argmax(abs.(s))])
+    @printf("l_max = %d / δ の裾 = %.2e%s / フィット残差 %.2e\n",
+            o["l_max"], o["delta_tail"],
+            o["truncated"] ? " ★打ち切り誤差が残る (--lmax で伸ばす)" : "",
+            o["max_match_resid"])
+    println("場: ", sp === :static ? "純静電 −Z/r + V_H (既定)" :
+                    "静電 + 標的 Xα 交換 (⚠ 飛来電子の場としては誤り。比較用)")
+    println("注意: ", o["note"])
+    if json_path !== nothing
+        open(json_path, "w") do io
+            write_json(io, o); println(io)
+        end
+        println("\n$json_path に保存しました")
+    end
+    return 0
+end
+
 "phase サブコマンド: 中性原子の静的場に対する弾性散乱位相シフト δ_l"
 function main_phase(args)
     length(args) >= 2 || error("Z と ε[eV] を指定 (例: phase 26 100)")
@@ -275,6 +324,7 @@ function main_(args)
     args[1] == "selftest" && return selftest()
     args[1] == "refcheck" && (refcheck(); return 0)
     args[1] == "phase" && return main_phase(args[2:end])   # 260806Cl: 弾性 δ_l 出口
+    args[1] == "mott" && return main_mott(args[2:end])     # 260807Cl: Mott 弾性 (P4)
     args[1] == "gos" && return main_gos(args[2:end])       # 260806Cl: GOS 出口
     args[1] == "fx" && return main_fx(args[2:end])         # 260807Cl: 原子散乱因子
     edge_mode = args[1] == "edge"                # 260806Cl: EELS 出口

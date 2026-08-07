@@ -835,6 +835,48 @@ function selftest()
         @assert d_phys > 20 * d_inf "T23d FAIL: 物理の c で相対論効果が出ていない"
     end
 
+    # ---- T24: Mott 弾性断面積 (P4、l5_exit_mott.jl) ----
+    # (a) **閉包**: σ_el を角度積分で出したものと、部分波和 (4π/k²)Σ|κ|sin²δ_κ が
+    #     一致すること。ルジャンドル漸化 (P_l と P_l¹)・スピン反転振幅 g の
+    #     組み立て・求積が一度に検査される
+    #     ⚠ 光学定理 σ_el = (4π/k)Im f(0) は部分波表示で同じ式に帰着するので
+    #       **独立な検査にならない**。参考表示に留める
+    # (b) |S(θ)| ≤ 1 — Sherman 関数は偏極能なので定義上の上限がある。
+    #     g の規格化や符号を間違えると真っ先に破れる
+    # (c) **c → ∞ でスピン軌道分裂が消える**。見るのは g や S ではなく
+    #     **δ_{κ=+l} − δ_{κ=−(l+1)} そのもの** — これがスピン軌道の本体で、
+    #     1/c² で落ちるので c×10³ なら 10⁻⁶ 倍になるはず。
+    #     ⚠ S を直接ゲートにするのは軽元素では鈍い: Z=6 の物理的な max|S| は
+    #       1.5e-3 しかなく、c→∞ 側は位相シフトの数値床 (~1e-8) に当たって
+    #       2.9e-5 で止まる (比 52 倍にしかならない)。分裂そのものなら鋭い
+    let z = 6, ev = 300.0
+        split(o) = begin
+            kap = o["kappa"]
+            dl = o["delta_kappa"]
+            d = Dict(kap[i] => dl[i] for i in eachindex(kap))
+            maximum(abs(get(d, l, 0.0) - get(d, -(l + 1), 0.0))
+                    for l in 1:o["l_max"])
+        end
+        o = compute_mott(z, ev; verbose=false, l_cap=200)
+        oi = compute_mott(z, ev; verbose=false, l_cap=200, c=C_LIGHT * 1e3)
+        s0, si = split(o), split(oi)
+        @printf("[T24] Mott (Z=%d, ε=%.0f eV, l_max=%d): 閉包 %.2e / 光学定理 %.2e (同じ恒等式)\n",
+                z, ev, o["l_max"], o["closure_rel"], o["optical_rel"])
+        @printf("      max|S| = %.2e / スピン軌道分裂 max|δ₊−δ₋| = %.2e → c×10³ で %.2e (比 %.1e)\n",
+                o["max_sherman"], s0, si, s0 / si)
+        @assert o["closure_rel"] < 1e-8 "T24 FAIL: σ_el の角度積分が部分波和と合わない"
+        @assert o["max_sherman"] <= 1.0 + 1e-12 "T24 FAIL: |Sherman| が 1 を超えた"
+        @assert o["sigma_el_a0_2"] > 0 && o["sigma_tr_a0_2"] > 0 "T24 FAIL: 断面積が非正"
+        @assert o["sigma_tr_a0_2"] < 2 * o["sigma_el_a0_2"] "T24 FAIL: σ_tr < 2σ_el が破れた"
+        # ⚠ 分裂は 1/c² なので c×10³ なら 10⁻⁶ 倍が理想だが、実測は 2.9×10³ 倍で
+        #   止まる。**位相シフトの数値床 ~4×10⁻⁷ rad** に当たるため — κ と
+        #   −(κ+1) は c→∞ でも**別の連立系**として積分され (種の F も分割数も
+        #   違う)、その打ち切り誤差の差が残る。δ の打ち切り閾値 (1e-7) と同程度
+        #   なので物理には効かない。ゲートは床の上に置く
+        @assert si < s0 / 500 "T24 FAIL: c→∞ でスピン軌道分裂が消えない"
+        @assert oi["max_sherman"] < o["max_sherman"] / 20 "T24 FAIL: c→∞ で S が落ちない"
+    end
+
     # ---- T13b: 交換係数が二重に掛かっていないこと ----
     # 260807Cl に実際にやらかした事故の回帰テスト。`slater_vx` に X_ALPHA を
     # 畳み込んだ結果、終状態ポテンシャル (第 5 章、KS 2/3) が (2/3)·α になり、

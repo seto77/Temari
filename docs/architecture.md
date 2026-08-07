@@ -35,6 +35,7 @@ concatenating the files in include order reproduces a single-file build.
 | `l5_exit_edx.jl` | L5 | the F(s, E₀) exit — K on an s grid, reported as N(K)/N(0) |
 | `l5_exit_eels.jl` | L5 | the dσ/dΔE exit — K = 0 only, reported as an edge shape plus the stopping-power contraction |
 | `l5_exit_phase.jl` | L5 | the δ_l exit — elastic phase shifts in the neutral atom's static field |
+| `l5_exit_mott.jl` | L5 | the Mott elastic exit (P4) — dσ/dΩ, the Sherman function, σ_el and σ_tr from the κ-resolved Dirac phase shifts |
 | `l5_exit_gos.jl` | L5 | the GOS exit — df/dΔE(Q), the Bethe surface. No E₀ anywhere in it |
 | `l5_exit_fx.jl` | L5 | the scattering-factor exit — f_x(s) from the SCF density, f_e(s) through Mott–Bethe. The first exit with a different *operator*, so it uses only L0 and L1 |
 | `selftest.jl` | — | the T0–T9 ladder and `refcheck` |

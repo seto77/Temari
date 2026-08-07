@@ -483,7 +483,7 @@ function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
                            q_resolve::Float64=0.0, dt_log::Float64=CONT_DT_LOG,
                            ppw::Float64=CONT_PPW, eta_bessel::Float64=ETA_BESSEL,
                            z_asym::Float64=1.0, c::Float64=C_LIGHT,
-                           n_sub::Int=4)
+                           n_sub::Int=4, store_int::Bool=true)
     k = krel(eps, c)
     # ---- グリッド: ContinuumSet と同一の 3 セグメント構成 ----
     # A だけ RK4 の増幅率のために刻みを絞る (章頭参照)。l_max が小さいときは
@@ -506,25 +506,16 @@ function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
     r = vcat(rA, rB, rC)                       # 1 本に連結して RK4 で通す
     n = length(r)
     v = pot_V.(r)
-    # ★区間内を n_sub 分割して RK4 を刻む。**格子そのものは変えない**ので
-    #   r_int も Simpson 重みも非相対論版と同一のまま、誤差だけ 1/n_sub⁴ に落ちる。
-    #   必要な理由: 同じ格子だと RK4 は Numerov より 6-70 倍粗い (自由粒子で実測)。
-    #   Numerov は y″ = Wy 専用で誤差定数が桁違いに小さく、連立 1 階系には使えない。
-    #   分割しないと c→∞ の退化残差 (1.1e-3) が物理効果 (2.6e-3) と同程度になり、
-    #   構造検査として成立しない
-    nf = (n - 1) * n_sub + 1
-    rf = zeros(nf)
-    @inbounds for i in 1:n-1, j in 0:n_sub-1
-        rf[(i-1)*n_sub+j+1] = r[i] + (r[i+1] - r[i]) * j / n_sub
-    end
-    rf[nf] = r[n]
-    vf = pot_V.(rf)
-    vmf = [pot_V((rf[i] + rf[i+1]) / 2.0) for i in 1:nf-1]
 
     kappas = kappa_list(l_max)
     nch = length(kappas)
-    Gall = zeros(nch, n)
-    Fall = zeros(nch, n)
+    # `store_int=false` は Mott 出口 (δ_κ しか要らない) 用。l_max が数百になると
+    # (nch × n) が数億要素になるので、そこだけ落とせるようにしてある
+    Gall = zeros(nch, store_int ? n : 0)
+    Fall = zeros(nch, store_int ? n : 0)
+    tailG = zeros(nch, N_FIT)                  # 漸近フィット窓 (常に保持)
+    tailF = zeros(nch, N_FIT)
+    i_tail0 = n - N_FIT + 1
     zf = Float64(z)
     for (ic, kap) in enumerate(kappas)
         kapf = Float64(kap)
@@ -537,30 +528,59 @@ function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
         s = rs < zf / (2.0 * c * c) ? gam : Float64(lp + 1)
         g = 1e-30
         f = (s + kapf) * g / (rs * (2.0 * c + (eps - v[i0]) / c))
-        Gall[ic, i0] = g
-        Fall[ic, i0] = f
-        j0 = (i0 - 1) * n_sub + 1              # 細分格子での種の位置
-        @inbounds for jf in j0:nf-1
-            g, f = _dirac_rk4_c(rf[jf], rf[jf+1], vf[jf], vmf[jf], vf[jf+1],
-                                eps, g, f, kapf, c)
+        if store_int
+            Gall[ic, i0] = g
+            Fall[ic, i0] = f
+        end
+        if i0 >= i_tail0
+            tailG[ic, i0-i_tail0+1] = g
+            tailF[ic, i0-i_tail0+1] = f
+        end
+        @inbounds for i in i0:n-1
+            ra, rb = r[i], r[i+1]
+            # ★区間内を分割して RK4 を刻む。**格子そのものは変えない**ので
+            #   r_int も Simpson 重みも非相対論版と同一のまま、誤差だけ落ちる。
+            #   必要な理由: 同じ格子だと RK4 は Numerov より 6-70 倍粗い
+            #   (自由粒子で実測)。Numerov は y″ = Wy 専用で誤差定数が桁違いに
+            #   小さく、連立 1 階系には使えない。分割しないと c→∞ の退化残差が
+            #   物理効果と同程度になり、構造検査として成立しない。
+            # ★分割数は**局所の増大率で決める**。障壁の中では解が exp(|κ|/r) で
+            #   育ち、1 ステップの指数 |κ|Δr/r が 1 を超えると RK4 が崩れる。
+            #   Mott 出口は l が数百に達するのでここが効く (固定 4 分割では不足)。
+            #   振動域では k_loc·Δr ≈ 2π/ppw なので既定の n_sub に落ち着く
+            expo = (rb - ra) * (abs(kapf) / ra + sqrt(abs(2.0 * (eps - v[i]))))
+            ns = clamp(ceil(Int, expo / 0.25), n_sub, 512)
+            h = (rb - ra) / ns
+            for j in 1:ns
+                pa = ra + h * (j - 1)
+                pb = ra + h * j
+                g, f = _dirac_rk4_c(pa, pb, pot_V(pa), pot_V((pa + pb) / 2.0),
+                                    pot_V(pb), eps, g, f, kapf, c)
+            end
             if abs(g) > 1e250 || abs(f) > 1e250      # 発散前にまとめてリスケール
                 sc = 1e-200
-                g *= sc; f *= sc
-                @inbounds for jj in i0:((jf - 1) ÷ n_sub + 1)
-                    Gall[ic, jj] *= sc
-                    Fall[ic, jj] *= sc
+                g *= sc
+                f *= sc
+                if store_int
+                    @views Gall[ic, i0:i] .*= sc
+                    @views Fall[ic, i0:i] .*= sc
                 end
+                @views tailG[ic, :] .*= sc
+                @views tailF[ic, :] .*= sc
             end
-            if (jf % n_sub) == 0               # 元の格子点に着いたら記録
-                ii = jf ÷ n_sub + 1
-                Gall[ic, ii] = g
-                Fall[ic, ii] = f
+            if store_int
+                Gall[ic, i+1] = g
+                Fall[ic, i+1] = f
+            end
+            if i + 1 >= i_tail0
+                tailG[ic, i+2-i_tail0] = g
+                tailF[ic, i+2-i_tail0] = f
             end
         end
     end
 
     # ---- エネルギー規格化: 大成分の末尾 N_FIT 点を (F_λ, G_λ) にフィット ----
-    r_fit = r[end-N_FIT+1:end]
+    r_fit = r[i_tail0:end]
     eta = -z_asym * (1.0 + eps / (c * c)) / k
     x_fit = k .* r_fit
     Cl = zeros(nch)
@@ -590,7 +610,7 @@ function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
     end
     for ic in 1:nch
         li = kappa_l(kappas[ic]) + 1
-        gfit = Gall[ic, end-N_FIT+1:end]
+        gfit = tailG[ic, :]
         fmax = maximum(abs.(gfit))
         if fmax == 0.0 || !isfinite(fmax)
             ok[ic] = false
@@ -610,19 +630,22 @@ function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
     scale = [ok[ic] ? amp / Cl[ic] : 0.0 for ic in 1:nch]
 
     # ---- 行列要素用の格子 (r ≤ r_core) と Simpson 重み (ContinuumSet と同一) ----
-    nA_keep = count(<=(r_core), rA)
-    nB_keep = count(<=(r_core + 1e-12), rB)
+    nA_keep = store_int ? count(<=(r_core), rA) : 0
+    nB_keep = store_int ? count(<=(r_core + 1e-12), rB) : 0
     r_int = vcat(rA[1:nA_keep], rB[1:nB_keep])
     idx = vcat(1:nA_keep, nA+1:nA+nB_keep)
-    G_int = Gall[:, idx] .* scale
-    F_int = Fall[:, idx] .* scale
-    wtA = simpson_weights(nA_keep, dtA) .* rA[1:nA_keep]
-    wtB = simpson_weights(nB_keep, drB)
-    w_int = vcat(wtA, wtB)
-    if nA_keep > 0 && nB_keep > 0
-        gap = rB[1] - rA[nA_keep]
-        w_int[nA_keep] += gap / 2.0
-        w_int[nA_keep+1] += gap / 2.0
+    G_int = store_int ? Gall[:, idx] .* scale : zeros(nch, 0)
+    F_int = store_int ? Fall[:, idx] .* scale : zeros(nch, 0)
+    w_int = Float64[]
+    if store_int
+        wtA = simpson_weights(nA_keep, dtA) .* rA[1:nA_keep]
+        wtB = simpson_weights(nB_keep, drB)
+        w_int = vcat(wtA, wtB)
+        if nA_keep > 0 && nB_keep > 0
+            gap = rB[1] - rA[nA_keep]
+            w_int[nA_keep] += gap / 2.0
+            w_int[nA_keep+1] += gap / 2.0
+        end
     end
     return DiracContinuumSet(eps, k, c, kappas, kappa_l.(kappas), kappa_tj.(kappas),
                              r_int, G_int, F_int, w_int, resid, collect(ok), delta)

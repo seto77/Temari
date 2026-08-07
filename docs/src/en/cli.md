@@ -21,6 +21,7 @@ julia -t auto src/ionization.jl      <Z> <channel> <E0_keV> [--quick|--high] [--
 julia -t auto src/ionization.jl edge <Z> <channel> <E0_keV> [--quick|--high] [--rel|--kdirac] [--frozen] [--transverse] [--json <path>]
 julia -t auto src/ionization.jl gos  <Z> <channel>          [--quick|--high] [--rel|--kdirac] [--frozen] [--epsmax <Ha>] [--qmax <a0^-1>] [--json <path>]
 julia -t auto src/ionization.jl phase <Z> <eps_eV> [--lmax <N>] [--json <path>]
+julia -t auto src/ionization.jl mott  <Z> <eps_eV> [--lmax <N>] [--xapot] [--json <path>]
 julia -t auto src/ionization.jl fx   <Z> [--s s1 s2 ...] [--json <path>]
 ```
 
@@ -35,6 +36,7 @@ julia -t auto src/ionization.jl fx   <Z> [--s s1 s2 ...] [--json <path>]
 | `phase` | The **δ_l exit**: elastic scattering phase shifts in the neutral atom's static field. Takes `<Z> <ε_eV>`, not a channel. | seconds |
 | `gos` | The **GOS exit**: the generalized oscillator strength surface df/dΔE(Q). Takes `<Z> <channel>` and **no beam energy** — the GOS does not depend on one. | comparable to one F(s) run, and it serves every E₀ |
 | `fx` | The **scattering-factor exit**: f_x(s) for X-rays and f_e(s) for electrons. Takes `<Z>` alone — no channel, no energy. | the SCF, then milliseconds |
+| `mott` | The **Mott elastic exit** (P4): dσ/dΩ, the Sherman function S(θ), σ_el and σ_tr from the κ-resolved Dirac phase shifts. Takes `<Z> <ε_eV>`. Uses the **purely electrostatic** field −Z/r + V_H by default; `--xapot` adds the target's Xα exchange for comparison (that field is wrong for a projectile — see `docs/mott_elastic_2026-08-07.md` §3). | seconds; the partial-wave count grows with energy |
 
 `refcheck` reports but does not gate — it always exits 0. To gate it (as CI
 does), call the function and inspect the return value:
