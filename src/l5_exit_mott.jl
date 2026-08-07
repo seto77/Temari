@@ -24,6 +24,15 @@
 # ---- 使う場 (`scat_pot`) --------------------------------------------------
 # `:static` (既定)  純静電場 **V = −Z/r + V_H[ρ]**。中性原子なので遠方で
 #                   指数的に 0 へ落ちる。飛来電子が感じる場の主要項はこれ。
+# `:fm`             上に **Furness–McCarthy の局所交換**を足したもの:
+#
+#                     V_ex(r) = ½(ε − V_st) − ½√[(ε − V_st)² + 4πρ(r)]
+#
+#                   (Furness & McCarthy 1973。ELSEPA/NIST SRD 64 が使う形)。
+#                   **入射エネルギー ε に依存し、高速で 0 に落ちる** —
+#                   V_ex → −πρ/(ε − V_st) なので、これが飛来電子の交換の
+#                   正しい振る舞い。標的の Xα 交換 (下) との決定的な違い。
+#                   常に負 (引力) で、√ の中は正なので数値的にも安全。
 # `:xalpha`         上に**標的の Xα 交換ポテンシャル**を足したもの
 #                   (= `phase` 出口が使っている場)。
 #
@@ -80,7 +89,8 @@ function compute_mott(z::Int, eps_eV::Float64;
     # `c` はパラメータ化してある: c → ∞ でスピン軌道分裂が消え、g ≡ 0 かつ
     # Sherman 関数 ≡ 0 にならなければならない (T8 と同じ思想の構造検査 T24)
     eps_eV > 0 || error("eps_eV は正 (入射電子の運動エネルギー)")
-    scat_pot in (:static, :xalpha) || error("scat_pot は :static か :xalpha")
+    scat_pot in (:static, :fm, :xalpha) ||
+        error("scat_pot は :static / :fm / :xalpha")
     eps = eps_eV / HARTREE_EV
     k = krel(eps, c)                            # 相対論的波数
     # 密度は既定で **完全 Dirac SCF** (エンジン全体の既定に揃える)。重元素では
@@ -89,11 +99,20 @@ function compute_mott(z::Int, eps_eV::Float64;
     a.converged || error("Z=$z の中性 SCF が未収束")
     # 飛来電子が感じる場 (章頭 `scat_pot` 参照)。`exchange` は **SCF の交換処方**で、
     # 密度を通してしか効かない — 散乱ポテンシャルに足すかどうかは `scat_pot` の話
-    pot = if scat_pot === :static
-        vh = hartree(a.r, a.rho)                # 純静電。中性なので尾は自然に 0
-        RvSpline(a.r, (-a.z ./ a.r .+ vh) .* a.r, 0.0)
-    else
+    pot = if scat_pot === :xalpha
         V_bound_callable(a; latter_charge=0.0, local_exchange=true)
+    else
+        vh = hartree(a.r, a.rho)                # 純静電。中性なので尾は自然に 0
+        vst = -a.z ./ a.r .+ vh
+        if scat_pot === :fm                     # Furness–McCarthy 局所交換
+            # V_ex = ½(ε−V_st) − ½√[(ε−V_st)² + 4πρ]。ρ は数密度 [a₀⁻³]
+            @inbounds for i in eachindex(vst)
+                q = eps - vst[i]
+                vst[i] += 0.5 * q -
+                          0.5 * sqrt(q * q + 4.0 * pi * max(a.rho[i], 0.0))
+            end
+        end
+        RvSpline(a.r, vst .* a.r, 0.0)
     end
 
     # ---- 部分波の上限: δ_κ が落ちるまで伸ばす ----

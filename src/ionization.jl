@@ -249,8 +249,9 @@ function main_mott(args)
         end
         i += 1
     end
-    # --xapot: 標的の Xα 交換を散乱ポテンシャルに足す (比較用。既定は純静電)
-    sp = "--xapot" in args ? :xalpha : :static
+    # --fm: Furness–McCarthy 局所交換 (飛来電子の交換。エネルギー依存)
+    # --xapot: 標的の Xα 交換 (⚠ 飛来電子の場としては誤り。比較用)
+    sp = "--xapot" in args ? :xalpha : ("--fm" in args ? :fm : :static)
     println("初回はこの元素の SCF を解くため時間がかかります...")
     o = compute_mott(z, eps_eV; l_max=l_max, exchange=parse_exchange(args),
                      scat_pot=sp)
@@ -268,6 +269,7 @@ function main_mott(args)
             o["truncated"] ? " ★打ち切り誤差が残る (--lmax で伸ばす)" : "",
             o["max_match_resid"])
     println("場: ", sp === :static ? "純静電 −Z/r + V_H (既定)" :
+                    sp === :fm ? "静電 + Furness–McCarthy 局所交換 (エネルギー依存)" :
                     "静電 + 標的 Xα 交換 (⚠ 飛来電子の場としては誤り。比較用)")
     println("注意: ", o["note"])
     if json_path !== nothing
