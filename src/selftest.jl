@@ -458,6 +458,68 @@ function selftest()
         @assert abs(Δ[argmax(ep)]) < 1e-14 "T16 FAIL: KLI が Δ_HOMO = 0 を守っていない"
     end
 
+    # ---- T17: 同一副殻の自己項に付く角度因子 D_k(l) = Σ_m [3j(l k l;−m,0,m)]² ----
+    # 整数占有の自己項補正 (exchange_weight の第 2 項) の分母 (2k+1) はこの和則そのもの。
+    # **l に依らず 1/(2k+1)** になることが、開殻でも交換の漸近が −1/r になる理由なので、
+    # 実測で確かめたきりにせずゲートにする。あわせて m=0 が閉形式 `threej000_sq` と
+    # 一致することも見る (l4_angular.jl の docstring が約束している突合)。
+    let e_d = maximum(abs(d_selfsum(k, l) * (2k + 1) - 1.0) for l in 0:4 for k in 0:2l),
+        e_m = maximum(abs(wigner3j(l, k, l, 0, 0, 0)^2 - threej000_sq(l, k, l))
+                      for l in 0:4 for k in 0:2l)
+
+        @printf("[T17] 自己項の角度因子 (2k+1)·D_k(l) = 1 (l=0..4): 誤差 %.1e / 3j m=0 突合 %.1e\n",
+                e_d, e_m)
+        @assert e_d < 1e-12 "T17 FAIL: D_k(l) = 1/(2k+1) が成り立たない"
+        @assert e_m < 1e-12 "T17 FAIL: wigner3j と threej000_sq が食い違う"
+    end
+
+    # ---- T18: KLI を SCF へ配線した結果 (段階 4 = 厳密交換の実装完了) ----
+    # 最も鋭いのは (a): **1 電子系では V_x^KLI = −V_H が厳密**なので、有効場は裸の
+    # −Z/r に戻らねばならない。これ 1 つで「自己相互作用の完全相殺 / u_x の 1/2 /
+    # Δ の連立解 / 遠方ガード / SCF への配線」が同時に検査される。Z=2 の側は
+    # `tail_guard!` の回帰テストでもある (軌道が厳密に 0 になる領域で 0/0 になり、
+    # ガード前は r·V が −1 ずれた)。
+    # (b),(c) が指示書の本題 — **Latter クリップ無しで漸近が物理から出ること**。
+    let
+        for z in (1, 2)
+            a = SCFAtom(z, [(1, 0, 1.0)]; exchange=:kli)
+            vh = hartree(a.r, a.rho)
+            dev = maximum(abs.((-z ./ a.r .+ vh .+ a.vx) .* a.r .+ z))
+            e_eps = abs(a.eps[(1, 0)] / (-0.5 * z^2) - 1.0)
+            @printf("[T18a] 1 電子 Z=%d: max|r·V_eff + Z| = %.2e / ε の厳密解比 1%+.1e\n",
+                    z, dev, e_eps)
+            @assert a.converged "T18 FAIL: 1 電子の KLI-SCF が収束しない"
+            @assert dev < 1e-6 "T18 FAIL: 1 電子で V_eff が −Z/r に戻らない"
+            @assert e_eps < 1e-6 "T18 FAIL: 1 電子の固有値が水素様の厳密解と合わない"
+        end
+        # 中性 (開殻 C・閉殻 Ne) と core-hole イオン。粗い格子で足りる —
+        # 見ているのは尾の電荷という O(1) の量で、格子由来の差はその数桁下
+        kw = (dt=8e-3, tol_rho=1e-5, tol_e=1e-6)
+        for (z, occ, want, lab) in (
+                (6, ORBITALS[6], -1.0, "中性 (開殻 2p²)"),
+                (10, ORBITALS[10], -1.0, "中性 (閉殻)"),
+                (10, [(1, 0, 1.0), (2, 0, 2.0), (2, 1, 6.0)], -2.0, "1s core-hole"))
+            a = SCFAtom(z, occ; latter_charge=(want == -1.0 ? 1.0 : 2.0),
+                        exchange=:kli, kw...)
+            vh = hartree(a.r, a.rho)
+            rv = (-z ./ a.r .+ vh .+ a.vx) .* a.r
+            i30 = findmin(abs.(a.r .- 30.0))[2]
+            @printf("[T18b] Z=%2d %-16s: N=%.1f  r·V_eff(30 a₀) = %+.5f (物理の予測 %+.1f)\n",
+                    z, lab, a.nel, rv[i30], want)
+            @assert a.converged "T18 FAIL: KLI-SCF が Latter 無しで収束しない (Z=$z)"
+            @assert abs(rv[i30] - want) < 0.01 "T18 FAIL: 漸近が −(Z−N+1)/r でない (Z=$z)"
+        end
+        # 密度の向き: 厳密交換は局所交換 (α=1) より弱い引力なので、密度は**広がる**。
+        # 診断書 §1 の「密度が収縮しすぎている」を直す向きであることの確認
+        a = SCFAtom(26, ORBITALS[26]; exchange=:kli, kw...)
+        b = SCFAtom(26, ORBITALS[26]; kw...)
+        w = simpson_weights(length(a.r), a.dt) .* a.r
+        r2(x) = sum(4pi .* x.r .^ 4 .* x.rho .* w) / x.nel
+        @printf("[T18c] Fe の ⟨r²⟩: Xα+Latter %.4f → KLI %.4f a₀² (広がる向き)\n",
+                r2(b), r2(a))
+        @assert r2(a) > r2(b) "T18 FAIL: KLI で密度が広がっていない"
+    end
+
     # ---- T13b: 交換係数が二重に掛かっていないこと ----
     # 260807Cl に実際にやらかした事故の回帰テスト。`slater_vx` に X_ALPHA を
     # 畳み込んだ結果、終状態ポテンシャル (第 5 章、KS 2/3) が (2/3)·α になり、

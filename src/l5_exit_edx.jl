@@ -21,7 +21,7 @@ function compute_channel(z::Int, tag::String, e0_keV::Float64;
                          s_nodes::Union{Nothing,Vector{Float64}}=nothing,
                          verbose::Bool=true,
                          rel_continuum::Bool=false, dirac_scf::Bool=true,
-                         x_alpha::Float64=X_ALPHA,
+                         x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
                          rel_override::Union{Nothing,RelCont}=nothing)
     # rel_continuum=true: 放出電子をスカラー相対論で解く (第 3.5 章、モデル v3)。
     # rel_override: T8 の c→∞ 極限テスト等で RelCont を直接注入する診断用
@@ -30,7 +30,8 @@ function compute_channel(z::Int, tag::String, e0_keV::Float64;
 
     t0 = time()
     ch = prepare_channel(z, tag, e0_keV; rel_continuum=rel_continuum,
-                         dirac_scf=dirac_scf, x_alpha=x_alpha, rel_override=rel_override)
+                         dirac_scf=dirac_scf, x_alpha=x_alpha, exchange=exchange,
+                         rel_override=rel_override)
     K_nodes = 4.0 * pi .* s_nodes .* BOHR_ANG   # s [Å⁻¹] → K [a0⁻¹] (4π 規約!)
 
     N, diag = compute_NK(ch.ion_pot, ch.r_b, ch.u_b, ch.E_th, ch.T0, K_nodes, z;

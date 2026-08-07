@@ -27,7 +27,7 @@ concatenating the files in include order reproduces a single-file build.
 |---|---|---|
 | `l0_numerics.jl` | L0 | constants, accuracy knobs, splines, Gauss–Legendre, spherical Bessel (scalar and 8-lane), Coulomb functions, Numerov |
 | `l0_json.jl` | L0 | the minimal JSON reader/writer that stands in for a stdlib that does not exist |
-| `l1_atomic.jl` | L1 | self-consistent HFS — non-relativistic, or a **full Dirac SCF** (DHFS) resolved in κ with the small component in the density — bound Schrödinger and Dirac states, relaxed core-hole potential |
+| `l1_atomic.jl` | L1 | self-consistent HFS — non-relativistic, or a **full Dirac SCF** (DHFS) resolved in κ with the small component in the density — with local Xα exchange or **exact exchange in the KLI form** (no Latter correction); bound Schrödinger and Dirac states, relaxed core-hole potential |
 | `l2_continuum.jl` | L2 | `ContinuumSet` — distorted waves, energy normalization, Coulomb matching, orthogonalization, the scalar-relativistic option |
 | `l3_radial.jl` | L3 | `RlTable` — the multipole integrals and their PCHIP interpolation |
 | `l4_angular.jl` | L4 | 3j symbols, Legendre recursion, MDFF assembly |

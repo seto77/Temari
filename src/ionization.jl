@@ -104,9 +104,21 @@ const USAGE = """
   julia -t auto ionization.jl fx   Z [--s ...] [--nonrel] [--json path]  # 原子散乱因子
                                    # 既定は完全 Dirac SCF 密度。--nonrel で比較用の非相対論
 
-opts: [--quick|--high] [--rel] [--nodscf] [--s s1 s2 ...] [--json path]
+opts: [--quick|--high] [--rel] [--nodscf] [--kli] [--s s1 s2 ...] [--json path]
       SCF は既定で完全 Dirac (DHFS)。--nodscf で旧来の非相対論 SCF (比較用)
+      --kli は厳密交換 (Latter 補正なし)。まだ非相対論 SCF にしか配線して
+      いないので --nodscf を伴う (指定しなくても自動で落ちる)
       --s は F(s) 出口のみ (edge は K=0 の 1 点で、その分だけ安い)"""
+
+"""`--kli` の解釈。KLI はまだ Dirac 経路に配線していないので、指定されたら
+非相対論 SCF へ落として**そのことを明示する** (処方の変更を黙ってやらない)。
+戻り値 `(exchange, dscf)`。"""
+function parse_exchange(args, dscf::Bool)
+    "--kli" in args || return (:xalpha, dscf)
+    dscf && println("--kli: KLI は Dirac 経路に未配線のため、非相対論 SCF に切り替えます " *
+                    "(処方 ID にも出ます)")
+    return (:kli, false)
+end
 
 "fx サブコマンド: X 線 f_x(s) と電子線 f_e(s) の原子散乱因子"
 function main_fx(args)
@@ -127,7 +139,8 @@ function main_fx(args)
         i += 1
     end
     println("初回はこの元素の SCF を解くため時間がかかります...")
-    o = compute_fx(z; s_nodes=s_nodes, relativistic=!("--nonrel" in args))
+    xc, rel_scf = parse_exchange(args, !("--nonrel" in args))
+    o = compute_fx(z; s_nodes=s_nodes, relativistic=rel_scf, exchange=xc)
     s = o["s_A_inv"]; fx = o["f_x"]; fe = o["f_e_A"]
     @printf("\n%10s  %14s  %14s\n", "s [1/Å]", "f_x [e]", "f_e [Å]")
     for i in 1:max(1, length(s) ÷ 15):length(s)
@@ -175,11 +188,12 @@ function main_gos(args)
         i += 1
     end
     settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
-    println("Z=$z $tag   出口: GOS df/dΔE(Q)   処方: ", model_id_of(rel, dscf))
+    xc, dscf = parse_exchange(args, dscf)
+    println("Z=$z $tag   出口: GOS df/dΔE(Q)   処方: ", model_id_of(rel, dscf, X_ALPHA, xc))
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
             "   スレッド: ", Threads.nthreads(), "   (E0 非依存)")
     o = compute_gos(z, tag; settings=settings, eps_max_Ha=eps_max, q_max=q_max,
-                    rel_continuum=rel, dirac_scf=dscf)
+                    rel_continuum=rel, dirac_scf=dscf, exchange=xc)
     q = o["q_a0inv"]; fs = o["f_sum"]; occ = o["occupancy"]
     @printf("\n完了 (%.0f s)  ΔE ノード %d 点 × Q %d 点   ε 上端 = %.1f eV\n",
             o["elapsed_s"], length(o["dE_eV"]), length(q),
@@ -226,7 +240,7 @@ function main_phase(args)
         i += 1
     end
     println("初回はこの元素の SCF を解くため時間がかかります...")
-    o = compute_phase(z, eps_eV; l_max=l_max)
+    o = compute_phase(z, eps_eV; l_max=l_max, exchange=parse_exchange(args, false)[1])
     @printf("\n%4s  %14s  %14s  %12s\n", "l", "δ_l [rad]", "sin²δ_l", "フィット残差")
     for (l, d, s2, rs, ok) in zip(o["l"], o["delta_rad"], o["sin2_delta"],
                                   o["match_resid"], o["ok"])
@@ -283,15 +297,17 @@ function main_(args)
         i += 1
     end
     settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
+    xc, dscf = parse_exchange(args, dscf)
     println("Z=$z $tag @ $e0 keV   出口: ", edge_mode ? "dσ/dΔE (EELS)" : "F(s) (EDX)",
-            "   処方: ", model_id_of(rel, dscf))
+            "   処方: ", model_id_of(rel, dscf, X_ALPHA, xc))
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
             "   スレッド: ", Threads.nthreads())
     println("初回はこの元素の SCF を解くため時間がかかります (atom_cache_jl_*.jls に保存)...")
     o = edge_mode ?
-        compute_edge(z, tag, e0; settings=settings, rel_continuum=rel, dirac_scf=dscf) :
+        compute_edge(z, tag, e0; settings=settings, rel_continuum=rel, dirac_scf=dscf,
+                     exchange=xc) :
         compute_channel(z, tag, e0; settings=settings, s_nodes=s_nodes,
-                        rel_continuum=rel, dirac_scf=dscf)
+                        rel_continuum=rel, dirac_scf=dscf, exchange=xc)
     @printf("\n完了 (%.0f s)   E_bound = %.1f eV (小成分ノルム比 %.4f)\n",
             o["elapsed_s"], o["E_bound_eV"], o["small_component_fraction"])
     if edge_mode

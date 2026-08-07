@@ -12,6 +12,8 @@
 # V_eff = −Z/r + V_H[ρ] + V_x^Slater[ρ]、束縛軌道のみ Latter 補正
 # (局所交換は遠方で自己相互作用を消しきれず V→0 になってしまうので、
 # V ≤ −q/r を強制して束縛軌道の尾を正しくする処方。中性原子は q=1)。
+# 260807Cl: `exchange = :kli` で**厳密交換 (KLI)** に切り替えられる。局所交換の
+# α という knob も Latter という当て物も消え、尾 −(Z−N+1)/r は物理の帰結になる。
 # 球対称 average-of-configuration・スピン非分極。この粗い場で足りる理由:
 # F(s) は束縛軌道の精密化に鈍感 (Roothaan-HF に替えても不変を実測) で、
 # 効くのは相対論的収縮 (第 4 章) と連続状態側の処方 (第 5 章) だから。
@@ -212,12 +214,35 @@ end
 radial_density(P::Vector{Vector{Float64}}, q::Vector{Float64}) =
     sum(q[a] .* P[a] .^ 2 for a in eachindex(P))
 
+# 交換ポテンシャルの遠方ガードが発動する動径密度。原子の内部では最小でも
+# ρ̃ ~ 1e-14 (格子内端 r=1e-7 で P ~ 2e-7) なので、10^100 以上の余裕がある。
+const RHO_TAIL_MIN = 1e-120
+
+"""交換ポテンシャルの遠方 0/0 ガード。ρ̃ が計算機的に消える半径から先を、
+**厳密な漸近である −1/r** に落とす。
+
+必要な理由: `solve_bound` は WKB 減衰指数が 80 を超えた先の軌道を**厳密に 0**
+にする (禁制域で発散成分が育つのを止めるための処方)。そこでは V_x の分子も
+分母も 0 になり、ガードが無いと V_x が 0 に落ちて尾が −1/r でなくなる。
+Latter を外した KLI では、この尾が有効ポテンシャルの漸近そのものなので致命的
+(H 様の Z≥2 や He のように HOMO が締まった系で実際に発生する)。
+
+−1/r で正しい理由: 交換ホールはどんな電離状態でも電子ちょうど 1 個分
+(selftest T14 の 3j 和則 Σ(2k+1)c^k = 1 がその根)。イオンでも −1/r。"""
+function tail_guard!(v::Vector{Float64}, r::AbstractVector{Float64},
+                     rho::Vector{Float64})
+    @inbounds for i in eachindex(r)
+        rho[i] < RHO_TAIL_MIN && (v[i] = -1.0 / r[i])
+    end
+    return v
+end
+
 function slater_exchange_potential(P::Vector{Vector{Float64}}, q::Vector{Float64},
                                    l::Vector{Int}, r::AbstractVector{Float64})
     w = orbital_exchange_weights(P, q, l, r)
     num = sum(q[a] .* w[a] for a in eachindex(P))
     den = radial_density(P, q)
-    return @. num / max(den, 1e-300)
+    return tail_guard!((@. num / max(den, 1e-300)), r, den)
 end
 
 """KLI 近似の厳密交換ポテンシャル (Krieger–Li–Iafrate 1992)。
@@ -241,7 +266,7 @@ function kli_exchange_potential(P::Vector{Vector{Float64}}, q::Vector{Float64},
     w = orbital_exchange_weights(P, q, l, r)
     rho = radial_density(P, q)
     vs = [q[a] * w[a] for a in eachindex(P)]
-    v_slater = sum(vs) ./ max.(rho, 1e-300)
+    v_slater = tail_guard!(sum(vs) ./ max.(rho, 1e-300), r, rho)
     ubar = [trapz(w[a], r) for a in 1:n]                  # ∫P_a² u_a dr
     S = [trapz(P[a] .^ 2 .* v_slater, r) for a in 1:n]
     h = i_homo === nothing ? argmax(eps_orb) : i_homo
@@ -254,7 +279,26 @@ function kli_exchange_potential(P::Vector{Vector{Float64}}, q::Vector{Float64},
         Δ[idx] = (I - M) \ rhs
     end
     corr = sum(q[a] * Δ[a] .* P[a] .^ 2 for a in 1:n) ./ max.(rho, 1e-300)
-    return v_slater .+ corr, v_slater, Δ
+    # 遠方は Δ_HOMO = 0 の軌道が密度を独占するので corr → 0、V_x → −1/r。
+    # ρ̃ が消える所から先は `tail_guard!` がその漸近を明示的に置く
+    return tail_guard!(v_slater .+ corr, r, rho), v_slater, Δ
+end
+
+"""SCF の軌道辞書から厳密交換に渡す配列 (P, q, l, ε) を組む。
+
+⚠ **占有 0 の副殻は落とす。** `orbital_exchange_weights` は規格化の Lagrange 条件
+由来の 1/q_a で割るので、q=0 の軌道を混ぜると 0/0 になる (密度にも交換にも寄与
+しないので落として厳密に正しい)。イオンの配置 (q−1) では実際に起こり得る。
+
+順序は (n, l) の昇順で安定 — KLI の Δ を解く連立系は行の順序に依らないが、
+浮動小数の総和順序は依るので、反復ごとに順序が揺れないようにしておく。"""
+function scf_exchange_arrays(occ::Vector{Tuple{Int,Int,Float64}},
+                             orbs::Dict{Tuple{Int,Int},Vector{Float64}},
+                             eps::Dict{Tuple{Int,Int},Float64})
+    ks = sort([(n, l) for (n, l, q) in occ if q > 0.0])
+    P = [orbs[k] for k in ks]
+    q = [first(x[3] for x in occ if (x[1], x[2]) == k) for k in ks]
+    return P, q, [k[2] for k in ks], [eps[k] for k in ks]
 end
 
 "Slater 局所交換 −(3/2)(3ρ/π)^(1/3)"
@@ -303,6 +347,12 @@ slater_vx(rho::Float64) = -1.5 * (3.0 * max(rho, 0.0) / pi)^(1.0 / 3.0)
 "交換係数をキャッシュキーと処方 ID に載せるための短いタグ (α=2/3 → \"xa67\")"
 xa_tag(a::Float64) = "xa" * string(round(Int, a * 100))
 
+"""交換**処方**のタグ。`:kli` は α という knob を持たないので \"kli\" になる。
+
+キャッシュキーと処方 ID は必ずここを通す — 鍵に処方の次元を入れ忘れると、
+別処方で作った原子を黙って読む (260807Cl に SCF 種別で実際にやった)。"""
+xc_tag(a::Float64, exchange::Symbol) = exchange === :kli ? "kli" : xa_tag(a)
+
 """r·V(r) を ln r でスプラインし、グリッド外は漸近値 asym に落とす callable
 (Python 版 _rv_spline)。V でなく r·V を補間するのは原点発散を避けるため。"""
 struct RvSpline
@@ -326,7 +376,10 @@ converged を持つ。latter_charge: Latter 尾の電荷 (中性 1、+1 イオ�
 `relativistic = true` で **完全 Dirac SCF (DHFS)** になる (260807Cl 追加):
 軌道を (n, l, κ) ごとに動径 Dirac 方程式で解き、密度に**小成分を含める**。
 非相対論経路とは別物なので、`relativistic` フィールドで取り違えを防ぐ
-(ディスクキャッシュも別キー — l5_channel.jl の get_neutral を参照)。"""
+(ディスクキャッシュも別キー — l5_channel.jl の get_neutral を参照)。
+
+`exchange = :kli` で**厳密交換 (KLI)** になる (260807Cl 追加)。局所交換 α を捨て、
+Latter クリップも外す — 詳細は下の SCF 本体のコメント。"""
 mutable struct SCFAtom
     z::Int
     occ::Vector{Tuple{Int,Int,Float64}}
@@ -339,6 +392,11 @@ mutable struct SCFAtom
     nel::Float64
     relativistic::Bool
     x_alpha::Float64         # 使った交換係数 (取り違え防止。キャッシュキーにも入る)
+    exchange::Symbol         # :xalpha (局所 Slater) | :kli (厳密交換の KLI 表現)
+    vx::Vector{Float64}      # 収束した交換ポテンシャル。**:kli のときだけ埋まる**
+                             # (:xalpha は ρ の汎関数なので必要時に組み直せる)
+    z_asym::Float64          # V_eff の尾 −z_asym/r。:xalpha は Latter 電荷、
+                             # :kli は物理が出す Z−N+1 (中性 1、core-hole 2)
 end
 
 """(n, l, q) の占有を Dirac の (n, l, κ, q) へ分ける。
@@ -369,11 +427,23 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                  tol_e::Float64=SCF_TOL_E, max_iter::Int=SCF_MAX_ITER,
                  rho_init::Union{Nothing,Vector{Float64}}=nothing,
                  relativistic::Bool=false, c::Float64=C_LIGHT,
-                 x_alpha::Float64=X_ALPHA)
+                 x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha)
+    exchange in (:xalpha, :kli) || error("unknown exchange $exchange (:xalpha|:kli)")
+    # Dirac 経路の orbs は占有加重和 (診断用) であって軌道そのものではないので、
+    # そのまま厳密交換に渡せない。κ 分解の交換角度係数と小成分の扱いを決めてから
+    # (docs/next_phase_2026-08-07.md §4.1)
+    exchange === :kli && relativistic &&
+        error("KLI はまだ Dirac 経路に配線していない (--nodscf で非相対論 SCF にすること)")
     n = ceil(Int, (log(rmax) - log(r0)) / dt)          # numpy.arange と同じ点数
     t = log(r0) .+ dt .* (0:n-1)
     r = exp.(t)
     nel = sum(q for (_, _, q) in occ)
+    # ---- KLI の要点: Latter を外しても漸近が自動で正しくなる ----------------
+    # V_H → N/r、V_x^KLI → −1/r なので V_eff → −(Z−N+1)/r。中性なら −1/r、
+    # core-hole イオン (N=Z−1) なら −2/r で、latter_charge に**手で入れていた値と
+    # 厳密に一致する**。当て物 (V ≤ −q/r の強制) が物理の帰結に置き換わる。
+    z_asym = exchange === :kli ? (z - nel + 1.0) : latter_charge
+    vx_kli = Float64[]        # 前反復の軌道から作った KLI ポテンシャル (空 = 未構築)
     rho = rho_init === nothing ? [tf_moliere_density(z, ri) * (nel / z) for ri in r] :
           copy(rho_init)
     converged = false
@@ -387,12 +457,24 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
     de = 0.0
     for _ in 1:max_iter
         vh = hartree(r, rho)
-        veff_b = similar(r)                            # V_eff に Latter を掛けた場
-        @inbounds for i in eachindex(r)
-            veff_b[i] = min(-z / r[i] + vh[i] + x_alpha * slater_vx(rho[i]),
-                            -latter_charge / r[i])
+        veff_b = similar(r)                            # 束縛軌道を解く有効場
+        local asym_now::Float64
+        if exchange === :kli && !isempty(vx_kli)
+            # 厳密交換: **クリップしない**。漸近は上のコメントのとおり物理が出す
+            @inbounds for i in eachindex(r)
+                veff_b[i] = -z / r[i] + vh[i] + vx_kli[i]
+            end
+            asym_now = z_asym
+        else
+            # 局所交換 + Latter クリップ。:kli の初回もここを通る (鶏と卵 —
+            # KLI は軌道を要るので、1 反復目は Xα でブートストラップする)
+            @inbounds for i in eachindex(r)
+                veff_b[i] = min(-z / r[i] + vh[i] + x_alpha * slater_vx(rho[i]),
+                                -latter_charge / r[i])
+            end
+            asym_now = latter_charge
         end
-        pot = RvSpline(r, veff_b .* r, -latter_charge)
+        pot = RvSpline(r, veff_b .* r, -asym_now)
         rho_new = zeros(length(r))
         eps_now = Dict{Tuple{Int,Int},Float64}()
         orbs = Dict{Tuple{Int,Int},Vector{Float64}}()
@@ -478,6 +560,14 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
             end
         end
         @label after_orbitals
+        if exchange === :kli
+            # ⚠ **ポテンシャルも混合する。** KLI は軌道汎関数なので、混ぜた密度から
+            # 決まらない — 密度混合だけでは前反復の交換が引き継がれず振動する
+            Pv, qv, lv, epv = scf_exchange_arrays(occ, orbs, eps_now)
+            vx_new = kli_exchange_potential(Pv, qv, lv, r, epv)[1]
+            vx_kli = isempty(vx_kli) ? vx_new :
+                     (1.0 - beta) .* vx_kli .+ beta .* vx_new
+        end
         drho = trapz(4.0 * pi .* r .* r .* abs.(rho_new .- rho), r)
         de = maximum(abs(eps_now[k] - get(eps_prev, k, 1e9)) / max(1.0, abs(eps_now[k]))
                      for k in keys(eps_now))
@@ -491,16 +581,33 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
         end
     end
     if !converged
-        @printf("WARN: %sSCF Z=%d not fully converged (drho=%.1e, de=%.1e)\n",
-                relativistic ? "Dirac " : "", z, drho, de)
+        @printf("WARN: %s%sSCF Z=%d not fully converged (drho=%.1e, de=%.1e)\n",
+                relativistic ? "Dirac " : "", exchange === :kli ? "KLI " : "",
+                z, drho, de)
     end
     return SCFAtom(z, occ, r, dt, rho, orbs, eps_now, converged, nel, relativistic,
-                   x_alpha)
+                   x_alpha, exchange, vx_kli, z_asym)
 end
 
-"収束密度から束縛軌道用ポテンシャル (静電+Slater 交換+Latter) を作る"
-function V_bound_callable(a::SCFAtom; latter_charge::Float64=1.0)
+"""収束密度から束縛軌道用ポテンシャル V_eff を作る。
+
+  `:xalpha` −Z/r + V_H + α·V_x^Slater を Latter でクリップ (V ≤ −q/r)
+  `:kli`    −Z/r + V_H + V_x^KLI。**クリップしない** (漸近は物理が出す)。
+            `latter_charge` は無視され、尾は SCF が決めた `a.z_asym`
+
+`local_exchange = true` を渡すと `:kli` の原子でも局所交換で場を組み直す。
+**散乱 (phase 出口) 用**: 中性標的の静的場は遠方で 0 に落ちねばならないが、
+KLI の V_eff は −1/r の尾を持つ。これは KS ポテンシャルとしては正しい振る舞い
+(自己相互作用が消えている証拠) で、飛来電子が感じる静的場としては誤り。
+KLI の改善は**密度**を通して受け取り、交換は終状態場 (第 5 章) と同じく
+局所形で当てる、という切り分け。"""
+function V_bound_callable(a::SCFAtom; latter_charge::Float64=1.0,
+                          local_exchange::Bool=false)
     vh = hartree(a.r, a.rho)
+    if a.exchange === :kli && !local_exchange
+        veff = @. -a.z / a.r + vh + a.vx
+        return RvSpline(a.r, veff .* a.r, -a.z_asym)
+    end
     veff = similar(a.r)
     @inbounds for i in eachindex(a.r)
         veff[i] = min(-a.z / a.r[i] + vh[i] + a.x_alpha * slater_vx(a.rho[i]),

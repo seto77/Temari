@@ -55,13 +55,65 @@ The chapter numbering below is the chapter numbering in the source.
 
 | Chapter | Step | Prescription |
 | --- | --- | --- |
-| 2 | Neutral-atom field | SCF Hartree–Fock–Slater with Xα exchange (α = 2/3, Kohn–Sham) and the Latter tail correction. A **full Dirac SCF** (`--dscf`, the default): every occupied orbital solved from the radial Dirac equation, resolved in κ, with the small component kept in the density. Decisive for heavy elements — it moves Au's $f_x$ by 10.8 % at $s = 4$ Å⁻¹ and brings the 1s eigenvalue onto the experimental K edge (0.9908 → 1.00004) |
+| 2 | Neutral-atom field | SCF Hartree–Fock–Slater with Xα exchange (α = 1, Slater) and the Latter tail correction. A **full Dirac SCF** (the default; `--nodscf` turns it off): every occupied orbital solved from the radial Dirac equation, resolved in κ, with the small component kept in the density. Decisive for heavy elements — it moves Au's $f_x$ by 10.8 % at $s = 4$ Å⁻¹ and brings the 1s eigenvalue onto the experimental K edge (0.9908 → 1.00004). `--kli` replaces the local exchange with **exact exchange in the KLI form** — see below |
 | 4 | Initial state | Radial Dirac equation solved in that field; the large component is $u_{nl}$. K/L1/L2/L3 are resolved in $j$ through $\kappa$, and renormalized to $\int G^2 \mathrm{d}r = 1$ |
 | 5 | Final-state field | The core hole is opened and the ion is re-converged (relaxed core-hole SCF), plus a Kohn–Sham (2/3) static exchange — the distorted-wave approximation |
 | 3 | Continuum state | Three-segment Numerov integration, asymptotically matched to Coulomb functions for energy normalization $\langle\varepsilon\vert\varepsilon'\rangle = \delta(\varepsilon - \varepsilon')$; the partial wave with the same $l$ as the initial state is Gram–Schmidt orthogonalized against it |
 | 3.5 | Scalar relativity | (Julia only, `--rel`) the continuum electron is treated scalar-relativistically — this is model v3 |
 | 6 | MDFF assembly | $S = q_{nl} \sum_{l'\lambda} (2l'+1)(2\lambda+1)\,[3j]^2\,R\,R'\,P_\lambda(\cos\Theta)$ with $R_{l'\lambda}(Q) = \int u_{\varepsilon l'}\, j_\lambda(Qr)\, u_{nl}\,\mathrm{d}r$, over the symmetric Ewald pair $(Q_+, Q_-)$: a double angular integral followed by the $\varepsilon$ integral |
 | 7 | Cross section | Bote–Salvat analytic coefficients (`bote_salvat.json`). No physics is computed here — it is a table lookup and an evaluation |
+
+## Exact exchange (`--kli`)
+
+Local Xα exchange has one knob, α, and the knob is over-determined: the density
+wants α ≈ 0.75, while the eigenvalues and the ionization cross sections want
+α = 1. That is not a fitting failure — Slater's α = 1 with the Latter correction
+is built to put eigenvalues on binding energies, while α ≈ 0.7 is the value that
+reproduces Hartree–Fock *densities*. One scalar cannot serve both.
+
+`--kli` removes the knob. Exchange is computed exactly for the average of
+configuration and represented as a local potential in the Krieger–Li–Iafrate
+form:
+
+$$V_x^{\text{KLI}}(r) = V_x^{S}(r) + \frac{1}{\tilde\rho(r)}\sum_a q_a P_a(r)^2 \Delta_a$$
+
+Two properties matter operationally. First, **the Latter correction disappears**:
+$V_H \to N/r$ and $V_x \to -1/r$, so the effective field goes to $-(Z-N+1)/r$ on
+its own — exactly the value that was being imposed by hand. Second, the
+asymptote holds for **open** shells too, because the weights carry an
+integer-occupation self term,
+
+$$W^k_{ab} = \tfrac{1}{2}q_a q_b + \delta_{ab}\,\frac{(2l_a+1)q_a - q_a^2/2}{2k+1},$$
+
+which comes from $\langle n^2 \rangle = \langle n \rangle$ for integer
+occupations. Spin polarization is not needed for this.
+
+Measured against Waasmaier–Kirfel (X-ray) and Peng *et al.* (electron) — both
+fitted to relativistic Hartree–Fock — with the SCF non-relativistic on both
+sides so that only the exchange differs:
+
+| Z | | Xα = 1 | Xα = 0.75 | **KLI** |
+| --- | --- | --- | --- | --- |
+| 6 | peak \|Δf_x\| [e] | 0.113 | 0.129 | **0.022** |
+| 6 | f_e vs Peng, s ≤ 2 [%] | 1.61 | 3.67 | **0.58** |
+| 14 | peak \|Δf_x\| [e] | 0.173 | 0.108 | **0.018** |
+| 14 | f_e vs Peng, s ≤ 2 [%] | 2.15 | 2.17 | **0.87** |
+| 26 | peak \|Δf_x\| [e] | 0.288 | 0.070 | **0.063** |
+| 26 | f_e vs Peng, s ≤ 2 [%] | 2.36 | 1.11 | **0.64** |
+
+KLI beats not only α = 1 but also the best-fit α = 0.75, **with no knob at all**.
+The ionization side moves the other way, but only slightly: mean
+\|σ_own/σ_Bote − 1\| over C K / Fe K / Au L3 goes 0.083 (α = 1) → 0.086 (KLI) →
+0.088 (α = 0.75). Since σ is shipped from Bote–Salvat and σ_own is a sanity
+indicator, that trade is heavily in KLI's favour.
+
+**Limitation.** KLI is wired into the non-relativistic SCF only, so `--kli`
+implies `--nodscf`, and for heavy atoms the missing relativistic contraction
+dominates any exchange improvement (Au: 0.82 % for Dirac + Xα vs 2.68 % for
+non-relativistic KLI, against the same reference). Extending KLI to the Dirac
+path — which needs the κ-resolved angular coefficients and a decision on the
+small component — is the next step, and until it lands the shipping default
+stays Dirac + Xα.
 
 ## Model identifiers
 

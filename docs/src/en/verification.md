@@ -6,7 +6,7 @@ is not in it.
 ## Tier 1 — the analytic ladder
 
 ```bash
-julia -t auto src/ionization.jl selftest      # ~10 s, ends with ALL PASS
+julia -t auto src/ionization.jl selftest      # ~45 s, ends with ALL PASS
 ```
 
 Each rung compares a piece of the engine against something known exactly.
@@ -30,10 +30,18 @@ Failures are assertions, so the command exits non-zero on a real failure.
 | T11 | The GOS at both limits for hydrogen 1s: as $Q \to 0$ against the exact continuum dipole strength $1 - \sum_n f_{1s \to np}$ (closed form, summed in-test), that the approach is $O(Q^2)$, and the Bethe sum rule $\int \mathrm{d}f/\mathrm{d}\Delta E \, \mathrm{d}\Delta E \to N$ at large $Q$ | dipole −0.00 %, $Q^2$ ratio 4.00, sum rule 0.998 |
 | T12 | The X-ray scattering factor of an exact hydrogen 1s density against the closed form $[1+(K/2)^2]^{-2}$, over K = 0…32, plus $f_x(0) = Z$, monotonicity, and the bare-nucleus limit of Mott–Bethe | max rel. 7.7×10⁻¹⁴ |
 | T13 | The Dirac SCF: that raising $c$ by 100× collapses it onto the non-relativistic SCF density, that the physical $c$ leaves a much larger difference, and that the 1s eigenvalue lands on the **experimental** K edge from the bundled Bote–Salvat table | c→∞ 2.2×10⁻⁵ vs physical 7.3×10⁻³; 1s/edge 0.9908 → 1.00004 |
+| T13b | That the exchange coefficient is not applied twice — `slater_vx` must be the bare Slater form, with α supplied by the SCF and 2/3 by the final-state field | exact |
+| T14 | The radial Slater function $Y^k$: against the closed-form hydrogenic Hartree potential, its $\langle r^2\rangle/r^2$ limit at $k=2$, the exact cancellation of self-interaction in a one-electron system, and the 3j sum rule $\sum_k (2k+1)c^k = 1$ that normalizes the exchange hole | 2.3×10⁻⁷ / 1.7×10⁻⁷ / 3.3×10⁻¹⁶ / 0 |
+| T15 | Exact exchange for the average of configuration: $-V_H/2$ for a two-electron s shell, complete cancellation for one electron, $V_x \cdot r \to -1$ for closed-shell Ne, and $E_x$ computed two independent ways | 2.2×10⁻¹⁶ / 1.2×10⁻³ / 3.3×10⁻¹⁶ |
+| T16 | The orbital exchange potential and KLI: the identity $\sum_a q_a \bar u_a = 2E_x$ that fixes the factor of 1/2, and the asymptote $V_x \cdot r \to -1$ for **open** shells too (C 2p², Au 6s¹), which is what makes the Latter correction unnecessary | identity 1 − 10⁻¹⁰; asymptote −1.000 … −1.002 |
+| T17 | The angular factor of the integer-occupation self term, $D_k(l) = \sum_m [3j(l\,k\,l;-m,0,m)]^2 = 1/(2k+1)$, independent of $l$, and its $m=0$ agreement with the closed form | 4.4×10⁻¹⁶ / 2.8×10⁻¹⁷ |
+| T18 | **KLI wired into the SCF.** (a) In a one-electron atom exact exchange must cancel the Hartree term exactly, so the effective field collapses to the bare $-Z/r$ and the eigenvalue to $-Z^2/2$ — one assertion covering self-interaction cancellation, the 1/2 convention, the Δ solve, the far-field guard and the SCF wiring. (b) With **no Latter clip**, the tail comes out as $-(Z-N+1)/r$ for neutral open shells, neutral closed shells and a core-hole ion alike. (c) The density expands relative to Xα, the direction the diagnosis called for | (a) 1.1×10⁻⁹, ε ratio 1 ± 2×10⁻⁹; (b) −1.0008 / −1.0005 / −2.0004; (c) Fe ⟨r²⟩ 1.423 → 1.551 a₀² |
 
 T8 is the strongest structural check in the ladder: it exercises the entire
 relativistic code path and demands that it collapse onto an independently
-written non-relativistic path.
+written non-relativistic path. T18a is the sharpest single number: a
+one-electron atom has no exchange partner, so any error anywhere in the exact-
+exchange chain shows up as a residual field where there must be none.
 
 ## Tier 2 — an independent implementation
 

@@ -89,10 +89,11 @@ mott_bethe_a0(z_net::Float64, fx::Float64, K::Float64) = 2.0 * (z_net - fx) / (K
 """
 function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
                     relativistic::Bool=true, x_alpha::Float64=X_ALPHA,
-                    verbose::Bool=true)
+                    exchange::Symbol=:xalpha, verbose::Bool=true)
     s_nodes === nothing && (s_nodes = collect(0.0:0.1:6.0))
     issorted(s_nodes) || error("s_nodes は昇順で")
-    a = get_neutral(z; relativistic=relativistic, x_alpha=x_alpha)
+    a = get_neutral(z; relativistic=relativistic, x_alpha=x_alpha,
+                    exchange=exchange)
     a.converged || error("Z=$z の中性 SCF が未収束")
     K = 4.0 * pi .* s_nodes .* BOHR_ANG            # s [Å⁻¹] → K [a₀⁻¹] (F(s) と同規約)
     # 台形則規格化のバイアスを除く (上のコメント参照)。一様スケールなので形は不変
@@ -111,10 +112,12 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
         "n_electrons_scf" => a.nel, "norm_correction" => corr - 1.0,
         "s_A_inv" => s_nodes, "q_a0inv" => K,
         "f_x" => fx, "f_e_A" => fe,
-        "relativistic" => a.relativistic,
-        "density" => a.relativistic ?
-                     "DHFS (完全 Dirac SCF、小成分込み) + Slater 交換 + Latter 尾、球対称" :
-                     "HFS (Slater 交換 + Latter 尾)、非相対論・球対称",
+        "relativistic" => a.relativistic, "exchange" => String(a.exchange),
+        "density" => (a.relativistic ? "DHFS (完全 Dirac SCF、小成分込み)" :
+                      "HFS (非相対論)") *
+                     (a.exchange === :kli ?
+                      " + 厳密交換 (KLI、Latter 無し)、球対称" :
+                      " + Slater 交換 + Latter 尾、球対称"),
         "note" => "f_e は第 1 Born (Mott–Bethe) の**非相対論** f_e。" *
                   "入射電子の γ = 1 + E/(m₀c²) は掛けていない — Peng/Doyle–Turner と" *
                   "同じ規約で、消費側 (ReciPro の BetheMethod.getU など) が掛ける。" *

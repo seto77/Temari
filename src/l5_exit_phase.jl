@@ -38,15 +38,18 @@ function compute_phase(z::Int, eps_eV::Float64;
                        l_max::Union{Nothing,Int}=nothing,
                        r_core::Float64=15.0, r_match::Float64=60.0,
                        ppw::Float64=CONT_PPW, dt_log::Float64=CONT_DT_LOG,
-                       verbose::Bool=true)
+                       exchange::Symbol=:xalpha, verbose::Bool=true)
     eps_eV > 0 || error("eps_eV は正 (入射電子の運動エネルギー)")
     eps = eps_eV / HARTREE_EV
     kappa = sqrt(2.0 * eps)
     # 中性原子が電子に及ぼす静的場。latter_charge = 0 で尾を 0 に落とす
     # (束縛状態用の V_bound_callable は −1/r の尾を強制するので散乱には使えない)
-    a = get_neutral(z)
+    # ⚠ KLI の原子でも **local_exchange=true** で局所交換の形に組み直す。KLI の
+    #   V_eff は −1/r の尾を持ち、これは KS ポテンシャルとして正しいが、中性標的の
+    #   静的場としては誤り。KLI の改善は密度を通して受け取る (V_bound_callable 参照)
+    a = get_neutral(z; exchange=exchange)
     a.converged || error("Z=$z の中性 SCF が未収束")
-    pot = V_bound_callable(a; latter_charge=0.0)
+    pot = V_bound_callable(a; latter_charge=0.0, local_exchange=true)
     # 有効な部分波の数 ~ κ·(原子半径)。原子は ~5 a₀ で遮蔽されるので余裕を足す
     lm = l_max === nothing ? clamp(ceil(Int, kappa * 6.0) + 12, 12, 120) : l_max
     verbose && @printf("Z=%d  ε=%.1f eV  κ=%.4f a₀⁻¹  l_max=%d\n", z, eps_eV, kappa, lm)
@@ -61,6 +64,8 @@ function compute_phase(z::Int, eps_eV::Float64;
         "match_resid" => cont.match_resid,
         "ok" => cont.ok,
         "reference" => "riccati-bessel (z_asym=0)",
-        "exchange" => "slater-local (SCF と同じ Xα)",
+        "exchange" => a.exchange === :kli ?
+                      "slater-local (飛来電子用。密度は KLI 厳密交換の SCF)" :
+                      "slater-local (SCF と同じ Xα)",
         "note" => "スピン平均・スカラー。分極/吸収ポテンシャルなし")
 end
