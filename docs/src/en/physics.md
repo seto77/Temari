@@ -128,6 +128,35 @@ little: mean \|σ_own/σ_Bote − 1\| over C K / Fe K / Au L3 goes 0.073
 (Dirac + Xα) → 0.077 (Dirac + KLI). Since σ is shipped from Bote–Salvat and
 σ_own is a sanity indicator, that is a cheap trade.
 
+### Against a computed reference rather than a fit
+
+Every parameterization above is a *fit* to relativistic Hartree–Fock, so once the
+engine's error reaches the fit's own residual the comparison stops resolving.
+The measurement was therefore repeated against **OFFV1** — the numerical
+Dirac–Hartree–Fock form factors of Olukayode, Froese Fischer & Volkov (2023),
+Z = 2–118, s = 0–6 Å⁻¹, precision 10⁻⁵ (see `refs/README.md`):
+
+| Z | | Waasmaier–Kirfel | Cromer–Mann | Dirac + Xα | **Dirac + KLI** |
+| --- | --- | --- | --- | --- | --- |
+| 6 | relative, s ≤ 2 [%] | 0.161 | 0.265 | 2.450 | **0.153** |
+| 14 | relative, s ≤ 2 [%] | 0.065 | 0.117 | 1.794 | 0.087 |
+| 26 | relative, s ≤ 2 [%] | 0.119 | 0.048 | 1.508 | **0.079** |
+| 79 | relative, s ≤ 2 [%] | 0.079 | 0.054 | 0.711 | **0.030** |
+| 79 | max \|Δf_x\|, s ≤ 6 [e] | 0.105 | 7.82 | 0.499 | **0.030** |
+
+Dirac + KLI matches Waasmaier–Kirfel's own accuracy and beats it for C, Fe and
+Au — for gold by 2.6× in the relative measure, and by more than three orders of
+magnitude against Cromer–Mann at high s, where a four-Gaussian fit simply runs
+out of functional form.
+
+**What this does and does not say.** OFFV1 is Dirac–Hartree–Fock: exchange exact,
+**correlation absent**. Dirac + KLI is also exchange-exact (in KLI's local
+representation) with no correlation. The comparison therefore measures fidelity
+to the same physics, not completeness of the physics — the 0.03–0.15 % agreement
+confirms that the KLI–OEP density reproduces the DHF density to that level (a
+known property of OEP) and that the numerics are sound. Correlation is still
+missing, and so is everything about chemical bonding.
+
 **Costs and caveats.** The SCF is 1.9× slower (Au 30 s → 56 s, once per element,
 then cached). Two residuals are known and quantified rather than patched:
 

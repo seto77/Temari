@@ -352,14 +352,20 @@ const _cache = Dict{Tuple,Any}()
 # 旧 v1 ファイルは読まれずに残る (無害。消したければ手で消す)
 # 260807Cl: KLI の 3 フィールド (exchange / vx / z_asym) 追加で v4 へ。
 const CACHE_SCHEMA = "v4"
+# 260807Cl: リポ直下に散らばると 100 個超・100 MB 超になるのでサブディレクトリへ集める。
+# ⚠ **cwd 相対のまま**にしてある — フリート実行でワーカーごとに作業ディレクトリを
+# 分ける運用 (指示書 §3) を壊さないため。共有したいなら同じ cwd から起動する
+# (gui.jl がエンジンを dir=REPO_ROOT で起動しているのはそのため)
+const CACHE_DIR = "atom_cache"
 cache_file(key::Tuple) =
-    "atom_cache_$(CACHE_SCHEMA)_jl$(VERSION.major)$(VERSION.minor)_" *
-    join(string.(key), "_") * ".jls"
-# cache_file(key::Tuple) = "atom_cache_jl_" * join(string.(key), "_") * ".jls"
+    joinpath(CACHE_DIR,
+             "atom_cache_$(CACHE_SCHEMA)_jl$(VERSION.major)$(VERSION.minor)_" *
+             join(string.(key), "_") * ".jls")
 
 function cache_put(key::Tuple, obj)
     _cache[key] = obj
     fname = cache_file(key)
+    mkpath(dirname(fname))
     tmp = fname * ".tmp$(getpid())"
     serialize(tmp, obj)
     mv(tmp, fname; force=true)                  # 原子的に置き換え
