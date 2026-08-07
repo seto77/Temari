@@ -1,11 +1,12 @@
 #=====================================================================
-gen_production.jl — v3 イオン化テーブルの本番バッチドライバ (260804Cl 追加)
+gen_production.jl — 本番イオン化テーブルのバッチドライバ (260804Cl 追加)
 
 ionization.jl の物理で、ReciPro に同梱するテーブル 1 式 (チャネル別 JSON)
-を生成する。Python 版 gen_production.py (v2) の後継で、Julia の速度余剰を
-精度に振ったのが v3:
+を生成する。Python 版 gen_production.py (v2) の後継。
 
-  1. 連続状態がスカラー相対論 (第 3.5 章、--norel で従来物理に戻せる)
+v3 (Julia 初代、2026-08-05 出荷) が v2 から変えたもの:
+
+  1. 連続状態がスカラー相対論 (SRC。第 3.5 章)
   2. 求積が HIGH_SETTINGS (ε ノード 72→96、角度 2 倍、Q テーブル 1.5 倍、
      メッシュ ppw 25→30 / dt_log 2e-3→1.0e-3)
   3. E0 グリッドを約 2 倍に密化 (v2 の出荷誤差の主因はテーブルの E0 補間
@@ -13,12 +14,25 @@ ionization.jl の物理で、ReciPro に同梱するテーブル 1 式 (チャ�
   4. s グリッドを s≤4 (81 点) → s≤8 (161 点) へ延長 (260805Cl。理由は
      S_GRID の定義コメント)
 
+**v4 (260808Cl、現在の既定)** が v3 から変えたもの:
+
+  5. 連続状態を **κ 分解 Dirac + 小成分の行列要素** に差し替えた (第 3.6 章)。
+     v3 の SRC は「真の相対論効果 (≤0.3 %) の 5〜20 倍の偽項」を持つことが
+     判明している (`docs/src_defect_2026-08-07.md`。機構は角括弧
+     [G′+(κ/r)G] = 2cM·F の相殺を落としたことによる Darwin 項の偽装)
+  6. **M 殻 (M1–M5) を追加**して 246 → 525 チャネル
+
+⚠ **既定処方は v4。**v3 (SRC) を再現するには `--v3` を明示すること。
+欠陥のある処方が既定であり続ける方が危ない、という判断
+(`docs/next_phase_2026-08-08.md` §2.1(b))。
+
 使い方 (レーン分割で複数プロセス並行可。出力先が同じでも resume 安全)。
 ⚠ --gcthreads=1 を必ず付ける: Julia 1.12/Windows の並列 GC は高負荷の
 マルチスレッド計算で segfault することがある (audit で実際に再現・回避を確認):
-  julia -t 8 --gcthreads=1 gen_production.jl                # 全 246 チャネル
-  julia -t 8 --gcthreads=1 gen_production.jl --lane 0/6     # 6 分割の 0 番
-  julia -t 8 --gcthreads=1 gen_production.jl --tags K --out prod_v3_jl
+  julia -t 8 --gcthreads=1 gen_production.jl                # v4 全 525 チャネル
+  julia -t 8 --gcthreads=1 gen_production.jl --lane 0/8     # 8 分割の 0 番
+  julia -t 8 --gcthreads=1 gen_production.jl --tags K --out prod_v4_jl
+  julia -t 8 --gcthreads=1 gen_production.jl --v3           # v3 を再現 (246ch)
   julia -t 8 --gcthreads=1 gen_production.jl audit          # HIGH の収束監査
   julia -t 8 --gcthreads=1 gen_production.jl --quick        # 動作確認
 
@@ -29,7 +43,7 @@ resume: 出力 JSON が既に存在するチャネルは飛ばす (チャネル�
 
 include(joinpath(@__DIR__, "ionization.jl"))
 
-const OUT_DEFAULT = joinpath(@__DIR__, "prod_v3_jl")
+const OUT_DEFAULT = joinpath(@__DIR__, "prod_v4_jl")
 
 # ---- 出荷グリッド (v2 と同じ s、E0 は密化) ----
 # 260805Cl 変更: s 上限 4.0 → 8.0 Å⁻¹ (81 → 161 点)。
@@ -56,14 +70,56 @@ const E0_MIN, E0_MAX = 30.0, 400.0
 const GATE_MRES = 1e-4
 const GATE_RTAIL = 1e-4
 
-const VALIDATED_NOTE =
+"""260808Cl 追加: 1 行が「そもそも数として成立しているか」。
+
+生成ゲート (badL / mres / rtail) は**ソルバの内部診断**なので、ランタイム側の
+メモリ破損 (Windows Julia の GC クラッシュ) を受けた行を検出できない —
+ソルバは正常に完了したと信じて壊れた値を書く。v3 の Cd-K と v4 の Sc L1 が
+どちらもこの形で、σ_own/σ_Bote が 10²¹ 級に飛んでいた。
+
+閾値は**極端に緩く**取る (1e-3..1e3)。閾値近傍 (u<2) では比が 0.3 まで下がるのが
+物理的に正常なので、そこを誤検知しないため。ここに引っかかるのは物理ではない。"""
+function is_sane_row(o)
+    n0 = o["N0"]
+    (isfinite(n0) && n0 > 0.0) || return false
+    all(isfinite, o["F"]) || return false
+    ratio = o["sigma_own_nm2"] / max(o["sigma_bote_nm2"], 1e-300)
+    return isfinite(ratio) && 1e-3 < ratio < 1e3
+end
+
+"""v3 (SRC) の検証注記。**再生成でしか使われない** — 出荷済み v3 テーブルは
+自分の文言を持っている。
+⚠ 260808Cl: 公開リポの規約 (`CONTRIBUTING.md`「制限付き出所の参照データを
+入れない」) に合わせ、外部参照から導出した数値を落とした。文言だけの差で、
+出荷済み v3 の F 値とは無関係"""
+const VALIDATED_NOTE_V3 =
     "v3 (scalar-relativistic continuum): verified against the non-relativistic " *
     "path by the c->infinity limit (max|dF| ~ 1e-14, selftest T8) and against " *
-    "the v2 Python tables (differences = the relativistic effect itself: " *
-    "<~1e-3 for Z<~20, up to ~2e-2 at s=4 for Z~74-86). v2 spot-validation " *
-    "against Oxley-Allen 2000 / muSTEM (K: <=1% for s<=1.25 A^-1) carries over " *
-    "to the non-relativistic limit; no external reference exists for the " *
+    "the v2 Python tables (the difference is the relativistic effect itself). " *
+    "Spot comparisons against external non-relativistic references were made " *
+    "outside this repository; no external reference exists for the " *
     "relativistic-continuum correction itself."
+
+"""v4 (κ 分解 Dirac 連続状態) の検証注記。
+⚠ **外部参照から導出した数値は書かない** (`CONTRIBUTING.md`)。内部で閉じた
+検査 (自分の c→∞ 極限・自由粒子解析解・恒等式) の数値だけを載せる。
+外部照合の結論は `docs/` 側に順位として残してある"""
+const VALIDATED_NOTE_V4 =
+    "v4 (kappa-resolved Dirac continuum with the small-component matrix " *
+    "element): the angular algebra is checked against closed forms (6j to " *
+    "5.6e-17, sum over kappa' back to (2l'+1)[3j]^2 to 2.2e-16, selftest T23a/b), " *
+    "the radial solver against the analytic free-particle Dirac solution " *
+    "(3.1e-07 on the large component, T23c), and the whole path degenerates in " *
+    "the c->infinity limit to the non-relativistic one (GOS 2.2e-05 vs 2.1e-03 " *
+    "of physical effect, F(s) 5.9e-06 vs 4.3e-03, T23d/e). v4 replaces the v3 " *
+    "scalar-relativistic continuum (SRC), whose one-component reduction drops a " *
+    "cancellation and leaves a spurious Darwin-like term 5-20x larger than the " *
+    "true relativistic effect; see docs/src_defect_2026-08-07.md. Absolute cross " *
+    "sections remain Bote-Salvat, whose own uncertainty against experiment is " *
+    "10 % (K), 15 % (L) and 24 % (M) RMS."
+
+"処方に応じた検証注記 (v3 再現なら v3 の文言、それ以外は v4 の文言)"
+validated_note(p) = p.dirac_continuum ? VALIDATED_NOTE_V4 : VALIDATED_NOTE_V3
 
 "git の短縮 HEAD (取れなければ unknown。出力の再現性情報。取得は 1 回だけ)"
 const _GIT_HEAD = Ref{Union{Nothing,String}}(nothing)
@@ -199,19 +255,90 @@ function append_partial(outdir, tag, z, row)
     end
 end
 
-"""処方一式 (260807Cl 追加)。v3 出荷は `PRESC_V3`。v4 候補は `--kdirac` 等で
-組み替える。**`compute_channel` に渡す keyword をそのまま持つ NamedTuple** に
-してあるので、新しいつまみが増えてもここに 1 行足すだけで通る。"""
-const PRESC_V3 = (rel_continuum=true, dirac_continuum=false,
+"""処方一式 (260807Cl 追加)。v3 出荷は `PRESC_V3`、**v4 出荷は `PRESC_V4` で
+これが既定**。**`compute_channel` に渡す keyword をそのまま持つ NamedTuple** に
+してあるので、新しいつまみが増えてもここに 1 行足すだけで通る。
+
+⚠ v4 で **交換は Xα のまま** (KLI ではない)。f_x / f_e 出口だけが KLI で、
+イオン化出口は業界標準・既存 GOS DB・比較データが全て Xα 系なので合わせる
+(`docs/release_readiness_2026-08-07.md` §3.4、作者判断済)。
+
+⚠⚠ **260808Cl 修正: `dirac_scf` を処方に含めた。**出荷済み v3 の model_id には
+`-DSCF` が無い = **原子場は非相対論 SCF (Schrödinger) だった**。完全 Dirac SCF が
+既定になったのは v3 出荷後の 7a3de21 (2026-08-07)。`dirac_scf` を処方から
+外したままだと `--v3` が「v3 の連続状態 + v4 の原子場」という**どの世代でもない
+混成**を dataset_version 3.0.0 と名乗って出す。したがって **v4 は v3 から
+連続状態と原子場の 2 点が変わる** (引き継ぎ書 §1 の表が「SCF は同左」と
+書いているのは誤り)。"""
+const PRESC_V3 = (rel_continuum=true, dirac_continuum=false, dirac_scf=false,
+                  exchange=:xalpha, final_state=:relaxed)
+const PRESC_V4 = (rel_continuum=false, dirac_continuum=true, dirac_scf=true,
                   exchange=:xalpha, final_state=:relaxed)
 
-presc_model_id(p) = model_id_of(p.rel_continuum, true, X_ALPHA, p.exchange,
+"出荷世代ごとのチャネル集合。v3 は K/L のみ、v4 は M 殻を含む"
+const TAGS_V3 = ["K", "L1", "L2", "L3"]
+const TAGS_V4 = ["K", "L1", "L2", "L3", "M1", "M2", "M3", "M4", "M5"]
+
+presc_model_id(p) = model_id_of(p.rel_continuum, p.dirac_scf, X_ALPHA, p.exchange,
                                 p.final_state, false, p.dirac_continuum)
+
+"""`provenance` = 処方 ID の基底 (世代タグを除いたもの)。v2 からあるフィールドで、
+`model_id` の「どの物理か」の部分だけを短く持つ。
+⚠ **260808Cl まで SRC 決め打ちだった** — v4 で生成すると連続状態が κ 分解 Dirac
+なのに provenance が SRC を名乗る状態だったので、処方から引くように直した"""
+presc_provenance(p) =
+    replace(p.dirac_continuum ? MODEL_ID_KD : p.rel_continuum ? MODEL_ID_REL :
+            MODEL_ID, r"-v[0-9]+[a-z]*$" => "")
+
+"""出荷世代の番号。**処方一式に対して定義される。**つまみを 1 つでも出荷処方から
+外したら `0.0.0-dev` になる — `pack_resource.py` は全チャネルで
+dataset_version と model_id が**一致すること**しか見ないので、ここで名乗り分けないと
+研究用の処方 (--kli / --frozen / --norel) で作った一式がそのまま出荷版として
+梱包できてしまう。"""
+presc_dataset_version(p) =
+    p == PRESC_V4 ? "4.0.0" : p == PRESC_V3 ? "3.0.0" : "0.0.0-dev"
+
+"""JSON の `prescription` ブロック。**処方から引く** — ここを固定文字列にすると、
+つまみを変えたのに説明文が古いまま出る (v3 の provenance で実際に起きた)。"""
+function presc_block(p)
+    cont = p.dirac_continuum ?
+        "relaxed core-hole ion SCF + " *
+        (p.exchange === :kli ? "KLI exact exchange" : "KS(2/3) static exchange") *
+        ", kappa-resolved Dirac (coupled radial G/F per kappa, small component " *
+        "kept in the matrix element R^lambda = int [G_a G_b + F_a F_b] " *
+        "j_lambda(qr) dr, Wigner 6j angular factor), finite nucleus " *
+        "(uniform sphere R=1.2 A^{1/3} fm), energy-normalized (two-component)" :
+        p.rel_continuum ?
+        "relaxed core-hole ion SCF + " *
+        (p.exchange === :kli ? "KLI exact exchange" : "KS(2/3) static exchange") *
+        ", scalar-relativistic (Koelling-Harmon type: local relativistic " *
+        "wavenumber + Darwin term, spin-orbit averaged), finite nucleus " *
+        "(uniform sphere R=1.2 A^{1/3} fm), energy-normalized " *
+        "(one-component-consistent amplitude)" :
+        "relaxed core-hole ion SCF + " *
+        (p.exchange === :kli ? "KLI exact exchange" : "KS(2/3) static exchange") *
+        ", energy-normalized"
+    p.final_state === :relaxed ||
+        (cont = replace(cont, "relaxed core-hole ion SCF" =>
+                        p.final_state === :frozen ? "frozen core (neutral SCF)" :
+                        "frozen core (neutral SCF, static)"))
+    return Dict{String,Any}(
+        # 260808Cl: 原子場が Dirac SCF かどうかを書き分ける。v3 出荷は非相対論 SCF
+        # 中の Dirac 大成分 (model_id の "DHFS" の D は始状態だけを指していた)
+        "bound" => (p.dirac_scf ? "neutral Dirac SCF-HFS (large component)" :
+                    "neutral SCF-HFS (Dirac large component)") *
+                   (p.exchange === :kli ? " with KLI exact exchange" : ""),
+        "continuum" => cont,
+        "orthogonalization" => "l_init Gram-Schmidt vs initial orbital only",
+        "eps_integration" => "full range (T0-Eth), both endpoints regularized",
+        "kinematics" => "sym (symmetric Ewald on-shell pair)",
+        "exchange_identity" =>
+            "full-range direct-only == half-range (|D|^2+|X|^2)")
+end
 
 "1 チャネル (Z, tag) の全 E0 行を計算して JSON に書く"
 function run_channel(z::Int, tag::String, outdir::String;
-                     settings=HIGH_SETTINGS, presc=PRESC_V3)
-    rel = presc.rel_continuum
+                     settings=HIGH_SETTINGS, presc=PRESC_V4)
     path = joinpath(outdir, "F_$(tag)_Z$(z).json")
     if isfile(path)
         println("skip (exists): $path")
@@ -236,6 +363,28 @@ function run_channel(z::Int, tag::String, outdir::String;
         o = compute_channel(z, tag, e0; settings=settings, s_nodes=S_GRID,
                             verbose=false, presc...)
         retried = 0
+        # ★260808Cl 追加: **明らかな破損はその場で作り直す。**
+        #   v3 の Cd-K で、GC クラッシュ由来のメモリ破損を受けた 1 行が
+        #   「診断値は正常 (ソルバは正常終了したと信じて書いた)」まま生成ゲートを
+        #   素通りし、QC で初めて見つかった。今回の v4 生成でも同じ形が 1 行出た
+        #   (Sc L1 @150 kV、σ_own/σ_Bote = 6.9e21)。
+        #   ⚠ **同じ設定で引き直す** — ppw を上げる下の経路と違い、正常なら
+        #   クリーンな実行と**ビット同一**の値が戻る。物理的な帯域外 (閾値近傍の
+        #   u<2 で比 0.3 など) を誤検知しないよう、閾値は 1e-3..1e3 と極端に緩くする
+        if !is_sane_row(o)
+            @printf("  [sane] Z=%d %s @%.1f: N0=%.3e s/B=%.3e が異常 → 同設定で再計算\n",
+                    z, tag, e0, o["N0"],
+                    o["sigma_own_nm2"] / max(o["sigma_bote_nm2"], 1e-300))
+            flush(stdout)
+            o = compute_channel(z, tag, e0; settings=settings, s_nodes=S_GRID,
+                                verbose=false, presc...)
+            if !is_sane_row(o)
+                push!(failures, Dict{String,Any}(
+                    "e0_keV" => e0, "reason" => "insane row after recompute",
+                    "N0" => o["N0"], "sigma_ratio" =>
+                        o["sigma_own_nm2"] / max(o["sigma_bote_nm2"], 1e-300)))
+            end
+        end
         d = o["diag"]
         if d["bad_significant_l"] > 0 || d["max_match_resid"] > GATE_MRES ||
            d["r_tail_max"] > GATE_RTAIL
@@ -275,22 +424,10 @@ function run_channel(z::Int, tag::String, outdir::String;
     end
     sort!(rows, by = r -> r["e0_keV"])          # 260805Cl: resume 分と新規分の順序を保証
     shell, j_lower, occ_init, subshell = CHANNELS[tag]
+    note = validated_note(presc)
     doc = Dict{String,Any}(
-        "provenance" => "DHFS-KS23-DiracB-SRC-jsplit-fullrange-sym",
-        "prescription" => Dict{String,Any}(
-            "bound" => "neutral SCF-HFS (Dirac large component)",
-            "continuum" => rel ?
-                "relaxed core-hole ion SCF + KS(2/3) static exchange, " *
-                "scalar-relativistic (Koelling-Harmon type: local relativistic " *
-                "wavenumber + Darwin term, spin-orbit averaged), finite nucleus " *
-                "(uniform sphere R=1.2 A^{1/3} fm), energy-normalized " *
-                "(one-component-consistent amplitude)" :
-                "relaxed core-hole ion SCF + KS(2/3) static exchange, energy-normalized",
-            "orthogonalization" => "l_init Gram-Schmidt vs initial orbital only",
-            "eps_integration" => "full range (T0-Eth), both endpoints regularized",
-            "kinematics" => "sym (symmetric Ewald on-shell pair)",
-            "exchange_identity" =>
-                "full-range direct-only == half-range (|D|^2+|X|^2)"),
+        "provenance" => presc_provenance(presc),
+        "prescription" => presc_block(presc),
         "z" => z, "shell" => tag, "e_th_keV_bote" => eth,
         "edge_source" =>
             "Bote-Salvat 2008 (xion.f) subshell edges (per subshell)",
@@ -299,12 +436,15 @@ function run_channel(z::Int, tag::String, outdir::String;
         "j_lower" => j_lower, "occ_init" => occ_init,
         "s_grid_A_inv" => S_GRID,
         "model_id" => presc_model_id(presc),
-        "dataset_version" => "3.0.0", "schema_version" => 1,
+        "dataset_version" => presc_dataset_version(presc), "schema_version" => 1,
         "generator" => "ionization.jl (Julia)",
         "generator_commit" => _git_head(),
-        "validated" => VALIDATED_NOTE, "validation_summary" => VALIDATED_NOTE,
+        "validated" => note, "validation_summary" => note,
         "settings" => Dict{String,Any}(String(k) => v for (k, v) in pairs(settings)),
-        "rel_continuum" => rel,
+        "rel_continuum" => presc.rel_continuum,
+        # 260808Cl 追加: v4 の連続状態を JSON からも読めるようにする
+        # (`rel_continuum` だけだと v2 と v4 が同じ false になって区別できない)
+        "dirac_continuum" => presc.dirac_continuum,
         "generated_utc_note" =>
             "timestamp intentionally omitted (deterministic output)",
         "license_note" =>
@@ -327,9 +467,13 @@ function run_channel(z::Int, tag::String, outdir::String;
 end
 
 """HIGH 設定の収束監査: 代表チャネルで各つまみを HIGH からさらに上げ、
-F の変化 (= HIGH に残る打ち切り誤差) を実測する。"""
-function audit(; rel::Bool=true)
-    cases = [(26, "K", 200.0), (79, "L3", 300.0)]
+F の変化 (= HIGH に残る打ち切り誤差) を実測する。
+260808Cl: **生成に使う処方そのもので測る** (既定 v4)。旧版は `rel_continuum` だけを
+渡していたので、v4 で生成しながら v3 の求積誤差を報告する状態だった。
+M 殻を 1 本足したのは、始状態 l=2 (3d) が λ の本数を増やす = 打ち切り誤差の
+出方が K/L と違うため。"""
+function audit(; presc=PRESC_V4)
+    cases = [(26, "K", 200.0), (79, "L3", 300.0), (79, "M5", 200.0)]
     bumps = [
         ("eps nodes n1/n2/n3 ×1.4", (; HIGH_SETTINGS..., n1=28, n2=80, n3=28)),
         ("l_cap 128→160",           (; HIGH_SETTINGS..., l_cap=160)),
@@ -340,25 +484,27 @@ function audit(; rel::Bool=true)
         ("sig_thresh 1e-13→1e-15",  (; HIGH_SETTINGS..., sig_thresh=1e-15)),
     ]
     s = collect(0.0:0.25:4.0)
+    println("audit 処方: ", presc_model_id(presc))
     for (z, tag, e0) in cases
         base = compute_channel(z, tag, e0; settings=HIGH_SETTINGS, s_nodes=s,
-                               verbose=false, rel_continuum=rel)
+                               verbose=false, presc...)
         @printf("\n== audit Z=%d %s @%g kV (HIGH 基準 t=%.0fs) ==\n",
                 z, tag, e0, base["elapsed_s"])
         o_prod = compute_channel(z, tag, e0; settings=PROD_SETTINGS, s_nodes=s,
-                                 verbose=false, rel_continuum=rel)
+                                 verbose=false, presc...)
         @printf("  %-26s max|ΔF| = %.2e  (t=%.0fs) ← v2 求積に残っていた誤差\n",
                 "(参考) PROD→HIGH の差", maximum(abs.(o_prod["F"] .- base["F"])),
                 o_prod["elapsed_s"])
         worst = 0.0
         for (name, st) in bumps
             o = compute_channel(z, tag, e0; settings=st, s_nodes=s,
-                                verbose=false, rel_continuum=rel)
+                                verbose=false, presc...)
             dF = maximum(abs.(o["F"] .- base["F"]))
             worst = max(worst, dF)
             @printf("  %-26s max|ΔF| = %.2e  (t=%.0fs)\n", name, dF, o["elapsed_s"])
         end
         @printf("  → HIGH の打ち切り誤差 ≲ %.1e\n", worst)
+        flush(stdout)
     end
 end
 
@@ -378,17 +524,50 @@ function set_below_normal_priority()
     println("優先度: BELOW_NORMAL (自己設定)")
 end
 
+"""コマンドラインから処方を組む (260808Cl に既定を v4 へ切り替え)。
+
+  既定        v4 = κ 分解 Dirac 連続状態 + Dirac SCF 原子場
+              (`--kdirac` は同義で、後方互換のため残す)
+  `--v3`      v3 = SRC + 非相対論 SCF 原子場。**出荷済み v3 を再現するとき専用**
+  `--norel`   非相対論連続状態 (v2 相当。診断用)
+  `--nodscf`  原子場を非相対論 SCF に (診断用。`--v3` は自動でこちら)
+  `--kli`     交換を KLI に (研究用。イオン化出口の出荷既定は Xα)
+  `--frozen`  終状態を frozen core に (研究用)
+
+⚠ 連続状態の 3 択は互いに排他。同時指定は**黙って片方を採らずにエラーで止める** —
+処方が曖昧なまま数日の生成が走る事故の方が高くつく。"""
+function presc_from_args(args)
+    v3 = "--v3" in args
+    norel = "--norel" in args
+    kd = "--kdirac" in args
+    (v3 && norel) && error("--v3 と --norel は排他")
+    (v3 && kd) && error("--v3 と --kdirac は排他 (--kdirac は v4 の既定)")
+    (norel && kd) && error("--norel と --kdirac は排他")
+    return (rel_continuum=v3, dirac_continuum=!(v3 || norel),
+            dirac_scf=!(v3 || "--nodscf" in args),
+            exchange=("--kli" in args ? :kli : :xalpha),
+            final_state=("--frozen" in args ? :frozen : :relaxed))
+end
+
 function main_gen(args)
     set_below_normal_priority()                # 260804Cl 追加
+    # 260808Cl 追加 (監査書 P1-8): BLAS を 1 スレッドに。BLAS を通るのは
+    # leggauss_ の eigvals (ε ノードあたり 1 回) と 8×2 の `M \`、それに
+    # N = dNde'·we の gemv だけで、いずれも分割閾値以下。**値が動かないことは
+    # 実測で確認済み** (N0・F・σ が 16 スレッドとビット一致)。
+    # 8 レーン運用では 8×16 = 128 本の遊休スレッドが消える
+    LinearAlgebra.BLAS.set_num_threads(1)
     if !isempty(args) && args[1] == "audit"
-        audit()
+        audit(; presc=presc_from_args(args))
         return 0
     end
+    presc = presc_from_args(args)
     outdir = OUT_DEFAULT
     lane_i, lane_n = 0, 1
-    tags = ["K", "L1", "L2", "L3"]      # M 殻は --tags で明示的に要求する
+    # 260808Cl: 既定のチャネル集合も世代から引く。v3 の再現なら K/L だけ、
+    # v4 なら M 殻込み (M 殻は v4 で出荷に入る)。`--tags` で常に上書きできる
+    tags = presc.rel_continuum ? copy(TAGS_V3) : copy(TAGS_V4)
     quick = "--quick" in args
-    rel = !("--norel" in args)
     i = 1
     while i <= length(args)
         if args[i] == "--out"
@@ -404,19 +583,13 @@ function main_gen(args)
         i += 1
     end
     settings = quick ? QUICK_SETTINGS : HIGH_SETTINGS
-    # 260807Cl: 処方をコマンドラインから組む。v3 出荷は既定 (SRC)。
-    # ⚠ `--kdirac` は SRC の欠陥を外す v4 候補 (docs/src_defect_2026-08-07.md)。
-    #    `--rel` と排他なので rel_continuum を false にする
-    kd = "--kdirac" in args
-    presc = (rel_continuum=(rel && !kd), dirac_continuum=kd,
-             exchange=("--kli" in args ? :kli : :xalpha),
-             final_state=("--frozen" in args ? :frozen : :relaxed))
     ch = [(z, t) for (z, t) in all_channels(Tuple(tags))]
     mine = [(z, t) for (k, (z, t)) in enumerate(ch) if (k - 1) % lane_n == lane_i]
     println("gen_production: $(length(mine))/$(length(ch)) チャネル " *
             "(lane $lane_i/$lane_n, tags=$(join(tags,",")), " *
             (quick ? "QUICK" : "HIGH") * ", スレッド $(Threads.nthreads()))")
-    println("処方: ", presc_model_id(presc))
+    println("処方: ", presc_model_id(presc),
+            "  dataset_version=", presc_dataset_version(presc))
     println("出力: $outdir\n")
     n_done = n_skip = 0
     for (z, t) in mine

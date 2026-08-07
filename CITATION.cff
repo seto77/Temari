@@ -1,0 +1,75 @@
+cff-version: 1.2.0
+title: "Temari: atomic scattering and excitation factors from first principles"
+message: "If you use this software or the tables it generates, please cite it."
+type: software
+authors:
+  - family-names: Seto
+    given-names: Yusuke
+    email: seto77@gmail.com
+repository-code: "https://github.com/seto77/Temari"
+url: "https://seto77.github.io/Temari/"
+license: MIT
+version: "0.1.0"
+date-released: "2026-08-08"
+keywords:
+  - electron microscopy
+  - EELS
+  - STEM-EDX
+  - inner-shell ionization
+  - generalized oscillator strength
+  - atomic form factor
+  - Dirac-Hartree-Fock-Slater
+  - Julia
+abstract: >-
+  Temari solves an isolated atom from scratch — self-consistent field, bound
+  orbitals and distorted continuum waves — and derives the scattering and
+  excitation factors used by electron microscopy, spectroscopy and transport
+  simulation: the inner-shell ionization form factor F(s, E0) for STEM-EDX, the
+  EELS differential cross section, the generalized oscillator strength, X-ray
+  and electron atomic scattering factors, and Mott elastic cross sections. It
+  depends on the Julia standard library only and contains no fitted parameter
+  tables, with one declared exception (the public-domain Bote–Salvat ionization
+  cross-section coefficients; see CONTRIBUTING.md). Generated datasets carry
+  their own version, independent of this software version, and each is pinned to
+  a specific Julia release in its manifest. The prescription was chosen and
+  verified by the author; the bulk of the implementation was written by an AI
+  assistant (Anthropic Claude) under that direction.
+references:
+  - type: article
+    title: >-
+      Cross sections for ionization of inner shells of atoms by electron impact
+    authors:
+      - family-names: Bote
+        given-names: David
+      - family-names: Salvat
+        given-names: Francesc
+      - family-names: Jablonski
+        given-names: Aleksander
+      - family-names: Powell
+        given-names: Cedric J.
+    journal: "Atomic Data and Nuclear Data Tables"
+    volume: 96
+    start: 871
+    year: 2009
+    doi: "10.1016/j.adt.2010.06.001"
+    notes: >-
+      Source of the bundled absolute ionization cross-section parameterization
+      (src/bote_salvat.json). See also the Erratum, At. Data Nucl. Data Tables
+      97, 186 (2011).
+  - type: article
+    title: >-
+      Calculations of inner-shell ionization by electron impact with the
+      distorted-wave and plane-wave Born approximations
+    authors:
+      - family-names: Bote
+        given-names: David
+      - family-names: Salvat
+        given-names: Francesc
+    journal: "Physical Review A"
+    volume: 77
+    start: 042701
+    year: 2008
+    doi: "10.1103/PhysRevA.77.042701"
+    notes: >-
+      The relativistic distorted-wave calculations that the bundled
+      parameterization was fitted to.

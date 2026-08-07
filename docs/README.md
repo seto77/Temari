@@ -43,7 +43,13 @@ rather than in a wiki:
 | --- | --- |
 | `architecture.md` | The layer structure L0–L5 and which file holds what. Also published as the Architecture page. |
 | `speedup_audit_2026-08-05.md` / `.json` | The optimization ledger: 43 candidates, verdicts and measurements. Items without a verdict are still open. |
-| `next_phase_2026-08-06.md` | Handover: current state, settled decisions, remaining work in priority order. Japanese. |
+| `speedup_v4_2026-08-08.md` | **The v4 optimization record**: 3.9× on a production row, every step bit-identical, with the profile before and after and the reason the next lever was declined. Japanese. |
+| `src_defect_2026-08-07.md` | **Why v4 exists**: the scalar-relativistic continuum used by v3 carries a spurious term 5–20× larger than the relativistic effect it approximates. Mechanism identified. Japanese. |
+| `kappa_dirac_continuum_2026-08-07.md` | The v4 continuum: coupled radial Dirac per κ, small component in the matrix element, Wigner 6j angular factor. Japanese. |
+| `release_readiness_2026-08-07.md` | The M shell, σ against experiment, and the exchange prescription decision. Japanese. |
+| `fs_external_validation_2026-08-07.md` | How F(s) compares against external references, and how to pick a yardstick. Rankings only — no numbers derived from restricted sources. Japanese. |
+| `frozen_core_and_transverse_2026-08-07.md` / `mott_elastic_2026-08-07.md` / `exchange_diagnosis_2026-08-07.md` | The frozen core and transverse interaction, the Mott elastic exit, and the exchange diagnosis. Japanese. |
+| `next_phase_2026-08-0*.md` | Handover: current state, settled decisions, remaining work in priority order. **The highest-numbered one is current** (`2026-08-09`). Japanese. |
 
 The overall plan is `計画書.md` in the repository root (Japanese; it is the
 canonical design document), and `CLAUDE.md` holds the working rules.

@@ -477,17 +477,23 @@ end
 @inline function _dirac_rk4_c(ra::Float64, rb::Float64, va::Float64, vm::Float64,
                               vb::Float64, eps::Float64, G0::Float64, F0::Float64,
                               kap::Float64, c::Float64)
-    rhsG(rr, vv, G, F) = -(kap / rr) * G + (2.0 * c + (eps - vv) / c) * F
-    rhsF(rr, vv, G, F) = (kap / rr) * F - ((eps - vv) / c) * G
+    # ★260808Cl 高速化 (ビット同一): 係数 κ/r と (ε−V)/c を**点ごとに 1 回**に畳む。
+    #   旧版はクロージャ rhsG/rhsF を 8 回呼び、その中で毎回 2 つ割っていたので
+    #   **1 ステップに 16 除算**あった (中点は k2 と k3 で 2 度、しかも G と F で
+    #   もう 2 度ずつ = 同じ商を 4 回計算していた)。点は 3 つしかないので 6 除算で足りる。
+    #   同じ被除数・除数の同じ除算を再利用するだけなので値は 1 ビットも動かない。
     h = rb - ra
     rm = (ra + rb) / 2.0
-    k1G = rhsG(ra, va, G0, F0);              k1F = rhsF(ra, va, G0, F0)
+    Aa = kap / ra;  Ca = (eps - va) / c;  Ba = 2.0 * c + Ca
+    Am = kap / rm;  Cm = (eps - vm) / c;  Bm = 2.0 * c + Cm
+    Ab = kap / rb;  Cb = (eps - vb) / c;  Bb = 2.0 * c + Cb
+    k1G = -Aa * G0 + Ba * F0;                k1F = Aa * F0 - Ca * G0
     g2 = G0 + h / 2.0 * k1G;  f2 = F0 + h / 2.0 * k1F
-    k2G = rhsG(rm, vm, g2, f2);              k2F = rhsF(rm, vm, g2, f2)
+    k2G = -Am * g2 + Bm * f2;                k2F = Am * f2 - Cm * g2
     g3 = G0 + h / 2.0 * k2G;  f3 = F0 + h / 2.0 * k2F
-    k3G = rhsG(rm, vm, g3, f3);              k3F = rhsF(rm, vm, g3, f3)
+    k3G = -Am * g3 + Bm * f3;                k3F = Am * f3 - Cm * g3
     g4 = G0 + h * k3G;        f4 = F0 + h * k3F
-    k4G = rhsG(rb, vb, g4, f4);              k4F = rhsF(rb, vb, g4, f4)
+    k4G = -Ab * g4 + Bb * f4;                k4F = Ab * f4 - Cb * g4
     return (G0 + h / 6.0 * (k1G + 2k2G + 2k3G + k4G),
             F0 + h / 6.0 * (k1F + 2k2F + 2k3F + k4F))
 end
@@ -523,6 +529,30 @@ function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
 
     kappas = kappa_list(l_max)
     nch = length(kappas)
+    # ★260808Cl 高速化 (ビット同一): RK4 の**下位刻みで引くポテンシャルを κ 間で
+    #   共有する**。区間 i を n_sub 分割したときの評価点 (端点と中点) は κ に
+    #   依らないのに、これまでは κ (l_max=42 で 85 本) ごとに 3 回ずつ
+    #   `pot_V` を呼び直していた。プロファイル (Fe K 200 kV HIGH、v4) では
+    #   **全時間の 37 % が RvSpline = log + 二分探索**に落ちていた。
+    #   呼び出し回数は 3·n_sub·nch·n → (2n_sub+1)·n で、nch=85 なら ~113 分の 1。
+    # ⚠ ビット同一の根拠は「同じ Float64 引数で同じ関数を呼ぶ」ことだけ。
+    #   評価点は**式ごと**再現する — `(pa+pb)/2` は `ra + h*(j-0.5)` と最下位
+    #   ビットが違いうるので、書き換えてはいけない。
+    # ⚠ `ns` は κ に依存する (障壁中の増大率) ので、`ns != n_sub` の区間だけは
+    #   従来どおり直接引く。そちらも pb → 次の pa の重複を消して 3→2 にした
+    nsv = 2 * n_sub + 1
+    vsub = Matrix{Float64}(undef, nsv, max(n - 1, 0))
+    @inbounds for i in 1:n-1
+        ra, rb = r[i], r[i+1]
+        h = (rb - ra) / n_sub
+        for j in 1:n_sub
+            pa = ra + h * (j - 1)
+            pb = ra + h * j
+            vsub[2j-1, i] = pot_V(pa)          # = 次の刻みの pa でもある
+            vsub[2j, i] = pot_V((pa + pb) / 2.0)
+        end
+        vsub[nsv, i] = pot_V(ra + h * n_sub)   # ⚠ ra+h*n_sub ≠ rb (丸め)。式を保つ
+    end
     # `store_int=false` は Mott 出口 (δ_κ しか要らない) 用。l_max が数百になると
     # (nch × n) が数億要素になるので、そこだけ落とせるようにしてある
     Gall = zeros(nch, store_int ? n : 0)
@@ -565,11 +595,24 @@ function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
             expo = (rb - ra) * (abs(kapf) / ra + sqrt(abs(2.0 * (eps - v[i]))))
             ns = clamp(ceil(Int, expo / 0.25), n_sub, 512)
             h = (rb - ra) / ns
-            for j in 1:ns
-                pa = ra + h * (j - 1)
-                pb = ra + h * j
-                g, f = _dirac_rk4_c(pa, pb, pot_V(pa), pot_V((pa + pb) / 2.0),
-                                    pot_V(pb), eps, g, f, kapf, c)
+            if ns == n_sub                     # 260808Cl: 表を引く (大多数はこちら)
+                for j in 1:ns
+                    pa = ra + h * (j - 1)
+                    pb = ra + h * j
+                    g, f = _dirac_rk4_c(pa, pb, vsub[2j-1, i], vsub[2j, i],
+                                        vsub[2j+1, i], eps, g, f, kapf, c)
+                end
+            else                               # 障壁中で刻みを増やした区間
+                pa = ra
+                va = v[i]                      # pot_V(ra + h*0) は厳密に pot_V(ra)
+                for j in 1:ns
+                    pb = ra + h * j
+                    vb = pot_V(pb)
+                    g, f = _dirac_rk4_c(pa, pb, va, pot_V((pa + pb) / 2.0),
+                                        vb, eps, g, f, kapf, c)
+                    pa = pb                    # pot_V(pb) == 次の刻みの pot_V(pa)
+                    va = vb
+                end
             end
             if abs(g) > 1e250 || abs(f) > 1e250      # 発散前にまとめてリスケール
                 sc = 1e-200

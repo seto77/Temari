@@ -6,19 +6,26 @@ better than absolute times.
 
 ## Where the time goes
 
+Measured on a production row (Fe K at 200 keV, `HIGH` quadrature, the shipping
+161-point s grid) under the **v4 prescription**, after the optimizations below:
+
 | Region | Share | Character |
 | --- | ---: | --- |
-| Spherical Bessel recurrence | 58 % | Sequential in $\lambda$, **fully independent across radial points** |
-| Inner loop of the radial integral | 24 % | Dot-product shaped, memory-bound |
-| Everything else | 18 % | |
+| Spherical Bessel recurrence | 33 % | Sequential in $\lambda$, **fully independent across radial points**. The Miller start order carries ~60 % burn-in that stores nothing |
+| Angular integral | 29 % | Legendre recurrence plus a PCHIP evaluation per channel |
+| κ-resolved Dirac continuum (RK4) | 24 % | Two coupled first-order equations, per κ |
+| Everything else | 14 % | |
 
-Two regions carry 80 % of the runtime, and both were addressable — one by
-vectorizing across radial points, the other by improving locality.
+The earlier profile — Bessel 58 % / radial-integral inner loop 24 % — was taken
+before the 8-lane Bessel kernel and the fused angular pass. The picture moves
+every time something large is removed, so **re-profile before each round**.
 
 ## What was gained
 
-The current stack is roughly **11.7× faster than the code that generated the
-current dataset**, and **every step of it is bit-identical**:
+**Every step below is bit-identical.** Nothing here reorders a sum, and nothing
+here uses `muladd`, `fma` or `@simd` on a reduction.
+
+Against the code that generated the v3 dataset:
 
 | Step | Gain |
 | --- | --- |
@@ -28,6 +35,24 @@ current dataset**, and **every step of it is bit-identical**:
 Of those 48 jobs, 47 were bit-identical between passes; the one exception was a
 transient of the kind described in
 [Reproducibility](reproducibility.md#e8), not a property of the code.
+
+Then, for the v4 prescription (2026-08-08), **3.9× on a production row**
+— 24.7 s to 6.3 s at `-t 4`:
+
+| Step | Gain | What it was |
+| --- | ---: | --- |
+| Share the RK4 potential samples across κ | 1.72× | 37 % of the run was one spline evaluation, re-done for each of ~85 partial waves at points that do not depend on κ |
+| Hoist the $Q_+$ side of $R(Q)$ to once per ε node | 1.21× | $Q_+^2 = k_i^2 + k_f^2 - 2k_f k_i\cos	heta$ depends on neither the azimuth nor $K$, yet was re-interpolated 161 × 48 times |
+| Interleave the Legendre recurrence over 8 grid points | 1.15× | The recurrence is latency-bound on one division (~16 cycles measured); grid points are independent |
+| ε loop to `:greedy` + descending order (LPT) | 1.25× | Cost grows with ε, so contiguous chunks left threads idle |
+| **Port the q-lane SIMD accumulation to the Dirac radial table** | 1.21× | It had only ever been written for the non-relativistic path, which stopped being the shipping path in v4 |
+
+The last one is the lesson: when a code path is promoted from "for comparison
+only" to "this is what ships", **its optimizations do not come with it**. Look
+for the ones it never received.
+
+The full record, including what was measured and rejected, is
+`docs/speedup_v4_2026-08-08.md`.
 
 ## Parallelism: processes beat threads
 
@@ -103,8 +128,19 @@ Recorded because they look plausible and cost time to disprove:
   region, so the distinct values of $x = qr$ collapse from ~6.2 M to ~1.2 M —
   about 1.9× end to end. **Not bit-identical** (it changes the q grid), so it is
   held for the next dataset generation.
+- **Truncating λ and the Miller start order per radial point.** The continuum
+  wave is seeded where $r^{l+1}$ reaches $e^{-60}$, so at small radius no channel
+  with a high λ contributes at all — for $l = 42$ the seed sits past 92 % of the
+  grid. Capping $\lambda_{\max}$ there shortens the Miller recurrence with it,
+  worth roughly 1.2× end to end. **Not bit-identical** (the start order moves the
+  values by ~10⁻¹³ relative), so it is held for a generation that already
+  changes the quadrature.
 - **Sixteen further audited candidates** without a verdict yet, catalogued in
   `docs/speedup_audit_2026-08-05.json`.
+
+Measured and **rejected**: pre-filtering the insignificant partial waves before
+building them. 95–99 % of them survive the significance filter, so there is
+nothing to skip.
 
 ## Benchmarking rules
 

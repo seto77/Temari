@@ -263,6 +263,115 @@ function legendre_sum(rl::RlTable, Qa::Matrix{Float64}, Qb::Matrix{Float64},
     Pl = zeros(rl.lam_max + 1)
     return legendre_sum!(S, Pl, rl, Qa, Qb, cQ, occ)
 end
+
+"""ε ノードあたり 1 回だけ作る「生きているチャネル」の詰め直し (260808Cl)。
+
+`legendre_sum` の内側は 1 格子点あたり nch(=85〜257) 本のチャネルを舐めるが、
+補間データ `sp.y` / `sp.m` は**チャネルごとに別の Vector** なので、節点 ib を
+読むだけでチャネル数ぶんのキャッシュラインを触っていた。生きているチャネルだけを
+`Y[t, k]` / `M[t, k]` (t = 詰め直した添字) に**連続に**並べ直すと、同じ ib の列が
+1 ライン 8 チャネルで読める。
+
+さらに `interp[ic] === nothing` の分岐 (Union 型のフィールド読み) も内側から消える。
+**生きているチャネルの順序は ic 昇順のまま**なので、累算順は 1 つも変わらない。
+
+`Ra[t, i]` は Q₊ 側の補間値 (`precompute_RaT` の説明を参照)。"""
+struct ChPack
+    nlive::Int
+    lam::Vector{Int}                           # 各チャネルの λ
+    A::Vector{Float64}                         # 角度重み
+    Ra::Matrix{Float64}                        # (nlive × nx) Q₊ 側の R
+    Y::Matrix{Float64}                         # (nlive × nk) Pchip の節点値
+    M::Matrix{Float64}                         # (nlive × nk) Pchip の傾き
+    xk::Vector{Float64}
+end
+
+"""`legendre_sum!` の Q₊ 事前計算版 (260808Cl)。`RaT` は `precompute_RaT` の出力。
+
+旧版との差は 2 つだけで、**どちらも値を動かさない**:
+
+  1. `ra` を毎回補間せず `RaT[ic,i]` から読む (Q₊ は j にも K にも依らない)
+  2. Legendre 漸化を `P_BLK` 点まとめて回す (点どうしは独立。除算のレイテンシ隠し)
+
+チャネル累算の昇順・Hermite 式・漸化式・occ 乗算の**結合順は旧実装と同一**。
+オラクルは `legendre_sum!` (そのまま呼べば同じ値が出る)。"""
+function legendre_sum_ra!(S::Matrix{Float64}, Pm::Matrix{Float64}, rl::RlTable,
+                          pk::ChPack, Qb::Matrix{Float64},
+                          cQ::Matrix{Float64}, occ::Float64)
+    nx, np_ = size(Qb)
+    nlive = pk.nlive
+    if nlive == 0                              # 有効チャネル無し (実際は起きない)
+        fill!(S, 0.0)
+        return S
+    end
+    xk = pk.xk
+    Yp = pk.Y; Mp = pk.M; Rap = pk.Ra; lamv = pk.lam; Av = pk.A
+    nk = length(xk)
+    qlo = rl.q[1]
+    qhi = rl.q[end]
+    lm = rl.lam_max
+    # ブロック内の点ごとの Hermite 基底 (P_BLK は小さいので固定長の一時配列)
+    ibv = zeros(Int, P_BLK); hbv = zeros(P_BLK); outv = falses(P_BLK)
+    b0 = zeros(P_BLK); b1 = zeros(P_BLK); b2 = zeros(P_BLK); b3 = zeros(P_BLK)
+    cv = zeros(P_BLK)                          # cosΘ をブロックへ写す (漸化の内側で
+                                               # cQ を引き直さないため)
+    @inbounds for j in 1:np_
+        i0 = 1
+        while i0 <= nx
+            nb = min(P_BLK, nx - i0 + 1)
+            for t in 1:nb                      # (1) Qb 側の Hermite 基底
+                qb = Qb[i0+t-1, j]
+                outv[t] = qb > qhi
+                ibv[t] = 1; hbv[t] = 0.0
+                b0[t] = 0.0; b1[t] = 0.0; b2[t] = 0.0; b3[t] = 0.0
+                if !outv[t]
+                    xb = log(clamp(qb, qlo, qhi))
+                    ib = clamp(searchsortedlast(xk, xb), 1, nk - 1)
+                    hb = xk[ib+1] - xk[ib]
+                    tb = (xb - xk[ib]) / hb
+                    ibv[t] = ib; hbv[t] = hb
+                    b0[t] = (1 + 2tb) * (1 - tb)^2
+                    b1[t] = tb * (1 - tb)^2
+                    b2[t] = tb^2 * (3 - 2tb)
+                    b3[t] = tb^2 * (tb - 1)
+                end
+                cv[t] = cQ[i0+t-1, j]
+                Pm[t, 1] = 1.0                 # P₀ = 1
+                lm >= 1 && (Pm[t, 2] = cv[t])  # P₁ = cosΘ
+            end
+            for lam in 2:lm                    # (2) 漸化を nb 点インターリーブ
+                for t in 1:nb
+                    Pm[t, lam+1] = ((2lam - 1) * cv[t] * Pm[t, lam] -
+                                    (lam - 1) * Pm[t, lam-1]) / lam
+                end
+            end
+            for t in 1:nb                      # (3) チャネル累算 (点ごと・昇順)
+                i = i0 + t - 1
+                outb = outv[t]; ib = ibv[t]; hb = hbv[t]
+                b00 = b0[t]; b10 = b1[t]; b01 = b2[t]; b11 = b3[t]
+                s = 0.0
+                # Q₋ が表の外なら全チャネルで R'=0 → 和は厳密に +0.0。
+                # 旧実装は `s += A*ra*0.0*P` を nch 回まわしていたが、
+                # IEEE では 0.0 + (±0.0) = +0.0 なので結果は同じ (Ra は
+                # `isnan` ガードと Miller 規格化ガードで有限が保証されている)
+                if outb
+                    S[i, j] = 0.0
+                    continue
+                end
+                for u in 1:nlive               # ic 昇順 = 旧実装と同じ加算順
+                    v = b00 * Yp[u, ib] + b10 * hb * Mp[u, ib] +
+                        b01 * Yp[u, ib+1] + b11 * hb * Mp[u, ib+1]
+                    rb = isnan(v) ? 0.0 : v
+                    s += Av[u] * Rap[u, i] * rb * Pm[t, lamv[u]+1]
+                end
+                S[i, j] = s
+            end
+            i0 += nb
+        end
+    end
+    S .*= occ                                  # 旧実装の S .* occ と同順
+    return S
+end
 # 260805Cl 旧実装 (チャネル外側・3D P 配列。値はビット同一):
 # function legendre_sum(rl::RlTable, Qa::Matrix{Float64}, Qb::Matrix{Float64},
 #                       cQ::Matrix{Float64}, occ::Float64)
@@ -398,7 +507,18 @@ struct AngWS
     Pl::Vector{Float64}
     Q2v::Vector{Float64}; Qv::Vector{Float64}; onev::Vector{Float64}
     Sv::Matrix{Float64}                        # K=0 用 (nx × 1)
+    Pm::Matrix{Float64}                        # 260808Cl: Legendre 漸化の
+                                               # インターリーブ用 (P_BLK × lam+1)
 end
+
+"""Legendre 漸化をまとめて回す点数 (260808Cl)。
+
+漸化 `P[λ+1] = ((2λ−1)cP[λ] − (λ−1)P[λ−1])/λ` は **1 点の中では直列依存**で、
+律速は除算のレイテンシ (実測 ~16 サイクル/反復 = ちょうど vdivsd のレイテンシ)。
+格子点どうしは独立なので、4 点を同じループで回すと除算がパイプラインで重なり、
+スループット律速 (~4 サイクル) に落ちる。**各点の演算列は 1 つも変えていない**
+ので値はビット同一。"""
+const P_BLK = 8
 
 function AngWS(k_i::Float64, k_f::Float64, n_x::Int, n_phi::Int, lam_max::Int)
     dq = k_i - k_f
@@ -415,11 +535,73 @@ function AngWS(k_i::Float64, k_f::Float64, n_x::Int, n_phi::Int, lam_max::Int)
                  zeros(n_x, n_phi), zeros(n_x, n_phi), zeros(n_x, n_phi),
                  zeros(n_x, n_phi), zeros(n_x, n_phi), zeros(n_x, n_phi),
                  zeros(lam_max + 1), zeros(n_x), zeros(n_x), ones(n_x),
-                 zeros(n_x, 1))
+                 zeros(n_x, 1), zeros(P_BLK, lam_max + 1))
+end
+
+"""★260808Cl 高速化 (ビット同一): **Q₊ 側の R(Q) を ε ノードあたり 1 回**にする。
+
+`angular_integral` の K≠0 経路で
+
+    kp_d     = k_i·cosθ_i                      … i にしか依らない
+    Q₊²[i,j] = k_i² + k_f² − 2 k_f·kp_d        … **j にも K にも依らない**
+
+なので、Q₊ の PCHIP 評価 (log + 節点二分探索 + Hermite 基底 + 全チャネルの
+補間値) は格子点 i ごとに 1 回で足りる。従来は
+**K ノード 161 本 × φ ノード 48 本 = 7728 回**引き直していた。
+監査書 (`docs/speedup_audit_2026-08-05.json`) の P1-5「Qp 側 Ra の ε ごと 1 回化」。
+
+⚠ ビット同一の根拠は「同じ Float64 に同じ式を当てる」だけなので、
+`kp_d` → `Qp2` → `sqrt` の**結合順を 1 文字も変えない**こと。
+`k_i^2 + k_f^2 - 2.0*k_i*k_f*cth[i]` (K=0 経路の書き方) は結合が違うので**別物**。
+
+戻り値 `RaT[ic, i]` は `legendre_sum_ra!` がそのまま読む (0 埋め = 無効チャネル /
+q > q_max / NaN。ガードの意味は `eval_ch` と同一)。"""
+
+function precompute_RaT(ws::AngWS, rl::RlTable)
+    nx = length(ws.wx)
+    nch = length(rl.channels)
+    live = [ic for ic in 1:nch if rl.interp[ic] !== nothing]   # ic 昇順を保つ
+    nlive = length(live)
+    xk = nlive == 0 ? Float64[] : (rl.interp[live[1]]::Pchip).x
+    nk = length(xk)
+    pk = ChPack(nlive, [rl.channels[ic][2] for ic in live],
+                [rl.channels[ic][3] for ic in live],
+                zeros(nlive, nx), zeros(nlive, nk), zeros(nlive, nk), xk)
+    nlive == 0 && return pk                    # 有効チャネル無し (実際は起きない)
+    @inbounds for t in 1:nlive                 # 補間データを (チャネル × 節点) に詰める
+        sp = rl.interp[live[t]]::Pchip
+        for k in 1:nk
+            pk.Y[t, k] = sp.y[k]
+            pk.M[t, k] = sp.m[k]
+        end
+    end
+    qlo = rl.q[1]
+    qhi = rl.q[end]
+    k_i = ws.k_i; k_f = ws.k_f
+    @inbounds for i in 1:nx
+        kp_d = k_i * ws.cth[i]                             # ★式を保つ
+        qa = sqrt(k_i^2 + k_f^2 - 2.0 * k_f * kp_d)        # ★= ws.Qp[i,j]
+        qa > qhi && continue                               # 旧 eval_ch と同じガード
+        xa = log(clamp(qa, qlo, qhi))
+        ia = clamp(searchsortedlast(xk, xa), 1, nk - 1)
+        ha = xk[ia+1] - xk[ia]
+        ta = (xa - xk[ia]) / ha
+        a00 = (1 + 2ta) * (1 - ta)^2
+        a10 = ta * (1 - ta)^2
+        a01 = ta^2 * (3 - 2ta)
+        a11 = ta^2 * (ta - 1)
+        for t in 1:nlive
+            v = a00 * pk.Y[t, ia] + a10 * ha * pk.M[t, ia] +
+                a01 * pk.Y[t, ia+1] + a11 * ha * pk.M[t, ia+1]
+            pk.Ra[t, i] = isnan(v) ? 0.0 : v
+        end
+    end
+    return pk
 end
 
 function angular_integral(ws::AngWS, rl::RlTable, K::Float64, occ::Float64;
-                          tr::Union{Nothing,Transverse}=nothing)
+                          tr::Union{Nothing,Transverse}=nothing,
+                          RaT::Union{Nothing,ChPack}=nothing)
     k_i = ws.k_i; k_f = ws.k_f
     wx = ws.wx; jac_t = ws.jac_t; cth = ws.cth; sth = ws.sth
     nx = length(wx); np_ = length(ws.wphi)
@@ -461,7 +643,10 @@ function angular_integral(ws::AngWS, rl::RlTable, K::Float64, occ::Float64;
         ws.Qp[i, j] = sqrt(Qp2[i, j])
         ws.Qm[i, j] = sqrt(Qm2[i, j])
     end
-    S = legendre_sum!(ws.S, ws.Pl, rl, ws.Qp, ws.Qm, cQ, occ)
+    # 260808Cl: RaT (Q₊ 側の事前計算) があればそちらを使う。値はビット同一で、
+    # 無ければ従来経路 (selftest の単発呼び出し・互換ラッパがこちらを通る)
+    S = RaT === nothing ? legendre_sum!(ws.S, ws.Pl, rl, ws.Qp, ws.Qm, cQ, occ) :
+        legendre_sum_ra!(ws.S, ws.Pm, rl, RaT, ws.Qm, cQ, occ)
     val = 0.0
     @inbounds for j in 1:np_, i in 1:nx        # integrand を融合 (式・結合順は旧と同一)
         term = (Qm2[i, j] / (Qp2[i, j] + Qm2[i, j])) * S[i, j] / (Qp2[i, j] * Qm2[i, j])

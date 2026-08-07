@@ -118,15 +118,27 @@ this code.
 ## Practical checklist
 
 ```bash
-julia +1.11 -t 4 tools/bitident_snapshot.jl before.txt   # FIRST
+# Snapshot BOTH prescriptions before touching anything. The plain form runs the
+# v3 prescription (five channels); --v4 runs the shipping v4 prescription
+# (seven channels, including M1 = 3s and M5 = 3d, so the l_init = 2 angular
+# path and the kappa-resolved Dirac continuum are actually exercised).
+julia +1.11 -t 4 tools/bitident_snapshot.jl      before.txt    # FIRST
+julia +1.11 -t 4 tools/bitident_snapshot.jl --v4 before4.txt   # FIRST
 # ... change ...
-julia +1.11 -t 4 tools/bitident_snapshot.jl after.txt
-diff before.txt after.txt
+julia +1.11 -t 4 tools/bitident_snapshot.jl      after.txt
+julia +1.11 -t 4 tools/bitident_snapshot.jl --v4 after4.txt
+diff before.txt after.txt && diff before4.txt after4.txt
 
 julia +1.11 -t auto src/ionization.jl selftest
 julia +1.11 -t auto src/ionization.jl refcheck
 julia +1.11 -t 1 tools/verify_simd_bessel.jl
 julia +1.11 -t 1 tools/verify_e5_qlane.jl
+```
+
+If the change touched a generated table, also run the dataset checker:
+
+```bash
+julia +1.11 -t auto tools/check_tables.jl <prod_dir> [--eb]
 ```
 
 And when a change is meant to alter values, build the neutralised variant and

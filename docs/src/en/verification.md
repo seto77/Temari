@@ -163,7 +163,11 @@ A separate axis: not "is the number right" but "did this change move any bit".
 | --- | --- |
 | `julia -t 1 tools/verify_simd_bessel.jl` | 8-lane SIMD spherical Bessel vs the scalar kernel, 288 cases |
 | `julia -t 1 tools/verify_e5_qlane.jl` | The radial-integral q lane vs its reference, 75 cases |
-| `julia -t 4 tools/bitident_snapshot.jl <file>` | Five channels end to end, dumped at full precision for a before/after diff |
+| `julia -t 4 tools/bitident_snapshot.jl <file>` | Five channels end to end under the v3 prescription, dumped at full precision for a before/after diff |
+| `julia -t 1 tools/verify_e5_qlane_dirac.jl` | The q-lane SIMD accumulation and the exact-zero prefix skip in the **Dirac** radial table — the v4 shipping path — against the pre-port reference, over 75 synthetic cases that exercise the n_q remainder, the delta region, the Miller/upward boundary and κ-dependent seeding |
+| `julia -t 1 tools/verify_angular_pack.jl` | The v4 angular fast path against the preserved oracle `legendre_sum!`: the $Q_+$ hoist, the packed live-channel arrays and the interleaved Legendre recurrence, over 61440 elements spanning the non-relativistic, kappa-resolved, heavy-element and d-shell paths |
+| `julia -t 4 tools/bitident_snapshot.jl --v4 <file>` | The same for the shipping v4 prescription: seven channels, adding M1 (3s, two radial nodes) and M5 (3d, `l_init = 2`) so the kappa-resolved Dirac continuum and the d-shell angular path are covered |
+| `julia -t auto tools/check_tables.jl <prod_dir> [--eb]` | A generated dataset: F(0)=1, finiteness, K-shell positivity and monotonicity below s = 4, tail consistency, leave-one-out E0 interpolation error, sigma_own/sigma_Bote band, generator gate failures, and — with `--eb` — the binding energy against the Bote-Salvat subshell edge |
 | `julia -t auto tools/e5_dump.jl <dir>` | The four `refcheck` channels as raw `Float64` bytes, compared by SHA-256 |
 
 The five snapshot channels are chosen to span the space that matters: a light

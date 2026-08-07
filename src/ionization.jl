@@ -107,14 +107,16 @@ const USAGE = """
   julia -t auto ionization.jl fx   Z [--s ...] [--nonrel] [--json path]  # 原子散乱因子
                                    # 既定は完全 Dirac SCF 密度。--nonrel で比較用の非相対論
 
-opts: [--quick|--high] [--rel] [--nodscf] [--kli] [--frozen] [--transverse]
+opts: [--quick|--high] [--rel] [--nodscf] [--kli] [--frozen] [--no-transverse]
       [--s s1 s2 ...] [--json path]
       SCF は既定で完全 Dirac (DHFS)。--nodscf で旧来の非相対論 SCF (比較用)
       --kli は厳密交換 (Latter 補正なし)。Dirac・非相対論のどちらとも組める
       --frozen は厳密 frozen core = 束縛も連続も**同一の中性 KS ポテンシャル**
                (Latter 補正込み、z_asym=1)。Zhang らの Dirac GOS DB と同じ規約
       --frozen-static は同じ frozen core を「尾が 0 の静的場」で組む比較用の版
-      --transverse は横断的 (Møller) 相互作用を足す。**edge 出口のみ** (K=0 専用)
+      横断的 (Møller) 相互作用は **edge 出口で既定 on** (260808Cl、作者判断)。
+               K=0 専用なので F(s) 出口には無関係。--no-transverse で縦成分のみに戻す
+               (旧既定。model_id の -TR の有無でどちらか分かる)
       --kdirac は κ 分解 Dirac 連続状態 + 小成分の行列要素 (--rel の上位互換)。
                重元素で効く: Au L3 の GOS が Zhang らの DB へ 8 % 寄る
       --s は F(s) 出口のみ (edge は K=0 の 1 点で、その分だけ安い)"""
@@ -358,9 +360,14 @@ function main_(args)
     settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
     xc = parse_exchange(args)
     fs = parse_final_state(args)
-    trans = "--transverse" in args              # 260807Cl 横断的 (Møller) 相互作用
+    # 260808Cl: 横断的 (Møller) 相互作用は **edge 出口で既定 on** (作者判断)。
+    # 物理として正しく (式 42 と双極子極限で厳密一致、selftest T22b)、σ の E0 ドリフトが
+    # ほぼ消える。K=0 専用なので F(s) 出口 (= 出荷テーブル) には一切影響しない。
+    # ⚠ **明示の --transverse も受け付ける** — 既存のスクリプトと docs のコマンド例を
+    #   黙って壊さないため。--no-transverse が旧既定 (縦成分のみ) への戻し口
+    trans = edge_mode && !("--no-transverse" in args)
     kd = "--kdirac" in args                     # 260807Cl κ 分解 Dirac 連続状態
-    trans && !edge_mode &&
+    "--transverse" in args && !edge_mode &&
         error("--transverse は edge 出口のみ (K=0 専用。指示書 §3)")
     println("Z=$z $tag @ $e0 keV   出口: ", edge_mode ? "dσ/dΔE (EELS)" : "F(s) (EDX)",
             "   処方: ", model_id_of(rel, dscf, X_ALPHA, xc, fs, trans, kd))

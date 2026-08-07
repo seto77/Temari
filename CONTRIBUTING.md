@@ -105,6 +105,11 @@ julia -t auto src/ionization.jl refcheck
 # 3. Bit-identity of the optimized kernels against their scalar references.
 julia -t 1 tools/verify_simd_bessel.jl      # 288 cases
 julia -t 1 tools/verify_e5_qlane.jl         #  75 cases
+julia -t 1 tools/verify_e5_qlane_dirac.jl   #  75 cases (the v4 shipping path)
+julia -t 1 tools/verify_angular_pack.jl     # 61440 elements
+
+# 4. A generated dataset (only if you changed the generator).
+julia -t auto tools/check_tables.jl <prod_dir> [--eb]
 ```
 
 For anything that touches a computation, add the end-to-end bit-identity check.

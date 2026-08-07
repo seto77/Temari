@@ -243,36 +243,132 @@ function RlTable(cont::DiracContinuumSet, r_b, G_b, F_b, q_lo::Float64,
     end
     isempty(channels) && error("Dirac RlTable: 有効なチャネルが無い (κ=$kap_init)")
     lam_max = maximum(ch[2] for ch in channels)
-    # 被積分関数を先に畳む: gw[ic, i] = w_i (G_b G_c + F_b F_c)
+    # 被積分関数を先に畳む: gw[i, ic] = w_i (G_b G_c + F_b F_c)
+    # ★260808Cl 高速化 (ビット同一): **(i, κ′) の順に持つ** (旧: (κ′, i))。
+    #   内側の積和は κ′ を固定して i を走るので、旧レイアウトでは
+    #   ストライド nch_c (l_max=42 で 85 要素 = 680 B) の飛び飛び読みになり、
+    #   要素 1 個ごとにキャッシュラインを 1 本触っていた。転置すると連続読みで
+    #   1 ライン 8 要素になる。**加算順は 1 つも変えていない** (j 昇順のまま)
     n_int = length(cont.r_int)
-    gw = zeros(nch_c, n_int)
-    @inbounds for i in 1:n_int, ic in 1:nch_c
-        gw[ic, i] = cont.w_int[i] *
+    gw = zeros(n_int, nch_c)
+    @inbounds for ic in 1:nch_c, i in 1:n_int
+        gw[i, ic] = cont.w_int[i] *
                     (gb[i] * cont.G_int[ic, i] + fb[i] * cont.F_int[ic, i])
     end
+    # ★260808Cl 高速化 (ビット同一、監査書 P2-2): gw の**厳密ゼロの前置部**を飛ばす。
+    #   連続波は r^{l+1} が e^{−60} になる半径から種を蒔くので、κ の l が大きいほど
+    #   右から始まり、それより内側の G/F は**厳密に 0.0** のまま残っている。
+    #   log 格子は内端 1e-6 から始まるので、l=42 では格子の ~9 割がゼロ加算だった。
+    #   `+0.0` の加算は恒等 (累算器は R の 0.0 から始まり、途中で −0.0 になることも
+    #   ない) なので、飛ばしても値は 1 ビットも動かない。
+    i_supp0 = fill(n_int + 1, nch_c)
+    @inbounds for ic in 1:nch_c
+        k = findfirst(!=(0.0), view(gw, :, ic))
+        k === nothing || (i_supp0[ic] = k)
+    end
     R = zeros(length(channels), n_q)
+    # ★260808Cl 高速化 (ビット同一): **非相対論版の E5 (q レーン SIMD 累算) を
+    #   ここへ移植**した。260805Cl に E5 を入れたとき Dirac 版は「比較・検証用で
+    #   出荷しない」前提だったので素の逐次和のままで、v4 で出荷経路になった今も
+    #   そのままだった。プロファイルでは **v4 の全時間の 55 % が この RlTable**
+    #   (うち球ベッセル 28 %・累算 22 %) で、v3 より遅い主因がここだった。
+    #   q を 8 本まとめてレーンに載せると、r 方向の逐次 FP 加算連鎖 1 本
+    #   (レイテンシ律速。ビット同一契約が再結合を禁じるので縮約 SIMD 不可) が
+    #   **8 本の独立連鎖 = 1 命令の vaddpd** に畳まれる。
+    #   ★ビット同一の根拠は非相対論版と同一 (同ファイル上方の E5 コメント):
+    #     レーン値は同乗レーンの x に依らず、(ic,iq) への加算は
+    #     タイル昇順 × チャンク昇順 × jj 昇順のままで演算列が変わらない。
+    #     チャンク境界で R を経由するが Float64 の格納・読み出しは厳密なので、
+    #     連続した 1 本の加算連鎖と完全に同じ値になる
     tile = 128
-    jl_tab = zeros(tile * (lam_max + 1))
+    jchunk = 24                                # λ スラブを L2 に収める幅 (非相対論版と同じ)
+    jc8 = jchunk * 8
+    jl_tab = zeros(tile * (lam_max + 1))       # q 端数 (従来経路) 用
+    jl_tab8 = zeros(jc8 * (lam_max + 1))       # E5: tab[λ*jc8 + (jj-1)*8 + k]
     xb = zeros(tile)
     tmpj = zeros(lam_max + 1)
+    thr = lam_max + 10.0                       # スカラー版と同じ Miller/上方境界
+    nq8 = n_q - n_q % 8
     for i0 in 1:tile:n_int
         m = min(i0 + tile - 1, n_int) - i0 + 1
-        for (iq, qv) in enumerate(q)
+        for iq0 in 1:8:nq8
+            for j0 in 1:jchunk:m
+                mc = min(j0 + jchunk - 1, m) - j0 + 1
+                for jj in 1:mc                 # j_λ(q_k·r_j) を 8 q レーンで評価
+                    X = _xq8(q, iq0, cont.r_int[i0+j0+jj-2])
+                    xlo = _min8(X)
+                    xhi = _max8(X)
+                    if xlo >= 1e-12 && xhi <= thr
+                        _jl8_miller!(jl_tab8, jc8, (jj - 1) * 8, lam_max, X)
+                    elseif xlo > thr
+                        _jl8_upward!(jl_tab8, jc8, (jj - 1) * 8, lam_max, X)
+                    else                       # 混在境界・δ 域: レーン別スカラー
+                        for k in 1:8
+                            sph_jl_all!(view(tmpj, 1:lam_max+1), lam_max, X[k])
+                            @inbounds for l in 0:lam_max
+                                jl_tab8[l*jc8+(jj-1)*8+k] = tmpj[l+1]
+                            end
+                        end
+                    end
+                end
+                GC.@preserve jl_tab8 begin
+                    p00 = pointer(jl_tab8)
+                    @inbounds for (ic, (_, lam, _)) in enumerate(channels)
+                        row = src[ic]
+                        # gw の添字 = i0+j0+jj-2。厳密ゼロの前置部を飛ばす (P2-2)
+                        js = max(1, i_supp0[row] - i0 - j0 + 2)
+                        js > mc && continue     # このチャンクは全部ゼロ加算 = 恒等
+                        acc = _ldrow8(R, ic, iq0)   # 8 q 分の累算器 = 1 zmm
+                        p = p00 + lam * jc8 * 8 + (js - 1) * 64
+                        col = (row - 1) * n_int + i0 + j0 - 2   # gw の線形添字
+                        for jj in js:mc
+                            acc = _acc8(acc, gw[col+jj], _ld8(p))
+                            p += 64
+                        end
+                        _strow8!(R, ic, iq0, acc)
+                    end
+                end
+            end
+        end
+        for iq in nq8+1:n_q                    # q 端数: 従来経路 (順序・演算列不変)
+            qv = q[iq]
             @inbounds for j in 1:m
                 xb[j] = qv * cont.r_int[i0+j-1]
             end
             sph_jl_tile!(jl_tab, tile, m, lam_max, xb, tmpj)
             @inbounds for (ic, (_, lam, _)) in enumerate(channels)
+                row = src[ic]
+                js = max(1, i_supp0[row] - i0 + 1)     # P2-2 (上と同じ恒等性)
+                js > m && continue
                 s = R[ic, iq]
                 base = lam * tile
-                row = src[ic]
-                for j in 1:m
-                    s += gw[row, i0+j-1] * jl_tab[base+j]
+                col = (row - 1) * n_int + i0 - 1       # gw の列頭 (線形添字)
+                for j in js:m
+                    s += gw[col+j] * jl_tab[base+j]
                 end
                 R[ic, iq] = s
             end
         end
     end
+    # 260808Cl 旧 (P2-1 構造・r レーン SIMD。値はビット同一。オラクル用に温存):
+    # for i0 in 1:tile:n_int
+    #     m = min(i0 + tile - 1, n_int) - i0 + 1
+    #     for (iq, qv) in enumerate(q)
+    #         @inbounds for j in 1:m
+    #             xb[j] = qv * cont.r_int[i0+j-1]
+    #         end
+    #         sph_jl_tile!(jl_tab, tile, m, lam_max, xb, tmpj)
+    #         @inbounds for (ic, (_, lam, _)) in enumerate(channels)
+    #             s = R[ic, iq]
+    #             base = lam * tile
+    #             col = (src[ic] - 1) * n_int + i0 - 1
+    #             for j in 1:m
+    #                 s += gw[col+j] * jl_tab[base+j]
+    #             end
+    #             R[ic, iq] = s
+    #         end
+    #     end
+    # end
     lq = log.(q)
     interp = Union{Pchip,Nothing}[Pchip(lq, R[ic, :]) for ic in 1:length(channels)]
     return RlTable(collect(q), nL, channels, lam_max, R, interp)

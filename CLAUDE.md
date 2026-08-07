@@ -3,10 +3,17 @@
 孤立原子の内殻イオン化形状因子 F(s, E0) と断面積テーブルを生成する Julia コード。
 ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定リポ (現在リモート無し)。
 
-## ⚠ ReciPro との関係 (最重要。2026-08-05 時点)
+## ⚠ ReciPro との関係 (2026-08-08 更新)
 
-- **生成コードの正本は当面 ReciPro 側**: `C:\Users\seto\source\repos\ReciPro\tools\IonizationGen\handout\`
-  (tools ローカルリポの一部)。Temari/src はそのミラー + 最適化実験の先行分
+- **★ v4 は Temari 側のコードで生成した。**計画書が書いていた移行条件
+  (「P2 完了 + v3 の本番生成完走後に Temari へ移し、以後は Temari が正本」) は
+  両方とも満たされている。**dataset v4.0.0 は実際に Temari の
+  `src/gen_production.jl` から生成した**ので、v4 世代について正本は Temari。
+  ⚠ **ReciPro 側 `handout/` をどうするか (v3 で凍結する / v4 を配備する) は未決。
+  作者判断**。現状は v3 のまま触っていない
+- v3 世代についての記述 (以下) は履歴として残す:
+  - 生成コードの正本は ReciPro 側: `C:\Users\seto\source\repos\ReciPro\tools\IonizationGen\handout\`
+    (tools ローカルリポの一部)。Temari/src はそのミラー + 最適化実験の先行分
 - **双方向の流れがある**:
   - 物理・運用機能 (例: E0 行チェックポイント) は handout 側で開発 → `tools/sync_from_recipro.sh` で取り込み
   - 高速化 (SIMD・Phase1・P2-1) は Temari 側で開発・ビット同一検証 → 検証済みのものだけ handout へ配備
@@ -18,10 +25,58 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
   Temari には**データセットを置かない** (コードとドキュメントのみ)
 - ReciPro 側の作業指示書 = `ReciPro/.project-guidance/ReciPro/ReciPro_STEM-EDX_*.md`
 
+## ★ 現在地 (2026-08-08) — **dataset v4.0.0 は生成・QC 完了**
+
+- **dataset v4.0.0 を生成・QC 済** (525 チャネル / 14,796 行、5 時間 16 分、
+  **failures 0 / check_tables 525/525**)。正本 = **`src/prod_v4_jl/MANIFEST.md`**
+- **v4 に切り替えた**。`gen_production.jl` の**既定処方が v4** (κ 分解 Dirac 連続状態 +
+  Dirac SCF 原子場 + M 殻)。v3 の再現は `--v3` で明示する。
+  `MODEL_ID_KD` = `DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4`、
+  `dataset_version` は**処方一式から引く** (出荷処方から 1 つでも外れると `0.0.0-dev`)
+- **⚠ 引き継ぎ書 §1 の表「SCF は v3 と同左」は誤り。**出荷済み v3 の model_id に
+  `-DSCF` が無い = **原子場は非相対論 SCF だった**。完全 Dirac SCF が既定になったのは
+  v3 出荷後 (`7a3de21`)。つまり **v4 は v3 から連続状態と原子場の 2 点が変わる**
+- **`--transverse` は EELS 出口の既定 on** (作者判断)。`--no-transverse` で旧既定へ。
+  F(s) は K=0 専用なので無影響
+- **高速化 3.9 倍 (1 行 24.7 → 6.3 s)、全てビット同一。**正本 =
+  `docs/speedup_v4_2026-08-08.md`。最大の取りこぼしは **E5 (q レーン SIMD) が
+  Dirac 版 RlTable に入っていなかった**こと。次の一手 (P3-1 = l_need 打ち切り) は
+  ビット同一を壊すので見送り、理由と見積りを同書 §5 に残した
+- **v4 のビット同一基準は `tools/bitident_snapshot.jl --v4` の 7 チャネル**
+  (M1 = 3s・M5 = 3d を含む)。従来の 5 チャネルは v3 処方なので v4 経路を踏まない。
+  **両方走らせること**
+- QC は `tools/check_tables.jl` (Julia 版。C1-C8 + **C9 = 軌道の割り当て** +
+  **C10 = メタデータ一致** + **C11 = N0 の桁外れ**)。`--eb` で C9 も回る。
+  ⚠ **C9 は「E_b が Bote 端と 0.1 % 一致」では駄目**だった — それが成り立つのは
+  深い準位だけで、浅い準位は 0.5〜1.6 % ずれる (Koopmans 型固有値と実験端の系統差)。
+  **スピン軌道分裂**なら系統差が相殺し、κ の割り当てを直接検査できる
+  (**1432 組すべて一致、最悪 |比−1| = 7.8e-4**)。
+  破損行の修復は `tools/repair_rows.jl` (良品を行チェックポイントへ書き戻して
+  該当行だけ再計算。**往復がビット一致することを実測済**)
+- **⚠⚠ v4 生成で破損行が 3 本出た** (Sc L1 @150 kV / Se L1 @400 kV /
+  Nb M3 @225 kV。σ_own/σ_Bote が 1e10〜1e23)。
+  v3 の Cd-K と同じ形で、**生成ゲート (badL/mres/rtail) は素通り**する
+  (ソルバは正常終了したと信じて壊れた値を書くため)。C11 が捕まえ、
+  `repair_rows.jl` で 3 本とも修復した (再計算後 0.944〜0.959)。
+  → **`is_sane_row` ゲートを生成側に足した** (N0 と σ 比が明らかに異常なら
+  **同設定で**その場で引き直す。ppw を上げる既存の再試行とは別経路)。
+  **完走 ≠ 健全。QC は必ず通すこと**
+- フリート実行は `tools/lane_watchdog.sh`。**Windows Julia の GC クラッシュは健在**
+  (v4 生成中に **5 回**発生)。**うち 2 回は wedged** (プロセスが死に切らずログだけ
+  止まる) で、mtime 監視でしか検知できない (15 分停滞で kill → 再起動)。
+  残り 3 回はプロセスが死んで即時再起動
+- **⚠ 単発 CLI (`src/ionization.jl`) の連続状態の既定は今も v2 (非相対論)。**
+  `gen_production.jl` だけが v4 既定。つまり `julia src/ionization.jl 26 K 200` は
+  **出荷処方ではない** (`--kdirac` で v4、`--rel` で v3)。refcheck と解析階段が
+  素の既定に固定されているので意図的だが、**公開リポとしては罠**。
+  docs/src/en/cli.md に警告を入れてある。**既定を揃えるかは作者判断**
+
 ## 現在地 (2026-08-05)
 
 - **dataset v3.0.0 は ReciPro で出荷済み** (ver4.946)。SRC + E0 倍密度 + s≤8 Å⁻¹ 161 点、
-  246ch、check_tables 246/246・C6 LOO 8.84e-4・failures 0
+  246ch、check_tables 246/246・C6 LOO 8.84e-4・failures 0。
+  ⚠ **v3 は現行コードでビット再現できない** (相対 2.8e-08。v3 出荷後に原子層が
+  変わったため。高速化のせいではない — 5 チャネル === は差分ゼロ)
 - 生成中に **Cd-K (Z=48) E0=300 の 1 行が GC クラッシュ起因で破損** → 行チェックポイント
   から当該行のみ再計算で修復 (経緯は MANIFEST 運用記録)。**完走 ≠ 健全、QC 必須**
 - 高速化: SIMD 球ベッセル (1.24x) + Phase1 角度融合 (3.0-3.7x) = 計 4.3x 配備済み。
@@ -37,11 +92,13 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
   `l4_angular` / `l5_exit_edx` / `selftest`。**module は導入せずフラット名前空間**
   (include するだけで全名前が見える / 連結すれば単一ファイルに戻る)。純粋な移動で
   5 チャネル === ビット同一。層とファイルの対応は `docs/architecture.md`
-- **⭐ 現状の残務・次の一手の正本 = `docs/next_phase_2026-08-08.md`**
-  (v4 の生成とリリース仕上げ。**冒頭でこれを読む**)。処方は作者判断で確定済 —
+- **⭐ 現状の残務・次の一手の正本 = `docs/next_phase_2026-08-09.md`**
+  (v4 は生成・QC 済。残るは配布と公開。**冒頭でこれを読む**)。
+  出荷データの正本 = **`src/prod_v4_jl/MANIFEST.md`**
+- 一世代前 = `docs/next_phase_2026-08-08.md` (v4 の生成指示。**§2 は全部実施済**、
+  §1 の未決 `--transverse` も決着)。処方は作者判断で確定済 —
   **連続状態 = κ 分解 Dirac / イオン化の交換 = Xα / f_x の交換 = KLI /
-  終状態 = 緩和 core-hole / チャネル = K,L1,L2,L3,M1–M5 / σ = Bote–Salvat**。
-  未決は `--transverse` を EELS 出口の既定にするかだけ (再生成不要)
+  終状態 = 緩和 core-hole / チャネル = K,L1,L2,L3,M1–M5 / σ = Bote–Salvat**
 - 一世代前の残務 = `docs/next_phase_2026-08-07.md`
   (`..._2026-08-06.md` は P1 完了時点の旧版)。**§2 (A 厳密 frozen core) と
   §3 (B 横断的 Møller) は 2026-08-07 に実施済** — 測定の正本は
@@ -133,9 +190,10 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
 - **ビット同一の規律**: 出荷テーブルに影響する変更は「ビット同一」か「テーブル全再生成とセット」
   の二択。`@simd`/muladd/fma/総和順序変更は不可。`Base.sum()` は内部 @simd なので自前ループとの
   相互置換も不可。ntuple のクロージャにループ内再代入変数を捕まえさせない (Core.Box 化)
-- 検証: `julia -t auto src/ionization.jl selftest` (~10 s) / `refcheck` (~1 分) /
-  配備前は 5 チャネル === 比較 (`tools/bitident_snapshot.jl` を変更の**前後**で走らせて diff。
-  前を取り忘れると後から作れない)。SCF キャッシュ (`atom_cache_*`) は物理変更時に手で消す
+- 検証: `julia -t auto src/ionization.jl selftest` (~50 s) / `refcheck` (~1 分) /
+  配備前は `tools/bitident_snapshot.jl` を変更の**前後**で走らせて diff
+  (前を取り忘れると後から作れない)。**v4 では `--v4` (7 チャネル) と無印
+  (v3 処方 5 チャネル) の両方**。SCF キャッシュ (`atom_cache_*`) は物理変更時に手で消す
 - Windows Julia の GC クラッシュ・wedged・監視の詳細 = `src/IMPORT.md`「既知の運用上の注意」
 - **プロセス並列 > スレッド並列** (8P×4T が 4P×8T の 2.26 倍)。長時間バッチの運用ノウハウは
   ReciPro 側メモリ `feedback_julia_batch_parallelism` と指示書 §3 に蓄積

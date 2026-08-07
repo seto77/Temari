@@ -30,6 +30,8 @@ ReciPro との関係・取り込み判断の詳細は **ルートの `CLAUDE.md`
 | 内容 | 種別 | handout への配備 |
 |---|---|---|
 | SIMD 球ベッセル / Phase1 角度融合 / P2-1 ループ入れ替え | 高速化 (ビット同一) | v4 世代から (作者決定で handout は v3 凍結) |
+| **260808Cl の高速化 6 点** (RK4 の pot_V 共有 / Q₊ の ε ごと 1 回化 / Legendre 漸化のインターリーブ / ε ループの `:greedy`+LPT / **E5 q レーンの Dirac 版への移植** / BLAS 1 スレッド) | 高速化 (ビット同一、計 3.9 倍) | **v4 と同時**。正本 = `docs/speedup_v4_2026-08-08.md` |
+| **v4 処方への切り替え** (`gen_production.jl` の既定 = κ 分解 Dirac + M 殻、`--v3` で旧処方) | 出荷世代 | v4 と同時 |
 | **球ベッセル Miller 規格化の 0/0 ガード** (`_jl_miller_scale`、2026-08-06) | **正しさ** | **配備済み** (handout `0933c0e`)。作者判断「正しさの修正は常に正しい」。handout 単独でも selftest T0c / refcheck 9.044e-08 不変 / 5 チャネル === / `J0_MIN=0.0` 対照を実施し、Temari と差分がバイト一致することを確認。MANIFEST の運用記録と README 検証状況にも記載 |
 
 ## 動かす

@@ -174,7 +174,11 @@ function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
                   dirac=dirac)
     # 260805Cl 変更: K 非依存の角度幾何・作業領域を 1 回だけ作る (旧: K ごとに再構築)
     ws = AngWS(k_i, kf, n_x, n_phi, rl.lam_max)
-    row = [kf / k_i * angular_integral(ws, rl, K, occ_init; tr=tr)
+    # 260808Cl 追加: Q₊ は i にしか依らない (j にも K にも非依存) ので、Q₊ 側の
+    # R(Q) を ε ノードあたり 1 回にする (旧: K 161 × φ 48 = 7728 回)。
+    # ビット同一 — 詳細は l4_angular.jl の precompute_RaT
+    RaT = precompute_RaT(ws, rl)
+    row = [kf / k_i * angular_integral(ws, rl, K, occ_init; tr=tr, RaT=RaT)
            for K in K_nodes]                   # k_f/k_i は位相空間因子
     # 旧: row = [kf / k_i * angular_integral(rl, K, k_i, kf, occ_init, n_x, n_phi)
     #            for K in K_nodes]
@@ -280,7 +284,14 @@ function compute_NK(pot_ion, r_b, u_b, E_th::Float64, T0::Float64,
     bad = zeros(Int, ne)
     rtail = zeros(ne)
     done = Threads.Atomic{Int}(0)
-    Threads.@threads for ie in 1:ne
+    # ★260808Cl 高速化 (ビット同一): `:greedy` + **降順** (LPT スケジューリング)。
+    #   既定の `:dynamic` は ne(=96) を nthreads 個の**連続チャンク**に割るので、
+    #   ε とともに l_max が伸びる = 後ろのチャネルほど重い本問では、最後の
+    #   チャンクを持ったスレッドだけが延々と走って他が遊ぶ。`:greedy` は 1 ノード
+    #   ずつ引かせるので不均衡が消え、降順にすると重い方から配る (LPT = 近似最適)。
+    #   ie ごとに互いに素なスライスへ書くだけなので**値は順序に依存しない**
+    #   (監査書 P4-1)。旧: `Threads.@threads for ie in 1:ne`
+    Threads.@threads :greedy for ie in ne:-1:1
         kf = kin_k(max(T0 - E_th - eps[ie], 0.0))
         row, mres, orec, lm, bd, rtl = eps_worker(
             pot_ion, r_b, u_b, eps[ie], kf, k_i, z, r_core, K_nodes,
@@ -394,8 +405,12 @@ const MODEL_ID_REL = "DHFS-KS23-DiracB-SRC-jsplit-fullrange-sym-v3"
 # 260807Cl 追加: κ 分解 Dirac 連続状態 + 2 成分行列要素 (第 3.6 章)。SRC (v3) の
 # 上位互換なので**別の基底 ID** を与える — `-KD` を v2 (非相対論連続状態) に
 # 付けると「非相対論なのに相対論の上位版」という矛盾した ID になる。
-# 出荷世代ではないので v4 は名乗らない (v4 は指示書 §5.6 の物理一式)
-const MODEL_ID_KD = "DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v3k"
+# 260808Cl: **出荷世代 v4 に昇格**した (暫定名 `-v3k` から改称)。作者判断で
+# 連続状態を SRC → κ 分解 Dirac に差し替えることが確定したため
+# (`docs/src_defect_2026-08-07.md` が理由、`docs/next_phase_2026-08-08.md` §1 が決定)。
+# ⚠ `-v3k` を名乗る出荷テーブルは存在しない (開発中の測定にしか使っていない) ので、
+#   改称で読めなくなるデータは無い
+const MODEL_ID_KD = "DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4"
 
 """処方 ID の唯一の組み立て口。**表示も JSON も必ずここを通す** — 分岐が増えるたびに
 文字列連結を書き足すと、片方だけ古い ID を出す事故が起きる (実際に起こした)。
