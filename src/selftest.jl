@@ -520,6 +520,85 @@ function selftest()
         @assert r2(a) > r2(b) "T18 FAIL: KLI で密度が広がっていない"
     end
 
+    # ---- T19: 厳密交換の Dirac 版 (KLI を DHFS へ広げた分) ----
+    # (a) 角度代数を 4 つの恒等式で固定する。**3 番目が本命** — jj の係数を κ について
+    #     足し上げると LS の係数に厳密に戻る、という退化条件で、これが成り立たなければ
+    #     c→∞ で非相対論へ落ちない。1 つでも係数を間違えれば破れる。
+    let e_sum = maximum(abs(sum((2k + 1) * threej_half_sq(tja, k, tjb)
+                                for k in 0:((tja + tjb) ÷ 2)) - 1.0)
+                        for tja in 1:2:9 for tjb in 1:2:9),
+        e_d = maximum(abs((2k + 1) * sum(wigner3j2(tj, 2k, tj, -tm, 0, tm)^2
+                                         for tm in -tj:2:tj) - 1.0)
+                      for tj in 1:2:9 for k in 0:tj),
+        kaps = l -> (l == 0 ? (-1,) : (l, -(l + 1))),
+        e_ls = maximum(abs(sum(kappa_deg(ka) * kappa_deg(kb) *
+                               dirac_exchange_c(ka, k, kb)
+                               for ka in kaps(la), kb in kaps(lb)) -
+                           2 * (2la + 1) * (2lb + 1) * threej000_sq(la, k, lb))
+                       for la in 0:3 for lb in 0:3 for k in 0:(la+lb)),
+        e_one = abs(dirac_exchange_c(-1, 0, -1) *
+                    dirac_exchange_weight(0, 1, 1, [1.0], [-1]) - 1.0)
+
+        @printf("[T19a] Dirac 交換の角度代数: 交換ホール和則 %.1e / D_k(j)(2k+1)−1 %.1e / LS への退化 %.1e / 1 電子 c⁰W⁰ %.1e\n",
+                e_sum, e_d, e_ls, e_one)
+        @assert e_sum < 1e-13 "T19 FAIL: Σ(2k+1)[3j(j k j';½0−½)]² = 1 が破れている"
+        @assert e_d < 1e-13 "T19 FAIL: 半整数 j の D_k(j) = 1/(2k+1) が破れている"
+        @assert e_ls < 1e-12 "T19 FAIL: jj の交換係数が κ 和で LS の係数に戻らない"
+        @assert e_one < 1e-13 "T19 FAIL: 1 電子で Dirac 交換が Hartree を打ち消さない"
+    end
+    # (b) 1 電子 Dirac + KLI: 相対論でも自己相互作用は完全に消えるので V_eff は
+    #     裸の −Z/r に戻り、固有値は Sommerfeld の厳密解になる (T6 の値と同じ)
+    for z in (1, 26)
+        a = SCFAtom(z, [(1, 0, 1.0)]; relativistic=true, exchange=:kli)
+        vh = hartree(a.r, a.rho)
+        dev = maximum(abs.((-z ./ a.r .+ vh .+ a.vx) .* a.r .+ z))
+        g = sqrt(1.0 - (z / C_LIGHT)^2)              # γ = √(κ² − (Zα)²)、κ=−1
+        ex = C_LIGHT^2 * ((1.0 + (z / C_LIGHT / g)^2)^-0.5 - 1.0)   # 1s の Sommerfeld
+        e_eps = abs(a.eps[(1, 0)] / ex - 1.0)
+        @printf("[T19b] 1 電子 Dirac Z=%2d: max|r·V_eff + Z| = %.2e / ε vs Sommerfeld %.2e\n",
+                z, dev, e_eps)
+        @assert a.converged "T19 FAIL: 1 電子の Dirac KLI-SCF が収束しない"
+        @assert dev < 1e-6 "T19 FAIL: Dirac でも V_eff が −Z/r に戻らない"
+        @assert e_eps < 1e-5 "T19 FAIL: 1 電子 Dirac KLI の固有値が Sommerfeld と合わない"
+    end
+    # (c) c→∞ の退化と、Σ_a q_a ū_a = 2E_x。閉殻を使うのは、**開殻では平均配置の
+    #     集団が LS 副殻 (n,l) か jj 副殻 (n,κ) かで違い、原理的に一致しない**ため
+    #     (DF-AOC と HF-AOC の既知の差)。閉殻なら自己項が両方 0 で厳密に一致する。
+    let z = 10, kw = (dt=8e-3, tol_rho=1e-5, tol_e=1e-6, exchange=:kli)
+        a_nr = SCFAtom(z, ORBITALS[z]; kw...)
+        a_inf = SCFAtom(z, ORBITALS[z]; relativistic=true, c=C_LIGHT * 100.0, kw...)
+        a_rel = SCFAtom(z, ORBITALS[z]; relativistic=true, kw...)
+        @assert a_nr.converged && a_inf.converged && a_rel.converged "T19 FAIL: 未収束"
+        w = simpson_weights(length(a_nr.r), a_nr.dt) .* a_nr.r
+        dens_diff(a, b) = sum(4pi .* a.r .^ 2 .* abs.(a.rho .- b.rho) .* w) / a.nel
+        d_inf = dens_diff(a_inf, a_nr)
+        d_phys = dens_diff(a_rel, a_nr)
+        # 収束場で κ 分解の軌道を解き直し、u_x の係数の恒等式を見る
+        pot = V_bound_callable(a_rel)
+        G = Vector{Vector{Float64}}(); F = Vector{Vector{Float64}}()
+        qv = Float64[]; kv = Int[]; ev = Float64[]
+        for (nq, lq, kap, q) in dirac_occupancy(a_rel.occ)
+            q <= 0.0 && continue
+            E, Gf, Ff = dirac_orbital_on_grid(pot, z, a_rel.r, a_rel.dt;
+                                              kappa=kap, n_nodes=nq - lq - 1)
+            push!(G, Gf); push!(F, Ff); push!(qv, q); push!(kv, kap); push!(ev, E)
+        end
+        wx = dirac_orbital_exchange_weights(G, F, qv, kv, a_rel.r)
+        ident = sum(qv[i] * trapz(wx[i], a_rel.r) for i in eachindex(qv)) /
+                (2 * dirac_exchange_energy_x(G, F, qv, kv, a_rel.r))
+        vk, _, Δ = dirac_kli_exchange_potential(G, F, qv, kv, a_rel.r, ev)
+        i30 = findmin(abs.(a_rel.r .- 30.0))[2]
+        off = abs(vk[i30] * a_rel.r[i30] + 1.0)
+        @printf("[T19c] Ne: c→∞ 密度差 %.2e (消える) / 物理 c %.2e (残る) / Σq·ū/2E_x = %.10f\n",
+                d_inf, d_phys, ident)
+        @printf("       κ 分裂した HOMO が残す定数オフセット: |r·V_x + 1|(30 a₀) = %.2e\n", off)
+        @assert d_inf < 5e-5 "T19 FAIL: c→∞ で非相対論 KLI へ退化しない"
+        @assert d_phys > 10 * d_inf "T19 FAIL: 物理の c で相対論効果が出ていない"
+        @assert abs(ident - 1.0) < 1e-9 "T19 FAIL: Dirac の u_x の 1/2 係数が違う"
+        # 既知の残差 (l1_atomic.jl の解説参照)。密度には効かないが、大きくなったら気付く
+        @assert off < 0.02 "T19 FAIL: KLI の遠方オフセットが想定より大きい"
+    end
+
     # ---- T13b: 交換係数が二重に掛かっていないこと ----
     # 260807Cl に実際にやらかした事故の回帰テスト。`slater_vx` に X_ALPHA を
     # 畳み込んだ結果、終状態ポテンシャル (第 5 章、KS 2/3) が (2/3)·α になり、

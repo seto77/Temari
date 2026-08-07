@@ -88,32 +88,58 @@ $$W^k_{ab} = \tfrac{1}{2}q_a q_b + \delta_{ab}\,\frac{(2l_a+1)q_a - q_a^2/2}{2k+
 which comes from $\langle n^2 \rangle = \langle n \rangle$ for integer
 occupations. Spin polarization is not needed for this.
 
+The same construction is wired into the **Dirac** SCF as well. Three things
+change and nothing else: the overlap density becomes $G_aG_b + F_aF_b$ (the
+small component enters exchange exactly as it enters the charge density), the
+angular coefficient becomes $[3j(j_a\,k\,j_b;\tfrac12,0,-\tfrac12)]^2$ with the
+parity rule $l_a + k + l_b$ even, and the subshell degeneracy becomes $2j+1$
+instead of $2(2l+1)$ — which removes the factor of ½ that the spin sum
+contributed. Written together,
+
+$$W^k = s\left\{q_a q_b + \delta_{ab}\frac{D_a q_a - q_a^2}{2k+1}\right\},\qquad
+s = \tfrac12,\ D = 2(2l{+}1)\ \text{(LS)};\quad s = 1,\ D = 2j{+}1\ \text{(jj)}$$
+
+Summing the jj coefficients over κ returns the LS ones exactly (verified to
+3.6×10⁻¹⁵ in T19a), which is why the whole thing collapses onto the
+non-relativistic KLI as $c \to \infty$.
+
 Measured against Waasmaier–Kirfel (X-ray) and Peng *et al.* (electron) — both
-fitted to relativistic Hartree–Fock — with the SCF non-relativistic on both
-sides so that only the exchange differs:
+fitted to relativistic Hartree–Fock. The last column is the **disagreement
+between two published parameterizations of the same underlying data**
+(Waasmaier–Kirfel vs Cromer–Mann), which is the noise floor of the comparison:
 
-| Z | | Xα = 1 | Xα = 0.75 | **KLI** |
-| --- | --- | --- | --- | --- |
-| 6 | peak \|Δf_x\| [e] | 0.113 | 0.129 | **0.022** |
-| 6 | f_e vs Peng, s ≤ 2 [%] | 1.61 | 3.67 | **0.58** |
-| 14 | peak \|Δf_x\| [e] | 0.173 | 0.108 | **0.018** |
-| 14 | f_e vs Peng, s ≤ 2 [%] | 2.15 | 2.17 | **0.87** |
-| 26 | peak \|Δf_x\| [e] | 0.288 | 0.070 | **0.063** |
-| 26 | f_e vs Peng, s ≤ 2 [%] | 2.36 | 1.11 | **0.64** |
+| Z | | Dirac + Xα (shipping) | non-rel KLI | **Dirac + KLI** | reference spread |
+| --- | --- | --- | --- | --- | --- |
+| 6 | RMS \|Δf_x\|, s ≤ 2 [e] | 0.0404 | 0.0063 | **0.0054** | 0.0024 |
+| 6 | relative, s ≤ 2 [%] | 2.39 | 0.24 | **0.19** | 0.32 |
+| 6 | f_e vs Peng, s ≤ 2 [%] | 1.62 | 0.58 | **0.51** | — |
+| 14 | relative, s ≤ 2 [%] | 2.34 | 0.18 | **0.14** | 0.19 |
+| 14 | f_e vs Peng, s ≤ 2 [%] | 2.22 | 0.87 | **0.85** | — |
+| 26 | relative, s ≤ 2 [%] | 1.42 | 0.79 | **0.19** | 0.18 |
+| 26 | f_e vs Peng, s ≤ 2 [%] | 2.56 | 0.64 | **0.67** | — |
+| 79 | relative, s ≤ 2 [%] | 0.82 | 2.68 | **0.12** | 0.13 |
+| 79 | f_e vs Peng, s ≤ 2 [%] | 1.99 | 1.43 | **0.23** | — |
 
-KLI beats not only α = 1 but also the best-fit α = 0.75, **with no knob at all**.
-The ionization side moves the other way, but only slightly: mean
-\|σ_own/σ_Bote − 1\| over C K / Fe K / Au L3 goes 0.083 (α = 1) → 0.086 (KLI) →
-0.088 (α = 0.75). Since σ is shipped from Bote–Salvat and σ_own is a sanity
-indicator, that trade is heavily in KLI's favour.
+On the relative measure, Dirac + KLI now agrees with Waasmaier–Kirfel about as
+closely as Waasmaier–Kirfel agrees with Cromer–Mann — that is, the comparison
+has reached the noise floor of the references, **with no adjustable parameter
+anywhere in the prescription**. The ionization side moves the other way by a
+little: mean \|σ_own/σ_Bote − 1\| over C K / Fe K / Au L3 goes 0.073
+(Dirac + Xα) → 0.077 (Dirac + KLI). Since σ is shipped from Bote–Salvat and
+σ_own is a sanity indicator, that is a cheap trade.
 
-**Limitation.** KLI is wired into the non-relativistic SCF only, so `--kli`
-implies `--nodscf`, and for heavy atoms the missing relativistic contraction
-dominates any exchange improvement (Au: 0.82 % for Dirac + Xα vs 2.68 % for
-non-relativistic KLI, against the same reference). Extending KLI to the Dirac
-path — which needs the κ-resolved angular coefficients and a decision on the
-small component — is the next step, and until it lands the shipping default
-stays Dirac + Xα.
+**Costs and caveats.** The SCF is 1.9× slower (Au 30 s → 56 s, once per element,
+then cached). Two residuals are known and quantified rather than patched:
+
+* Exchange is exact; **correlation is absent**. The Ne KLI HOMO comes out at
+  −0.849 Ha against an experimental ionization potential of 0.792 Ha — the 7 %
+  gap is what correlation and relaxation would supply.
+* In the Dirac path the HOMO splits in κ, and the partner keeps a nonzero KLI
+  constant $\Delta$ out to the edge of the grid (Ne 2p½ still holds 29 % of the
+  density at 30 a₀). That leaves a constant offset of 2–3×10⁻⁴ Ha in $V_x$.
+  It is **not removed**: a constant added to a bound-state potential shifts every
+  eigenvalue equally and leaves the wavefunctions — hence the density and
+  everything shipped from it — exactly unchanged. T19c bounds it.
 
 ## Model identifiers
 

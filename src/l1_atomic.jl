@@ -101,18 +101,19 @@ Y⁰(aa;r)/r はその軌道自身が作る Hartree ポテンシャル**、す�
 
 ⚠ 内側の項は r^(−k) と r^(k+1) という大きな因子を掛けるので、格子内端 (1e-7) と
   大きな k では桁が振れる。k ≤ 8 程度までを想定 (r^(−8) ~ 1e56 で Float64 の範囲内)。"""
-function ykr(k::Int, Pa::AbstractVector{Float64}, Pb::AbstractVector{Float64},
-             r::AbstractVector{Float64})
+function ykr_rho(k::Int, f::AbstractVector{Float64}, r::AbstractVector{Float64})
     n = length(r)
-    f = Pa .* Pb
-    inner = cumtrapz(f .* r .^ k, r)             # ∫₀^r s^k P_a P_b ds
+    inner = cumtrapz(f .* r .^ k, r)             # ∫₀^r s^k ρ_ab ds
     g = f ./ r .^ (k + 1)
-    outer = zeros(n)                             # ∫_r^∞ s^(−k−1) P_a P_b ds
+    outer = zeros(n)                             # ∫_r^∞ s^(−k−1) ρ_ab ds
     @inbounds for i in n-1:-1:1
         outer[i] = outer[i+1] + 0.5 * (g[i] + g[i+1]) * (r[i+1] - r[i])
     end
     return @. inner / r^k + r^(k + 1) * outer
 end
+
+ykr(k::Int, Pa::AbstractVector{Float64}, Pb::AbstractVector{Float64},
+    r::AbstractVector{Float64}) = ykr_rho(k, Pa .* Pb, r)
 
 """平均配置 (球平均・スピン非分極) の**厳密交換**エネルギーと Slater ポテンシャル。
 
@@ -284,6 +285,142 @@ function kli_exchange_potential(P::Vector{Vector{Float64}}, q::Vector{Float64},
     return tail_guard!(v_slater .+ corr, r, rho), v_slater, Δ
 end
 
+# ==== 260807Cl 追加: 厳密交換の Dirac 版 (KLI を DHFS へ広げる) ================
+# 非相対論版との対応は 1 対 1 で、置き換わるのは 3 箇所だけ:
+#
+#   重なり密度  P_a P_b            →  G_a G_b + F_a F_b   (小成分が入る)
+#   角度係数    [3j(l_a k l_b;000)]² →  [3j(j_a k j_b;½0−½)]² × π(l_a+k+l_b 偶)
+#   縮退度      D = 2(2l+1)        →  D = 2j+1 = 2|κ|     (m_j がスピンを含む)
+#
+# 最後の点から、スピン和による全体の 1/2 が消える。両者を並べると
+#
+#   W^k = s · { q_a q_b + δ_ab (D_a q_a − q_a²)/(2k+1) },  s = 1/2 (非相対論) / 1 (Dirac)
+#
+# という同じ形になる。⚠ **開殻では非相対論版と厳密には一致しない** — 平均配置の
+# 平均を取る集団が LS 副殻 (n,l) か jj 副殻 (n,κ) かで違うため (DF-AOC と HF-AOC の
+# 既知の差)。閉殻では両者の自己項がともに 0 になり厳密に一致するので、
+# **c→∞ の退化テストは閉殻元素で行う** (selftest T19)。
+
+"κ から (l, 2j, 縮退度 2j+1)。κ = +l は j = l−½、κ = −(l+1) は j = l+½"
+kappa_l(kap::Int) = kap > 0 ? kap : -kap - 1
+kappa_tj(kap::Int) = 2 * abs(kap) - 1                 # 2j
+kappa_deg(kap::Int) = 2 * abs(kap)                    # 2j+1
+
+"""Dirac の交換角度係数 c^k(κ_a, κ_b) = [3j(j_a k j_b; ½,0,−½)]² × π(l_a+k+l_b 偶)。
+
+パリティ因子 π は球面調和関数の既約行列要素 ⟨κ_a‖C^k‖κ_b⟩ から来る。大成分側の
+選択則だが、小成分の l̄ = 2j − l は l̄_a + l̄_b と l_a + l_b の偶奇が同じなので、
+**大小どちらの寄与にも同じ選択則が掛かる** (だから重なり密度をひとつに束ねられる)。"""
+function dirac_exchange_c(kap_a::Int, k::Int, kap_b::Int)
+    iseven(kappa_l(kap_a) + k + kappa_l(kap_b)) || return 0.0
+    return threej_half_sq(kappa_tj(kap_a), k, kappa_tj(kap_b))
+end
+
+"""Dirac の交換係数 W^k_{ab} = q_a q_b + δ_{ab}[(2j_a+1)q_a − q_a²]/(2k+1)。
+
+非相対論の `exchange_weight` と同じ導出 (整数占有 ⟨n²⟩ = ⟨n⟩ の自己項)。違いは
+縮退度が 2j+1 になることと、スピン和の 1/2 が無いこと。
+δ 部分に付く角度因子 Σ_{m_j}[3j(j k j; −m,0,m)]² = 1/(2k+1) は l が半整数でも
+成り立つ (3j の直交性。selftest T19 で確認)。"""
+function dirac_exchange_weight(k::Int, a::Int, b::Int, q::Vector{Float64},
+                               kap::Vector{Int})
+    w = q[a] * q[b]
+    a == b && (w += (kappa_deg(kap[a]) * q[a] - q[a]^2) / (2k + 1))
+    return w
+end
+
+"重なり密度 ρ_ab = G_a G_b + F_a F_b (Dirac の交換・直接項に共通)"
+overlap_density(G::Vector{Vector{Float64}}, F::Vector{Vector{Float64}},
+                a::Int, b::Int) = @. G[a] * G[b] + F[a] * F[b]
+
+"Dirac の平均配置の厳密交換エネルギー E_x = −(1/2)Σ_{ab}Σ_k c^k W^k R^k(ab)"
+function dirac_exchange_energy_x(G::Vector{Vector{Float64}}, F::Vector{Vector{Float64}},
+                                 q::Vector{Float64}, kap::Vector{Int},
+                                 r::AbstractVector{Float64})
+    ex = 0.0
+    for a in eachindex(G), b in eachindex(G)
+        rho_ab = overlap_density(G, F, a, b)
+        kmax = (kappa_tj(kap[a]) + kappa_tj(kap[b])) ÷ 2
+        for k in 0:kmax
+            c = dirac_exchange_c(kap[a], k, kap[b])
+            c == 0.0 && continue
+            y = ykr_rho(k, rho_ab, r)
+            ex -= 0.5 * c * dirac_exchange_weight(k, a, b, q, kap) *
+                  trapz(rho_ab .* y ./ r, r)
+        end
+    end
+    return ex
+end
+
+"""Dirac 版の w_a(r) = (G_a²+F_a²) u_{x,a}(r)。非相対論の
+`orbital_exchange_weights` と同じ規約 (δE/δ軌道 = 2q_aε_a×軌道 由来の 1/2 込み)。
+
+恒等式 **Σ_a q_a ū_a = 2E_x** で係数が固定されるのも同じ (selftest T19)。"""
+function dirac_orbital_exchange_weights(G::Vector{Vector{Float64}},
+                                        F::Vector{Vector{Float64}},
+                                        q::Vector{Float64}, kap::Vector{Int},
+                                        r::AbstractVector{Float64})
+    w = [zeros(length(r)) for _ in eachindex(G)]
+    for a in eachindex(G), b in eachindex(G)
+        rho_ab = overlap_density(G, F, a, b)
+        kmax = (kappa_tj(kap[a]) + kappa_tj(kap[b])) ÷ 2
+        for k in 0:kmax
+            c = dirac_exchange_c(kap[a], k, kap[b])
+            c == 0.0 && continue
+            y = ykr_rho(k, rho_ab, r)
+            f = c * dirac_exchange_weight(k, a, b, q, kap) / q[a]
+            @. w[a] -= f * rho_ab * y / r
+        end
+    end
+    return w
+end
+
+"Dirac の動径密度 ρ̃(r) = Σ_a q_a (G_a² + F_a²)"
+dirac_radial_density(G::Vector{Vector{Float64}}, F::Vector{Vector{Float64}},
+                     q::Vector{Float64}) =
+    sum(q[a] .* (G[a] .^ 2 .+ F[a] .^ 2) for a in eachindex(G))
+
+"""Dirac 版の KLI 交換ポテンシャル。構造は非相対論版 `kli_exchange_potential` と
+同一で、密度と軌道重みが 2 成分になるだけ。戻り値 (V_x^KLI, V_x^Slater, Δ)。"""
+function dirac_kli_exchange_potential(G::Vector{Vector{Float64}},
+                                      F::Vector{Vector{Float64}},
+                                      q::Vector{Float64}, kap::Vector{Int},
+                                      r::AbstractVector{Float64},
+                                      eps_orb::Vector{Float64};
+                                      i_homo::Union{Nothing,Int}=nothing)
+    n = length(G)
+    w = dirac_orbital_exchange_weights(G, F, q, kap, r)
+    rho = dirac_radial_density(G, F, q)
+    v_slater = tail_guard!(sum(q[a] .* w[a] for a in 1:n) ./ max.(rho, 1e-300), r, rho)
+    ubar = [trapz(w[a], r) for a in 1:n]
+    S = [trapz((G[a] .^ 2 .+ F[a] .^ 2) .* v_slater, r) for a in 1:n]
+    h = i_homo === nothing ? argmax(eps_orb) : i_homo
+    idx = [a for a in 1:n if a != h]                      # Δ_homo = 0 で固定
+    Δ = zeros(n)
+    if !isempty(idx)
+        M = [trapz(q[b] .* (G[a] .^ 2 .+ F[a] .^ 2) .* (G[b] .^ 2 .+ F[b] .^ 2) ./
+                   max.(rho, 1e-300), r) for a in idx, b in idx]
+        Δ[idx] = (I - M) \ [S[a] - ubar[a] for a in idx]
+    end
+    corr = sum(q[a] * Δ[a] .* (G[a] .^ 2 .+ F[a] .^ 2) for a in 1:n) ./
+           max.(rho, 1e-300)
+    # ---- 既知の残差: κ 分裂した HOMO が残す定数オフセット (260807Cl 実測) ------
+    # 非相対論では遠方を HOMO 副殻が独占するので Δ_HOMO = 0 がそのまま V_x(∞) = 0 を
+    # 意味した。Dirac では HOMO が κ で 2 本に割れ、**相方が計算領域の端まで一定割合で
+    # 残る** (Ne 2p½ は r=33 でもまだ密度の 29%。微細構造分裂 3.8e-3 Ha しか減衰率が
+    # 違わないため)。その Δ ≠ 0 が corr に定数として残り、r·V_x は −1 から
+    #     Ne 6.2e-3 (r=30) / Ar 8.6e-3 (r=30) / Au 1.5e-2 (r=45)
+    # ずれる = V_x に 2〜3e-4 Ha の定数オフセットが乗る。
+    #
+    # **取り除いていない。** 束縛問題では V に定数を足しても固有値が一様に動くだけで
+    # **波動関数と密度は厳密に不変**であり、本コードが出荷するのは密度由来の量
+    # (f_x / F(s) / GOS) で、吸収端は Bote–Salvat 表から取るため。Δ をシフトする
+    # ゲージ変換は自由だが、シフト量を測る半径を決める規則がどうしても場当たりになる
+    # (軌道ごとに打ち切り半径 45/λ が違い、端では相方が既に厳密に 0 になっている)。
+    # 場当たりな規則を入れるより、大きさを測って selftest T19 で上から抑える方を選ぶ。
+    return tail_guard!(v_slater .+ corr, r, rho), v_slater, Δ
+end
+
 """SCF の軌道辞書から厳密交換に渡す配列 (P, q, l, ε) を組む。
 
 ⚠ **占有 0 の副殻は落とす。** `orbital_exchange_weights` は規格化の Lagrange 条件
@@ -429,11 +566,6 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                  relativistic::Bool=false, c::Float64=C_LIGHT,
                  x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha)
     exchange in (:xalpha, :kli) || error("unknown exchange $exchange (:xalpha|:kli)")
-    # Dirac 経路の orbs は占有加重和 (診断用) であって軌道そのものではないので、
-    # そのまま厳密交換に渡せない。κ 分解の交換角度係数と小成分の扱いを決めてから
-    # (docs/next_phase_2026-08-07.md §4.1)
-    exchange === :kli && relativistic &&
-        error("KLI はまだ Dirac 経路に配線していない (--nodscf で非相対論 SCF にすること)")
     n = ceil(Int, (log(rmax) - log(r0)) / dt)          # numpy.arange と同じ点数
     t = log(r0) .+ dt .* (0:n-1)
     r = exp.(t)
@@ -478,6 +610,14 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
         rho_new = zeros(length(r))
         eps_now = Dict{Tuple{Int,Int},Float64}()
         orbs = Dict{Tuple{Int,Int},Vector{Float64}}()
+        # Dirac-KLI 用の (n,l,κ) ごとの軌道。`orbs` は占有加重和 (診断用) であって
+        # 軌道そのものではないので、厳密交換にはこちらを使う。非相対論経路では
+        # 空のまま (下の @label まで到達するので、分岐の外で用意しておく)
+        dG = Vector{Vector{Float64}}()
+        dF = Vector{Vector{Float64}}()
+        dq = Float64[]
+        dkap = Int[]
+        deps = Float64[]
         if relativistic
             # ---- Dirac 経路 (260807Cl) --------------------------------------
             # 軌道は (n, l, κ) で解き、密度は ρ = Σ q (G²+F²)/(4πr²)。
@@ -514,6 +654,10 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                 acc_e[key] = get(acc_e, key, 0.0) + q * E
                 acc_q[key] = get(acc_q, key, 0.0) + q
                 haskey(orbs, key) || (orbs[key] = zeros(length(r)))
+                if exchange === :kli                   # 厳密交換に渡す実体
+                    push!(dG, G); push!(dF, F)
+                    push!(dq, q); push!(dkap, kap); push!(deps, E)
+                end
                 @inbounds for i in eachindex(r)
                     rho_new[i] += q * (G[i]^2 + F[i]^2) / (4.0 * pi * r[i]^2)
                     orbs[key][i] += q * G[i]           # 診断用の占有加重和
@@ -563,8 +707,13 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
         if exchange === :kli
             # ⚠ **ポテンシャルも混合する。** KLI は軌道汎関数なので、混ぜた密度から
             # 決まらない — 密度混合だけでは前反復の交換が引き継がれず振動する
-            Pv, qv, lv, epv = scf_exchange_arrays(occ, orbs, eps_now)
-            vx_new = kli_exchange_potential(Pv, qv, lv, r, epv)[1]
+            local vx_new::Vector{Float64}
+            if relativistic
+                vx_new = dirac_kli_exchange_potential(dG, dF, dq, dkap, r, deps)[1]
+            else
+                Pv, qv, lv, epv = scf_exchange_arrays(occ, orbs, eps_now)
+                vx_new = kli_exchange_potential(Pv, qv, lv, r, epv)[1]
+            end
             vx_kli = isempty(vx_kli) ? vx_new :
                      (1.0 - beta) .* vx_kli .+ beta .* vx_new
         end

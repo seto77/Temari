@@ -106,19 +106,11 @@ const USAGE = """
 
 opts: [--quick|--high] [--rel] [--nodscf] [--kli] [--s s1 s2 ...] [--json path]
       SCF は既定で完全 Dirac (DHFS)。--nodscf で旧来の非相対論 SCF (比較用)
-      --kli は厳密交換 (Latter 補正なし)。まだ非相対論 SCF にしか配線して
-      いないので --nodscf を伴う (指定しなくても自動で落ちる)
+      --kli は厳密交換 (Latter 補正なし)。Dirac・非相対論のどちらとも組める
       --s は F(s) 出口のみ (edge は K=0 の 1 点で、その分だけ安い)"""
 
-"""`--kli` の解釈。KLI はまだ Dirac 経路に配線していないので、指定されたら
-非相対論 SCF へ落として**そのことを明示する** (処方の変更を黙ってやらない)。
-戻り値 `(exchange, dscf)`。"""
-function parse_exchange(args, dscf::Bool)
-    "--kli" in args || return (:xalpha, dscf)
-    dscf && println("--kli: KLI は Dirac 経路に未配線のため、非相対論 SCF に切り替えます " *
-                    "(処方 ID にも出ます)")
-    return (:kli, false)
-end
+"`--kli` の有無を交換処方の Symbol へ (:xalpha | :kli)"
+parse_exchange(args) = "--kli" in args ? :kli : :xalpha
 
 "fx サブコマンド: X 線 f_x(s) と電子線 f_e(s) の原子散乱因子"
 function main_fx(args)
@@ -139,8 +131,8 @@ function main_fx(args)
         i += 1
     end
     println("初回はこの元素の SCF を解くため時間がかかります...")
-    xc, rel_scf = parse_exchange(args, !("--nonrel" in args))
-    o = compute_fx(z; s_nodes=s_nodes, relativistic=rel_scf, exchange=xc)
+    o = compute_fx(z; s_nodes=s_nodes, relativistic=!("--nonrel" in args),
+                   exchange=parse_exchange(args))
     s = o["s_A_inv"]; fx = o["f_x"]; fe = o["f_e_A"]
     @printf("\n%10s  %14s  %14s\n", "s [1/Å]", "f_x [e]", "f_e [Å]")
     for i in 1:max(1, length(s) ÷ 15):length(s)
@@ -188,7 +180,7 @@ function main_gos(args)
         i += 1
     end
     settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
-    xc, dscf = parse_exchange(args, dscf)
+    xc = parse_exchange(args)
     println("Z=$z $tag   出口: GOS df/dΔE(Q)   処方: ", model_id_of(rel, dscf, X_ALPHA, xc))
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
             "   スレッド: ", Threads.nthreads(), "   (E0 非依存)")
@@ -240,7 +232,7 @@ function main_phase(args)
         i += 1
     end
     println("初回はこの元素の SCF を解くため時間がかかります...")
-    o = compute_phase(z, eps_eV; l_max=l_max, exchange=parse_exchange(args, false)[1])
+    o = compute_phase(z, eps_eV; l_max=l_max, exchange=parse_exchange(args))
     @printf("\n%4s  %14s  %14s  %12s\n", "l", "δ_l [rad]", "sin²δ_l", "フィット残差")
     for (l, d, s2, rs, ok) in zip(o["l"], o["delta_rad"], o["sin2_delta"],
                                   o["match_resid"], o["ok"])
@@ -297,7 +289,7 @@ function main_(args)
         i += 1
     end
     settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
-    xc, dscf = parse_exchange(args, dscf)
+    xc = parse_exchange(args)
     println("Z=$z $tag @ $e0 keV   出口: ", edge_mode ? "dσ/dΔE (EELS)" : "F(s) (EDX)",
             "   処方: ", model_id_of(rel, dscf, X_ALPHA, xc))
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),

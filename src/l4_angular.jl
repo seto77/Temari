@@ -10,35 +10,58 @@
 # S(Q,Q',ε) = q_nl Σ_{l'}(2l'+1) Σ_λ(2λ+1) [3j(λ,l,l';000)]² R R' P_λ(cosΘ)
 # R_{l'λ}(Q) = ∫ u_{εl'} j_λ(Qr) u_{nl} dr。l=0 で教科書の K 殻式に厳密退化。
 
-"""一般の Wigner 3j 記号 (整数角運動量のみ) の Racah 式。BigInt 有理数 + 平方根で
-評価するので、階乗のオーバーフローも桁落ちも無い。
+"""一般の Wigner 3j 記号の Racah 式。**引数は全て 2 倍した整数** (tj = 2j, tm = 2m)
+なので半整数の角運動量も扱える — Dirac の交換 (j = l ± ½) に要る。BigInt 有理数 +
+平方根で評価するので、階乗のオーバーフローも桁落ちも無い。
 
     3j(j1 j2 j3; m1 m2 m3) = (−1)^(j1−j2−m3) √Δ √Π Σ_t (−1)^t / (分母の階乗の積)
     Δ = (j1+j2−j3)!(j1−j2+j3)!(−j1+j2+j3)! / (j1+j2+j3+1)!
     Π = (j1+m1)!(j1−m1)!(j2+m2)!(j2−m2)!(j3+m3)!(j3−m3)!
 
-厳密交換の**同一副殻・同一 m** の自己項に必要 (`d_selfsum`)。m=0 の場合は
-`threej000_sq` と一致しなければならず、selftest T17 で照合する。"""
-function wigner3j(j1::Int, j2::Int, j3::Int, m1::Int, m2::Int, m3::Int)
-    (m1 + m2 + m3 == 0) || return 0.0
-    (abs(m1) <= j1 && abs(m2) <= j2 && abs(m3) <= j3) || return 0.0
-    (j3 >= abs(j1 - j2) && j3 <= j1 + j2) || return 0.0
+三角則が成り立つとき (j1+j2−j3) 等は全て整数なので、倍角表現でも階乗の引数は
+`÷2` で整数のまま出る。**半整数と整数が混ざる不正な組は三角則の偶奇で弾かれる**
+(tj1+tj2+tj3 が奇数)。"""
+function wigner3j2(tj1::Int, tj2::Int, tj3::Int, tm1::Int, tm2::Int, tm3::Int)
+    (tm1 + tm2 + tm3 == 0) || return 0.0
+    (abs(tm1) <= tj1 && abs(tm2) <= tj2 && abs(tm3) <= tj3) || return 0.0
+    (tj3 >= abs(tj1 - tj2) && tj3 <= tj1 + tj2) || return 0.0
+    iseven(tj1 + tj2 + tj3) || return 0.0            # 三角則の整数性
+    (iseven(tj1 - tm1) && iseven(tj2 - tm2) && iseven(tj3 - tm3)) || return 0.0
     ft(k) = factorial(big(k))
-    Δ = ft(j1 + j2 - j3) * ft(j1 - j2 + j3) * ft(-j1 + j2 + j3) // ft(j1 + j2 + j3 + 1)
-    Π = ft(j1 + m1) * ft(j1 - m1) * ft(j2 + m2) * ft(j2 - m2) *
-        ft(j3 + m3) * ft(j3 - m3)
-    tlo = max(0, j2 - j3 - m1, j1 - j3 + m2)
-    thi = min(j1 + j2 - j3, j1 - m1, j2 + m2)
+    Δ = ft((tj1 + tj2 - tj3) ÷ 2) * ft((tj1 - tj2 + tj3) ÷ 2) *
+        ft((-tj1 + tj2 + tj3) ÷ 2) // ft((tj1 + tj2 + tj3) ÷ 2 + 1)
+    Π = ft((tj1 + tm1) ÷ 2) * ft((tj1 - tm1) ÷ 2) * ft((tj2 + tm2) ÷ 2) *
+        ft((tj2 - tm2) ÷ 2) * ft((tj3 + tm3) ÷ 2) * ft((tj3 - tm3) ÷ 2)
+    tlo = max(0, (tj2 - tj3 - tm1) ÷ 2, (tj1 - tj3 + tm2) ÷ 2)
+    thi = min((tj1 + tj2 - tj3) ÷ 2, (tj1 - tm1) ÷ 2, (tj2 + tm2) ÷ 2)
     s = zero(Rational{BigInt})
     for t in tlo:thi
-        d = ft(t) * ft(j3 - j2 + m1 + t) * ft(j3 - j1 - m2 + t) *
-            ft(j1 + j2 - j3 - t) * ft(j1 - m1 - t) * ft(j2 + m2 - t)
+        d = ft(t) * ft((tj3 - tj2 + tm1) ÷ 2 + t) * ft((tj3 - tj1 - tm2) ÷ 2 + t) *
+            ft((tj1 + tj2 - tj3) ÷ 2 - t) * ft((tj1 - tm1) ÷ 2 - t) *
+            ft((tj2 + tm2) ÷ 2 - t)
         s += (isodd(t) ? -1 : 1) // d
     end
     s == 0 && return 0.0
-    sgn = isodd(j1 - j2 - m3) ? -1.0 : 1.0
+    sgn = isodd((tj1 - tj2 - tm3) ÷ 2) ? -1.0 : 1.0
     return sgn * sqrt(Float64(Δ * Π)) * Float64(s)
 end
+
+"""整数角運動量の Wigner 3j (倍角版への薄い入口)。
+
+厳密交換の**同一副殻・同一 m** の自己項に必要 (`d_selfsum`)。m=0 の場合は
+`threej000_sq` と一致しなければならず、selftest T17 で照合する。"""
+wigner3j(j1::Int, j2::Int, j3::Int, m1::Int, m2::Int, m3::Int) =
+    wigner3j2(2j1, 2j2, 2j3, 2m1, 2m2, 2m3)
+
+"""[3j(j_a k j_b; ½, 0, −½)]²。`tja`, `tjb` は 2j、`k` は整数の多重極。
+
+**Dirac の交換に現れる角度因子**。非相対論の [3j(l_a k l_b; 0,0,0)]² に対応するが、
+m = ±½ なのでパリティで自動的に 0 にはならない — 選択則 l_a + k + l_b 偶は
+呼び出し側 (`dirac_exchange_c`) が別に掛ける。
+
+和則 Σ_k (2k+1)[3j]² = 1 は非相対論と同じく成り立ち (3j の直交性)、これが
+交換ホールが電子 1 個分であることの根 = V_x → −1/r の由来 (selftest T19)。"""
+threej_half_sq(tja::Int, k::Int, tjb::Int) = wigner3j2(tja, 2k, tjb, 1, 0, -1)^2
 
 """D_k(l) = Σ_m [3j(l k l; −m, 0, m)]²。
 
