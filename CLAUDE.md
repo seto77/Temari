@@ -37,7 +37,12 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
   `l4_angular` / `l5_exit_edx` / `selftest`。**module は導入せずフラット名前空間**
   (include するだけで全名前が見える / 連結すれば単一ファイルに戻る)。純粋な移動で
   5 チャネル === ビット同一。層とファイルの対応は `docs/architecture.md`
-- **現状の残務・次の一手の正本 = `docs/next_phase_2026-08-06.md`** (P1 完了時点の引き継ぎ)
+- **現状の残務・次の一手の正本 = `docs/next_phase_2026-08-07.md`**
+  (`..._2026-08-06.md` は P1 完了時点の旧版)。次の一手は **KLI 厳密交換を SCF へ配線し
+  Latter 補正を削除する**こと — 機構は完成・検証済みで、残るのは配線のみ
+- **2026-08-07: 出口が 5 つに** (F(s) / EELS dσ/dΔE / δ_l / GOS / 原子散乱因子 f_x・f_e)。
+  原子場は**完全 Dirac SCF が既定** (`--nodscf` で旧処方)。交換の診断は
+  `docs/exchange_diagnosis_2026-08-07.md` が正本
 - 次の物理 = v4 (完全 Dirac 連続・−Re(DX*)・ULTRA 求積) + M 殻。正本 =
   `ReciPro/.project-guidance/ReciPro/ReciPro_STEM-EDX_v4精度検討.md`。
   **M 殻は v4 処方確定後に同処方で生成する** (二度手間回避)
