@@ -43,15 +43,21 @@ v4 は Temari 側のコードで生成した (計画書の移行条件 =「P2 �
 完走」は両方満たされている)。`handout/` を **v3 で凍結**するか、**v4 を配備**するか。
 現状は v3 のまま触っていない。
 
-### 1.3 `generator_commit` の扱い
+### 1.3 `generator_commit` の扱い — **✅ 決着 (2026-08-09)**
 
 出荷 JSON の `generator_commit` は生成時の HEAD (`3828778`) を記録しているが、
 **その commit は v4 を生成できない** (既定が v3 のまま)。実際の生成器は
-「その commit + 未コミットの v4 変更」。**世代の識別は `model_id` で行うのが確実。**
+「その commit + 未コミットの v4 変更」だった。**世代の識別は `model_id` で行うのが確実。**
 
-⇒ **v4 のコードを commit したら、その hash を MANIFEST に追記すること。**
-将来は「生成の直前に必ず commit する」運用にするか、`_git_head()` が
-working tree の dirty を見て警告するのが筋。
+⇒ **その未コミット変更を `6d24cbe` としてコミットした** (2026-08-09、
+"Promote v4 to the shipping prescription and make it fast enough to generate")。
+**v4 の生成器 = `6d24cbe`** で、hash は `src/prod_v4_jl/MANIFEST.md` に追記済。
+コミット前にゲートを再走させて確認してある (selftest ALL PASS / refcheck
+WORST 9.044e-08 = 基準値 / `verify_e5_qlane_dirac` 75 ケース ·
+`verify_angular_pack` 61440 要素ともビット同一)。
+
+**残る運用課題**: 「生成の直前に必ず commit する」運用にするか、`_git_head()` が
+working tree の dirty を見て警告するか。**未実装** — 次の生成世代までに入れる。
 
 ---
 
@@ -85,8 +91,13 @@ formatVersion で弾かれることを確認する。
 
 ### 2.2 GitHub への公開
 
-- リモートが無い。`README.md` のバッジは `seto77/Temari` を指しているので、
-  その名前で作れば整合する
+- ⚠ **2026-08-09 訂正: リモートは既にある。**`origin` =
+  `https://github.com/seto77/Temari.git` (`README.md` のバッジと整合)。
+  ただし **remote `main` は `0868fc1`** ("Add the repository documents and a
+  minimal CI") **で止まっており、ローカルが大きく先行**している
+  (2026-08-09 時点で 37 コミット。層分割・M 殻・kdirac・KLI・Mott・
+  v4 一式 `6d24cbe` が丸ごと未 push)。
+  **push するかは作者判断** — 押した時点で公開扱いになる
 - `CITATION.cff` と `Project.toml` は**作成済**
   - `Project.toml` は **パッケージではなく環境** (`name`/`uuid` を持たない)。
     フラット名前空間のスクリプト群なので `using Temari` はできない。
