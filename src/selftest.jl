@@ -835,6 +835,38 @@ function selftest()
         @assert d_phys > 20 * d_inf "T23d FAIL: 物理の c で相対論効果が出ていない"
     end
 
+    # ---- T23e: **F(s) (MDFF) の** c→∞ 退化 ----
+    # T23d は GOS (Q = Q′、cosΘ = 1) しか通っていない。**出荷される量は F(s)** で、
+    # そちらは Q₊ ≠ Q₋ の混合形式・2 重角度積分・P_λ(cosΘ) を通る。Dirac の
+    # 角度因子は 6j 経由で入るので、その経路が非相対論へ落ちることは別に要る。
+    # ⚠ 始状態も非相対論へ揃えること — F_b = 0 に潰すだけでなく G_b を ∫G²=1 に
+    #   再規格化する。Gram–Schmidt が 2 成分ノルム 1 を前提にしているので、
+    #   忘れると偽の単極子が c·frac_small だけ残り、小 Q で 1/Q² に発散する
+    let z = 6, tag = "K", e0 = 200.0, s = [0.0, 0.25, 0.75, 1.5]
+        K = 4.0 * pi .* s .* BOHR_ANG
+        ch0 = prepare_channel(z, tag, e0; dirac_scf=true)
+        chd = prepare_channel(z, tag, e0; dirac_scf=true, dirac_continuum=true)
+        d = chd.dirac
+        run(ch; kw...) = begin
+            N, _ = compute_NK(ch.ion_pot, ch.r_b, ch.u_b, ch.E_th, ch.T0, K, z;
+                              n1=6, n2=12, n3=6, l_cap=32, n_x=32, n_phi=16,
+                              n_q=80, l_init=ch.l_b, occ_init=ch.occ_init,
+                              progress=false, kw...)
+            N ./ N[1]
+        end
+        Fn = run(ch0)
+        Fi = run(chd; dirac=(r_b=d.r_b, G_b=d.G_b ./ sqrt(1 - chd.frac_small),
+                             F_b=zeros(length(d.F_b)), kappa=d.kappa,
+                             c=C_LIGHT * 1e4))
+        Fp = run(chd; dirac=d)
+        d_inf = maximum(abs(Fi[i] / Fn[i] - 1) for i in 2:length(s))
+        d_phys = maximum(abs(Fp[i] / Fn[i] - 1) for i in 2:length(s))
+        @printf("[T23e] F(s) (MDFF) の c→∞ 退化: %.2e (消える) / 物理 c %.2e (残る) — 比 %.0f\n",
+                d_inf, d_phys, d_phys / d_inf)
+        @assert d_inf < 1e-4 "T23e FAIL: MDFF が c→∞ で非相対論へ退化しない"
+        @assert d_phys > 20 * d_inf "T23e FAIL: 物理の c で相対論効果が出ていない"
+    end
+
     # ---- T24: Mott 弾性断面積 (P4、l5_exit_mott.jl) ----
     # (a) **閉包**: σ_el を角度積分で出したものと、部分波和 (4π/k²)Σ|κ|sin²δ_κ が
     #     一致すること。ルジャンドル漸化 (P_l と P_l¹)・スピン反転振幅 g の
