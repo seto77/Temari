@@ -121,18 +121,83 @@ const VALIDATED_NOTE_V4 =
 "処方に応じた検証注記 (v3 再現なら v3 の文言、それ以外は v4 の文言)"
 validated_note(p) = p.dirac_continuum ? VALIDATED_NOTE_V4 : VALIDATED_NOTE_V3
 
-"git の短縮 HEAD (取れなければ unknown。出力の再現性情報。取得は 1 回だけ)"
+"git の短縮 HEAD と working tree の dirty (取れなければ unknown。取得は 1 回だけ)"
 const _GIT_HEAD = Ref{Union{Nothing,String}}(nothing)
-function _git_head()
+const _GIT_DIRTY = Ref{Bool}(false)
+
+"""HEAD と dirty を 1 回だけ調べる。
+
+⚠ dirty の判定は **`-uno` = 追跡ファイルの変更だけ**。未追跡ファイルは
+`prod_*/`・`atom_cache/`・`refs/` の中身が常時あるので、それを数えると
+毎回発火して警告が意味を失う。"""
+function _git_probe()
     if _GIT_HEAD[] === nothing
-        _GIT_HEAD[] = try
-            String(strip(read(setenv(`git rev-parse --short HEAD`; dir=@__DIR__),
-                              String)))
+        head, dirty = try
+            h = String(strip(read(setenv(`git rev-parse --short HEAD`; dir=@__DIR__),
+                                  String)))
+            st = String(read(setenv(`git status --porcelain -uno`; dir=@__DIR__),
+                             String))
+            (h, !isempty(strip(st)))
         catch
-            "unknown"
+            ("unknown", false)
         end
+        _GIT_HEAD[] = head
+        _GIT_DIRTY[] = dirty
     end
-    return _GIT_HEAD[]::String
+    return (_GIT_HEAD[]::String, _GIT_DIRTY[])
+end
+
+"""出力に記録する生成器の識別子。**dirty なら `-dirty` を付ける** (260809Cl 追加)。
+
+⚠ **なぜ必要か**: dataset v4.0.0 の `generator_commit` は clean な hash
+(`3828778`) を名乗っていたが、**その commit は v4 を生成できない** — 既定処方が
+まだ v3 だったからで、実際の生成器は「その commit + 未コミットの v4 変更」
+だった。JSON だけを見て再現しようとした人は必ず失敗する。
+
+運用は **「生成の直前に必ず commit する」** (`docs/next_phase_2026-08-09.md` §1.3、
+作者判断)。ここはその規律を機械で支える 2 段構えの片方:
+
+  1. **`generator_commit` に `-dirty` が残る** — 出荷 JSON 自体が「この hash では
+     再現できない」と申告する (`git describe --dirty` と同じ約束)
+  2. 生成開始時に警告を撃つ (`warn_if_dirty`)
+
+⚠ 世代の識別は今後も `model_id` が確実 (`-dirty` は「hash が足りない」ことしか
+言わない)。"""
+function _git_head()
+    h, d = _git_probe()
+    return d ? h * "-dirty" : h
+end
+
+"""生成開始時に working tree の dirty を警告する (260809Cl 追加)。
+
+**止めはしない。**5 時間のバッチを警告 1 つで落とすより、`generator_commit` に
+`-dirty` が残る方が実害が小さいと判断した。フリート実行ではレーンごとに出るが、
+それでよい — 見落とすと出荷世代の再現性が失われる種類の警告なので。"""
+function warn_if_dirty()
+    h, d = _git_probe()
+    d || return nothing
+    files = try
+        collect(eachline(IOBuffer(read(setenv(`git status --porcelain -uno`;
+                                              dir=@__DIR__), String))))
+    catch
+        String[]
+    end
+    println("""
+    ################################################################
+    ⚠ working tree が dirty です (追跡ファイル $(length(files)) 個が未コミット)。
+      生成器は HEAD ($h) ではなく「$h + 未コミットの変更」になります。
+      出力の generator_commit には $h-dirty と記録されます。
+
+      出荷世代を生成しているなら **今すぐ止めて commit してください。**
+      (規律: 生成の直前に必ず commit する — docs/next_phase_2026-08-09.md §1.3。
+       dataset v4.0.0 はこれが無かったために、記録された hash から再現できない)
+    ################################################################""")
+    for f in first(files, 12)
+        println("    ", f)
+    end
+    length(files) > 12 && println("    ... 他 $(length(files) - 12) 個")
+    println()
+    return nothing
 end
 
 """チャネル一覧: K は Z=6..50、L1/L2/L3 は Z=20..86 (v2 と同じ範囲)。
@@ -591,6 +656,7 @@ function main_gen(args)
     println("処方: ", presc_model_id(presc),
             "  dataset_version=", presc_dataset_version(presc))
     println("出力: $outdir\n")
+    warn_if_dirty()                            # 260809Cl 追加 (指示書 §1.3)
     n_done = n_skip = 0
     for (z, t) in mine
         r = run_channel(z, t, outdir; settings=settings, presc=presc)
