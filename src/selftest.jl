@@ -599,6 +599,27 @@ function selftest()
         @assert off < 0.02 "T19 FAIL: KLI の遠方オフセットが想定より大きい"
     end
 
+    # ---- T20: KLI の原論文 (Krieger–Li–Iafrate 1992) との照合 ----
+    # T14–T19 は全て**自分の中の整合**を見るテストで、外部の独立実装と突き合わせて
+    # いなかった。KLI を最初に提案した論文が閉殻原子の表を持っているので、そこと照合する。
+    #   Krieger, Li & Iafrate, Phys. Rev. A 45, 101 (1992)
+    #   TABLE III  ⟨r²⟩ [a.u.]、TABLE IV  −ε_HOMO [Ry] — どちらも V_xσ (= KLI) の列
+    # **独立な 2 量**を見るのが要点: ⟨r²⟩ は密度の形、ε_HOMO はポテンシャルの深さで、
+    # 片方だけなら規格化やゲージの偶然で合うこともあるが、両方は合わない。
+    # 実測は 6 原子 (Be/Ne/Mg/Ar/Ca/Kr) 全てが論文の印字精度 (4 桁) で一致した。
+    # ゲートには Ne (閉殻・軽) と Ar (副殻が増える) を採る。
+    for (z, r2_ref, eps_ry_ref) in ((10, 0.9367, 1.6988), (18, 1.4467, 1.1786))
+        a = SCFAtom(z, ORBITALS[z]; exchange=:kli)
+        w = simpson_weights(length(a.r), a.dt) .* a.r
+        r2 = sum(4pi .* a.r .^ 4 .* a.rho .* w) / a.nel
+        eps_ry = -2 * maximum(values(a.eps))          # Ha → Ry (論文は Ry)
+        @printf("[T20] Z=%2d vs KLI1992: ⟨r²⟩ %.4f (論文 %.4f, 差 %+.1e) / −ε_HOMO %.4f Ry (論文 %.4f, 差 %+.1e)\n",
+                z, r2, r2_ref, r2 - r2_ref, eps_ry, eps_ry_ref, eps_ry - eps_ry_ref)
+        @assert a.converged "T20 FAIL: KLI-SCF が収束しない (Z=$z)"
+        @assert abs(r2 - r2_ref) < 5e-4 "T20 FAIL: ⟨r²⟩ が KLI1992 と合わない (Z=$z)"
+        @assert abs(eps_ry - eps_ry_ref) < 5e-4 "T20 FAIL: ε_HOMO が KLI1992 と合わない (Z=$z)"
+    end
+
     # ---- T13b: 交換係数が二重に掛かっていないこと ----
     # 260807Cl に実際にやらかした事故の回帰テスト。`slater_vx` に X_ALPHA を
     # 畳み込んだ結果、終状態ポテンシャル (第 5 章、KS 2/3) が (2/3)·α になり、

@@ -38,6 +38,10 @@ Kirkland) は全てこれ相当の DHF 計算への**フィット**なので、�
 | `Llovet_2014_JPCRD43_013102_inner-shell-ionization-cross-sections.pdf` | X. Llovet, C. J. Powell, F. Salvat, A. Jablonski, *Cross sections for inner-shell ionization by electron impact*, J. Phys. Chem. Ref. Data 43, 013102 (2014) / NIST NSRDS 164 | 10.1063/1.4832851 / 10.6028/NIST.NSRDS.164 (米国政府著作物) |
 | `Zhang_2024_arXiv2405.10151_relativistic-EELS-cross-sections-Dirac.pdf` | *Relativistic EELS scattering cross-sections for microanalysis based on Dirac solutions* | arXiv:2405.10151 |
 | `Engel_Dreizler_relativistic-DFT-review.pdf` | E. Engel & R. M. Dreizler, 相対論的 DFT の総説 (ROPM の解説を含む) | 著者サイト |
+| `Krrieger_1992_PhysRevA.45.101.pdf` | J. B. Krieger, Y. Li & G. J. Iafrate, Phys. Rev. A **45**, 101–126 (1992)。**KLI の原論文**。TABLE III = ⟨r²⟩ [a.u.]、TABLE IV = −ε_HOMO [**Ry**]、どちらも V_xσ (= KLI) 列が我々と比べる相手。**selftest T20 の出典** | 10.1103/PhysRevA.45.101 |
+| `Engel_1995_PhysRevA.52.2750.pdf` | E. Engel ら, Phys. Rev. A **52**, 2750–2764 (1995)。相対論 OPM (ROPM) の exchange-only 基準値。**Dirac+KLI の比較先 (未実施)** | 10.1103/PhysRevA.52.2750 |
+| `Olukayode_2023_ae5122.pdf` | Olukayode, Froese Fischer & Volkov, Acta Cryst. **A79**, 59–79 (2023)。OFFV1 の本論文 | 10.1107/S2053273322010944 |
+| `Rez_1994_sp0059.pdf` | D. Rez, P. Rez & I. Grant, Acta Cryst. **A50**, 481–497 (1994)。Peng らのパラメータ化がフィットされた元の DF 計算 | — |
 
 ---
 
@@ -45,12 +49,8 @@ Kirkland) は全てこれ相当の DHF 計算への**フィット**なので、�
 
 | 文献 | なぜ要るか | DOI |
 |---|---|---|
-| Olukayode, Froese Fischer & Volkov, Acta Cryst. **A79**, 59–79 (2023) | OFFV1 の本論文。計算条件の正本 | **10.1107/S2053273322010944** |
-| Rez, Rez & Grant, Acta Cryst. **A50**, 481–497 (1994) | **Peng らのパラメータ化がフィットされた元の DF 計算**。f_e 系統の出発点 | 10.1107/S0108767394000372 (要確認) |
 | Lobato & Van Dyck, Acta Cryst. **A70**, 636–649 (2014) | 物理的制約を全て満たす現行標準のパラメータ化 (abTEM 等が採用)。係数は diffsims / abTEM のソースにもある | **10.1107/S205327331401643X** |
 | Desclaux, At. Data Nucl. Data Tables **12**, 311–406 (1973) | 全元素の Dirac–Fock ⟨rⁿ⟩ と軌道エネルギー。⟨r²⟩ を直接照合できる | **10.1016/0092-640X(73)90020-X** |
-| Krieger, Li & Iafrate, Phys. Rev. A **45**, 101–126 (1992) | **KLI の原論文**。原子の固有値表と我々の Ne 1s/2s/2p を照合 | **10.1103/PhysRevA.45.101** |
-| Engel, Keller, Facco Bonetti, Müller & Dreizler, Phys. Rev. A **52**, 2750–2764 (1995) | **相対論 OPM (ROPM) の exchange-only 基準値**。Dirac+KLI の直接の比較先 | **10.1103/PhysRevA.52.2750** |
 | Engel, Facco Bonetti, Keller, Andrejkovics & Dreizler, Phys. Rev. A **58**, 964–992 (1998) | 上の続編 (横断的相互作用込み) | **10.1103/PhysRevA.58.964** |
 | Olukayode et al., Acta Cryst. **A79**, 293–304 (2023) — 論文 II | イオンの DHF f_x。`SCFAtom` は任意占有を受けるのでイオン出口の検証に直結 | **10.1107/S205327332300116X** |
 | Salvat, Jablonski & Powell, Comput. Phys. Commun. **165**, 157–190 (2005) | ELSEPA。手元の `NistElastic` (NIST SRD 64) の計算エンジン。`phase` 出口 → P4 Mott の比較先 | **10.1016/j.cpc.2004.09.006** |
