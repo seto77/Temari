@@ -86,9 +86,19 @@ keep working, and nothing may come to depend on a package-manager environment.
 ## Do not add reference data from restricted sources
 
 Comparison against published tables (Oxley & Allen 2000) and against GPL-licensed
-codes (µSTEM) is part of development, but **neither those tables nor numbers
-derived from them may enter this repository**, in code, in test fixtures, in
-documentation or in issues. Cite where the comparison data lives instead.
+codes (µSTEM) is part of development, but **their values may not enter this
+repository** -- not in code, test fixtures, documentation or issues. That means
+no transcription of their tables: no columns of their numbers, no lists of their
+raw values, and nothing that is one arithmetic step from either. Cite where the
+comparison data lives instead.
+
+What you *should* write is the outcome of the comparison: "agrees with Oxley &
+Allen (2000) and with µSTEM to within 1 % for s <= 1.25 A^-1", or a table of our
+own values, or the ratio between ours and theirs. Stating how far apart two
+calculations sit is ordinary scientific reporting and is what makes a validation
+claim checkable -- replacing it with "agrees well" would be less honest, not
+more careful. The line is transcription, not arithmetic: a deviation figure
+characterises the comparison, a copied column republishes their work.
 
 ## Verification before you open a pull request
 
