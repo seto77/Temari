@@ -104,13 +104,22 @@ const USAGE = """
   julia -t auto ionization.jl fx   Z [--s ...] [--nonrel] [--json path]  # 原子散乱因子
                                    # 既定は完全 Dirac SCF 密度。--nonrel で比較用の非相対論
 
-opts: [--quick|--high] [--rel] [--nodscf] [--kli] [--s s1 s2 ...] [--json path]
+opts: [--quick|--high] [--rel] [--nodscf] [--kli] [--frozen] [--transverse]
+      [--s s1 s2 ...] [--json path]
       SCF は既定で完全 Dirac (DHFS)。--nodscf で旧来の非相対論 SCF (比較用)
       --kli は厳密交換 (Latter 補正なし)。Dirac・非相対論のどちらとも組める
+      --frozen は厳密 frozen core = 束縛も連続も**同一の中性 KS ポテンシャル**
+               (Latter 補正込み、z_asym=1)。Zhang らの Dirac GOS DB と同じ規約
+      --frozen-static は同じ frozen core を「尾が 0 の静的場」で組む比較用の版
+      --transverse は横断的 (Møller) 相互作用を足す。**edge 出口のみ** (K=0 専用)
       --s は F(s) 出口のみ (edge は K=0 の 1 点で、その分だけ安い)"""
 
 "`--kli` の有無を交換処方の Symbol へ (:xalpha | :kli)"
 parse_exchange(args) = "--kli" in args ? :kli : :xalpha
+
+"終状態処方の Symbol へ (:relaxed | :frozen | :frozen_static)"
+parse_final_state(args) = "--frozen-static" in args ? :frozen_static :
+                          ("--frozen" in args ? :frozen : :relaxed)
 
 "fx サブコマンド: X 線 f_x(s) と電子線 f_e(s) の原子散乱因子"
 function main_fx(args)
@@ -181,11 +190,14 @@ function main_gos(args)
     end
     settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
     xc = parse_exchange(args)
-    println("Z=$z $tag   出口: GOS df/dΔE(Q)   処方: ", model_id_of(rel, dscf, X_ALPHA, xc))
+    fs = parse_final_state(args)
+    println("Z=$z $tag   出口: GOS df/dΔE(Q)   処方: ",
+            model_id_of(rel, dscf, X_ALPHA, xc, fs))
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
             "   スレッド: ", Threads.nthreads(), "   (E0 非依存)")
     o = compute_gos(z, tag; settings=settings, eps_max_Ha=eps_max, q_max=q_max,
-                    rel_continuum=rel, dirac_scf=dscf, exchange=xc)
+                    rel_continuum=rel, dirac_scf=dscf, exchange=xc,
+                    final_state=fs)
     q = o["q_a0inv"]; fs = o["f_sum"]; occ = o["occupancy"]
     @printf("\n完了 (%.0f s)  ΔE ノード %d 点 × Q %d 点   ε 上端 = %.1f eV\n",
             o["elapsed_s"], length(o["dE_eV"]), length(q),
@@ -290,16 +302,21 @@ function main_(args)
     end
     settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
     xc = parse_exchange(args)
+    fs = parse_final_state(args)
+    trans = "--transverse" in args              # 260807Cl 横断的 (Møller) 相互作用
+    trans && !edge_mode &&
+        error("--transverse は edge 出口のみ (K=0 専用。指示書 §3)")
     println("Z=$z $tag @ $e0 keV   出口: ", edge_mode ? "dσ/dΔE (EELS)" : "F(s) (EDX)",
-            "   処方: ", model_id_of(rel, dscf, X_ALPHA, xc))
+            "   処方: ", model_id_of(rel, dscf, X_ALPHA, xc, fs, trans))
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
             "   スレッド: ", Threads.nthreads())
     println("初回はこの元素の SCF を解くため時間がかかります (atom_cache_jl_*.jls に保存)...")
     o = edge_mode ?
         compute_edge(z, tag, e0; settings=settings, rel_continuum=rel, dirac_scf=dscf,
-                     exchange=xc) :
+                     exchange=xc, final_state=fs, transverse=trans) :
         compute_channel(z, tag, e0; settings=settings, s_nodes=s_nodes,
-                        rel_continuum=rel, dirac_scf=dscf, exchange=xc)
+                        rel_continuum=rel, dirac_scf=dscf, exchange=xc,
+                        final_state=fs)
     @printf("\n完了 (%.0f s)   E_bound = %.1f eV (小成分ノルム比 %.4f)\n",
             o["elapsed_s"], o["E_bound_eV"], o["small_component_fraction"])
     if edge_mode

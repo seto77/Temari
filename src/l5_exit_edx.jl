@@ -22,8 +22,10 @@ function compute_channel(z::Int, tag::String, e0_keV::Float64;
                          verbose::Bool=true,
                          rel_continuum::Bool=false, dirac_scf::Bool=true,
                          x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
+                         final_state::Symbol=:relaxed,
                          rel_override::Union{Nothing,RelCont}=nothing)
     # rel_continuum=true: 放出電子をスカラー相対論で解く (第 3.5 章、モデル v3)。
+    # final_state=:frozen: 束縛と連続を同一 (中性) ポテンシャルで解く (l5_channel.jl)
     # rel_override: T8 の c→∞ 極限テスト等で RelCont を直接注入する診断用
     s_nodes === nothing && (s_nodes = collect(0.0:0.25:4.0))
     s_nodes[1] == 0.0 || error("s_nodes must start with 0 (F(0)=1 の規格化点)")
@@ -31,7 +33,7 @@ function compute_channel(z::Int, tag::String, e0_keV::Float64;
     t0 = time()
     ch = prepare_channel(z, tag, e0_keV; rel_continuum=rel_continuum,
                          dirac_scf=dirac_scf, x_alpha=x_alpha, exchange=exchange,
-                         rel_override=rel_override)
+                         final_state=final_state, rel_override=rel_override)
     K_nodes = 4.0 * pi .* s_nodes .* BOHR_ANG   # s [Å⁻¹] → K [a0⁻¹] (4π 規約!)
 
     N, diag = compute_NK(ch.ion_pot, ch.r_b, ch.u_b, ch.E_th, ch.T0, K_nodes, z;

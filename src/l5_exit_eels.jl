@@ -71,11 +71,12 @@ function compute_edge(z::Int, tag::String, e0_keV::Float64;
                       settings=PROD_SETTINGS, verbose::Bool=true,
                       rel_continuum::Bool=false, dirac_scf::Bool=true,
                       x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
+                      final_state::Symbol=:relaxed, transverse::Bool=false,
                       rel_override::Union{Nothing,RelCont}=nothing)
     t0 = time()
     ch = prepare_channel(z, tag, e0_keV; rel_continuum=rel_continuum,
                          dirac_scf=dirac_scf, x_alpha=x_alpha, exchange=exchange,
-                         rel_override=rel_override)
+                         final_state=final_state, rel_override=rel_override)
     N, diag = compute_NK(ch.ion_pot, ch.r_b, ch.u_b, ch.E_th, ch.T0, [0.0], z;
                          n1=settings.n1, n2=settings.n2, n3=settings.n3,
                          l_cap=settings.l_cap, n_x=settings.n_x,
@@ -84,10 +85,12 @@ function compute_edge(z::Int, tag::String, e0_keV::Float64;
                          ppw=Float64(get(settings, :ppw, CONT_PPW)),
                          dt_log=Float64(get(settings, :dt_log, CONT_DT_LOG)),
                          l_init=ch.l_b, occ_init=ch.occ_init, progress=verbose,
-                         rel=ch.rel)
+                         rel=ch.rel, transverse=transverse)
     e = eels_from_NK(N, diag, ch.E_th, ch.T0)
     return Dict{String,Any}(
-        "model_id" => ch.model_id, "exit" => "eels-dsde",
+        "model_id" => model_id_of(ch.rel !== nothing, dirac_scf, x_alpha,
+                                  exchange, final_state, transverse),
+        "exit" => "eels-dsde", "transverse" => transverse,
         "z" => z, "channel" => tag, "e0_keV" => e0_keV,
         "shell_nl" => [ch.n_b, ch.l_b], "kappa" => ch.kappa,
         "occupancy" => ch.occ_init,

@@ -110,10 +110,12 @@ function compute_gos(z::Int, tag::String;
                      q_min::Float64=0.05, q_max::Union{Nothing,Float64}=nothing,
                      n_q_out::Int=48, verbose::Bool=true,
                      rel_continuum::Bool=false, dirac_scf::Bool=true,
-                     x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha)
+                     x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
+                     final_state::Symbol=:relaxed)
     t0 = time()
     ch = prepare_channel(z, tag; rel_continuum=rel_continuum, dirac_scf=dirac_scf,
-                          x_alpha=x_alpha, exchange=exchange)
+                          x_alpha=x_alpha, exchange=exchange,
+                          final_state=final_state)
     eps_max = eps_max_Ha === nothing ? 10.0 * ch.E_th : eps_max_Ha
     eps_max > 0 || error("eps_max_Ha は正")
     # 和則を評価できる Q の上限: 尾根 Q²/2 とその Compton 幅 ~3pQ が ε 域に収まること

@@ -620,6 +620,130 @@ function selftest()
         @assert abs(eps_ry - eps_ry_ref) < 5e-4 "T20 FAIL: ε_HOMO が KLI1992 と合わない (Z=$z)"
     end
 
+    # ---- T21: 厳密 frozen core (終状態処方 :frozen / :frozen_static) ----
+    # 「束縛と連続を同じポテンシャルで解けば厳密に直交する」という**構造**の検査。
+    # 直交性が丸め誤差まで落ちることが、同一ポテンシャルが本当に配線されている
+    # ことの証明になる (Gram-Schmidt が実質不要になる = Q→0 の偽の単極子が消える)。
+    #
+    # ⚠ 検査では**束縛も非相対論 Numerov で解く**。本番経路の始状態は Dirac の
+    #   大成分で、連続はスカラー相対論/Schrödinger — **演算子が違う**ので、
+    #   ポテンシャルを揃えても (Zα)² 級の重なりが残る (C で ~1e-4、Fe で ~1e-2)。
+    #   それは frozen core の欠陥ではなく処方の別次元なので、ここでは演算子を
+    #   揃えて「ポテンシャルの配線」だけを見る。
+    let z = 6, tag = "K"
+        ch = Dict(fs => prepare_channel(z, tag; final_state=fs)
+                  for fs in (:relaxed, :frozen, :frozen_static))
+        # (a) :frozen は :relaxed と**同じ場**で束縛を解くので軌道はビット同一。
+        #     ここが崩れたらキャッシュ鍵か場の組み立てが壊れている
+        @assert ch[:frozen].E_b === ch[:relaxed].E_b &&
+                ch[:frozen].u_b == ch[:relaxed].u_b "T21 FAIL: :frozen の束縛が :relaxed と違う"
+        # (b) 漸近電荷: KS ポテンシャルは −1/r の尾、静的場は 0
+        @assert ch[:frozen].ion_pot.z_asym == 1.0 "T21 FAIL: :frozen の z_asym"
+        @assert ch[:frozen_static].ion_pot.z_asym == 0.0 "T21 FAIL: :frozen_static の z_asym"
+        @assert ch[:relaxed].ion_pot.z_asym ≈ 1.0 "T21 FAIL: :relaxed の z_asym"
+        # (c) 直交性
+        neutral = get_neutral(z; relativistic=true)
+        eps_t = 5.0
+        cs = Dict{Symbol,Float64}()
+        for fs in (:relaxed, :frozen, :frozen_static)
+            vb = fs === :frozen_static ?
+                 V_bound_callable(neutral; latter_charge=0.0, local_exchange=true) :
+                 V_bound_callable(neutral)
+            _, rb, ub = solve_bound(vb, 0, 0)          # 連続と同じ演算子で解く
+            pot = ch[fs].ion_pot
+            cont = ContinuumSet(V_for(pot, eps_t), eps_t, 6, 6.0,
+                                max(r_match_for(pot, eps_t), 30.0);
+                                q_resolve=10.0, z_asym=pot.z_asym)
+            cs[fs], _ = orthogonalize_l0!(cont, rb, ub; l=0)
+        end
+        @printf("[T21] frozen core (Z=%d %s, ε=%.0f Ha): 重なり c = relaxed %+.2e / frozen %+.2e / frozen_static %+.2e\n",
+                z, tag, eps_t, cs[:relaxed], cs[:frozen], cs[:frozen_static])
+        @printf("      改善 %.0f 倍 / %.0f 倍 (同一ポテンシャル → 厳密直交)\n",
+                abs(cs[:relaxed] / cs[:frozen]), abs(cs[:relaxed] / cs[:frozen_static]))
+        @assert abs(cs[:relaxed]) > 1e-4 "T21 FAIL: :relaxed で重なりが小さすぎ (検査が効いていない)"
+        @assert abs(cs[:frozen]) < abs(cs[:relaxed]) / 100 "T21 FAIL: :frozen が直交していない"
+        @assert abs(cs[:frozen_static]) < abs(cs[:relaxed]) / 100 "T21 FAIL: :frozen_static が直交していない"
+    end
+
+    # ---- T22: 横断的 (Møller) 相互作用の核 (l4_angular.jl 第 6.5 章) ----
+    # 厳密に成り立つ**構造**だけを見る (T8/T13 と同じ思想):
+    #  (a) c → ∞ で横断項が消える (β → 0 かつ ΔE/ħc → 0)
+    #  (b) ΔE → 0 で消える (前因子が (ΔE/ħc)²)
+    #  (c) 物理領域では正の寄与で、β² とともに単調に増える
+    #  (d) 物理領域 (q > q_min = k_i − k_f) では分母 q² − (ΔE/ħc)² が正
+    let dE = 260.0, T0 = 200e3 / HARTREE_EV           # Fe K @200 keV 相当
+        k_i = kin_k(T0); k_f = kin_k(T0 - dE)
+        q_min = k_i - k_f
+        @assert q_min > dE / C_LIGHT "T22 FAIL: q_min ≤ ΔE/c (極が積分域に入る)"
+        Q2 = (1.5 * q_min)^2                          # 物理領域の代表点
+        base = 1.0 / (Q2 * Q2)
+        w_inf = coulomb_kernel(Q2, Transverse(dE, T0, C_LIGHT * 1e4))
+        w_de0 = coulomb_kernel(Q2, Transverse(dE * 1e-8, T0, C_LIGHT))
+        w_phys = coulomb_kernel(Q2, Transverse(dE, T0, C_LIGHT))
+        @printf("[T22] 横断項 (ΔE=%.0f Ha, q=%.2f a₀⁻¹): c→∞ %.1e / ΔE→0 %.1e / 物理 %+.4f\n",
+                dE, sqrt(Q2), abs(w_inf / base - 1), abs(w_de0 / base - 1),
+                w_phys / base - 1)
+        @assert abs(w_inf / base - 1) < 1e-12 "T22 FAIL: c→∞ で横断項が消えない"
+        @assert abs(w_de0 / base - 1) < 1e-12 "T22 FAIL: ΔE→0 で横断項が消えない"
+        @assert w_phys > base "T22 FAIL: 物理の c で横断項が正の寄与になっていない"
+        prev = -1.0
+        for e0 in (60e3, 100e3, 200e3, 300e3, 400e3)  # β² 単調性
+            t = e0 / HARTREE_EV
+            kk = kin_k(t) - kin_k(t - dE)
+            frac = coulomb_kernel((1.5 * kk)^2, Transverse(dE, t)) *
+                   (1.5 * kk)^4 - 1.0                 # 同じ「q_min の 1.5 倍」で比較
+            @assert frac > prev "T22 FAIL: 横断寄与が β² とともに増えていない (E0=$e0)"
+            prev = frac
+        end
+        @printf("      β² 単調性 OK (E0 = 60→400 keV で寄与 %+.4f まで増加)\n", prev)
+    end
+
+    # ---- T22b: 横断項を独立な解析式と突き合わせる (Zhang ら 2024 式 42) ----
+    # T22 は自分の中の構造検査。式 42 は**別の出典** [60,65,66] から引かれた
+    # 「双極子近似での相対論補正比」で、核だけで評価できるので外部照合になる。
+    #
+    #   σ_rel/σ_conv = [ln((x + 1 − β²)/(1 − β²)) − β²x/(1 − β² + x)] / ln(1 + x)
+    #   x = θ₀²/θ_E²,  θ_E = ΔE/(γ m v₀²)
+    #
+    # ⚠ 論文の印字は第 1 項が ln((1+x)/(1−β²)) で、これは **x ≫ β² の近似**
+    #   (θ₀→0 で比が 1 に落ちない)。厳密な原始関数に直したのが上の形で、
+    #   x が小さいところまで含めて我々の核と比べられる。
+    # 我々側は双極子 S ∝ q² を核に当てて θ₀ まで数値積分する (原子は要らない)。
+    # **この検査が、式 38 の印字に落ちている 1/q² を補った根拠**。印字どおりだと
+    # ここで 1.07 に対して 1.0003 が出て、桁で外れる。
+    let
+        worst = 0.0
+        for e0 in (100e3, 200e3, 300e3), dE_eV in (100.0, 1000.0),
+            th0 in (1e-3, 5e-3, 2e-2)
+
+            T0 = e0 / HARTREE_EV
+            dE = dE_eV / HARTREE_EV
+            g = kin_gamma(T0)
+            b2 = 1.0 - 1.0 / (g * g)
+            x = (th0 / (dE / (g * b2 * C_LIGHT^2)))^2
+            ana = (log((x + 1.0 - b2) / (1.0 - b2)) - b2 * x / (1.0 - b2 + x)) /
+                  log(1.0 + x)
+            # 我々の核: dσ/dΩ ∝ W(q²)·q² (双極子)、θ の中点則で θ₀ まで
+            k_i = kin_k(T0)
+            k_f = kin_k(T0 - dE)
+            tr = Transverse(dE, T0)
+            num = 0.0
+            den = 0.0
+            n = 20_000
+            for i in 1:n
+                th = th0 * (i - 0.5) / n
+                Q2 = k_i^2 + k_f^2 - 2.0 * k_i * k_f * cos(th)
+                jac = sin(th)
+                num += coulomb_kernel(Q2, tr) * Q2 * jac
+                den += Q2 * jac / (Q2 * Q2)
+            end
+            worst = max(worst, abs(num / den - ana))
+        end
+        @printf("[T22b] 式 42 (双極子・厳密化) との最大差 = %.2e (18 ケース、x = 0.03-9.6e3)\n",
+                worst)
+        @assert worst < 2e-3 "T22b FAIL: 横断項が式 42 と合わない (核の形が違う)"
+    end
+
     # ---- T13b: 交換係数が二重に掛かっていないこと ----
     # 260807Cl に実際にやらかした事故の回帰テスト。`slater_vx` に X_ALPHA を
     # 畳み込んだ結果、終状態ポテンシャル (第 5 章、KS 2/3) が (2/3)·α になり、

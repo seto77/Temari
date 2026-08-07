@@ -46,8 +46,35 @@ package, try reorganizing arrays so that `@simd` / `@inbounds` lets LLVM
 vectorize on its own — that is how the current 8-lane spherical Bessel kernel
 was written.
 
-The only bundled data file is `src/bote_salvat.json` (public domain, extracted
-from NIST's BoteSalvatICX.jl).
+### The one bundled data file
+
+`src/bote_salvat.json` holds the Bote–Salvat analytic ionization cross-section
+coefficients and shell binding energies for Z = 1–99. Its provenance, in full,
+because "no third-party number tables in the repository" makes it the one
+exception that has to be justified:
+
+- **What it is.** The analytic parameterization of Bote, Salvat, Jablonski &
+  Powell, *At. Data Nucl. Data Tables* **96**, 871 (2009) (and its Erratum,
+  **97**, 186), fitted to the relativistic distorted-wave calculations of
+  Bote & Salvat, *Phys. Rev. A* **77**, 042701 (2008).
+- **Where these bits came from.** Machine-extracted from
+  **NIST's `BoteSalvatICX.jl`** (github.com/usnistgov/BoteSalvatICX.jl),
+  which is released under **The Unlicense** — a public-domain dedication. That
+  package in turn transcribes `xion.f` by the same authors. So the numbers reach
+  us through a US Government public-domain redistribution, not from the
+  publisher's PDF.
+- **The citable NIST source of record** for the underlying cross sections is
+  **NIST SRD 164 / NSRDS 164**, Llovet, Salvat, Bote, Salvat-Pujol, Jablonski &
+  Powell, *NIST Database of Cross Sections for Inner-Shell Ionization by
+  Electron or Positron Impact*, doi:10.6028/NIST.NSRDS.164 (US Government work,
+  published free of charge). ⚠ Note what it is and is not: NSRDS 164 is a user's
+  guide plus 198 ASCII tables of computed cross sections. It **does not print the
+  analytic coefficients** — it points at the ADNDT papers for those (its §3).
+  Swapping our analytic evaluation for its tables would be a different
+  prescription, would move every shipped σ, and would therefore need a full
+  table regeneration; it is not a drop-in citation change.
+
+Nothing else is bundled.
 
 The engine is `src/ionization.jl` — a thin loader and command line — plus the
 `l0`–`l5` layer files it includes. There is no Julia `module`: the namespace

@@ -123,13 +123,16 @@ Q 域は運動学から: q_hi は Ewald 対の最大移行 (k_i+k_f) と、行�
 なる κ+15z+2·max(K) の小さい方、q_lo は 0.9(k_i−k_f)。
 
 戻り値: (各 K の (k_f/k_i)·角度積分, 最大フィット残差, 直交化記録, l_max,
-badL 数, r_tail)。"""
+badL 数, r_tail)。
+
+`tr` を渡すと相互作用核が 1/Q⁴ → 縦 + 横断 (Møller) になる (K=0 専用。第 6.5 章)。"""
 function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
                     z::Int, r_core::Float64, K_nodes::Vector{Float64},
                     l_cap::Int, n_x::Int, n_phi::Int, n_q::Int, ppw::Float64,
                     dt_log::Float64, l_init::Int, occ_init::Float64,
                     sig_thresh::Float64;
-                    rel::Union{Nothing,RelCont}=nothing)
+                    rel::Union{Nothing,RelCont}=nothing,
+                    tr::Union{Nothing,Transverse}=nothing)
     kappa = rel === nothing ? sqrt(2.0 * e) : krel(e, rel.c)
     q_hi = min(k_i + kf, kappa + 15.0 * z + 2.0 * maximum(K_nodes))
     q_lo = max(1e-4, 0.9 * (k_i - kf))
@@ -138,7 +141,7 @@ function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
                   ppw, dt_log, l_init, sig_thresh, k_i + kf; rel=rel)
     # 260805Cl 変更: K 非依存の角度幾何・作業領域を 1 回だけ作る (旧: K ごとに再構築)
     ws = AngWS(k_i, kf, n_x, n_phi, rl.lam_max)
-    row = [kf / k_i * angular_integral(ws, rl, K, occ_init)
+    row = [kf / k_i * angular_integral(ws, rl, K, occ_init; tr=tr)
            for K in K_nodes]                   # k_f/k_i は位相空間因子
     # 旧: row = [kf / k_i * angular_integral(rl, K, k_i, kf, occ_init, n_x, n_phi)
     #            for K in K_nodes]
@@ -209,7 +212,11 @@ end
 
 """N(K) = ∫dε (k_f/k_i) ∫dΩ_f S/(Q₊²Q₋²) (Python 版 compute_NK)。
 ε 全域を direct のみで積分 (= 半域 |D|²+|X|²、干渉項 −Re(DX*) は含まず)。
-ε ノードは独立なので Threads.@threads で並列 (結果はスレッド数に依らない)。"""
+ε ノードは独立なので Threads.@threads で並列 (結果はスレッド数に依らない)。
+
+`transverse=true` で相互作用核に横断的 (Møller) 項を足す (第 6.5 章)。
+ΔE = E_th + ε は ε ノードごとに違うので、`Transverse` もノードごとに作る。
+**K = 0 のみ**なので σ・EELS 出口専用 — F(s) の K グリッドと併用すると停止する。"""
 function compute_NK(pot_ion, r_b, u_b, E_th::Float64, T0::Float64,
                     K_nodes::Vector{Float64}, z::Int;
                     n1::Int=10, n2::Int=28, n3::Int=12, l_cap::Int=72,
@@ -217,9 +224,12 @@ function compute_NK(pot_ion, r_b, u_b, E_th::Float64, T0::Float64,
                     ppw::Float64=CONT_PPW, dt_log::Float64=CONT_DT_LOG,
                     l_init::Int=0, occ_init::Float64=2.0,
                     sig_thresh::Float64=1e-8, progress::Bool=false,
-                    rel::Union{Nothing,RelCont}=nothing)
+                    rel::Union{Nothing,RelCont}=nothing,
+                    transverse::Bool=false)
     eps_max = T0 - E_th
     eps_max <= 0 && error("below threshold")
+    transverse && any(!=(0.0), K_nodes) &&
+        error("横断項は K=0 専用 — F(s) の K グリッドとは併用できない (指示書 §3)")
     eps, we = eps_nodes(E_th, eps_max, n1, n2, n3)
     k_i = kin_k(T0)
     # 束縛軌道の実効的な拡がり → 行列要素の積分域 r_core
@@ -241,7 +251,8 @@ function compute_NK(pot_ion, r_b, u_b, E_th::Float64, T0::Float64,
         row, mres, orec, lm, bd, rtl = eps_worker(
             pot_ion, r_b, u_b, eps[ie], kf, k_i, z, r_core, K_nodes,
             l_cap, n_x, n_phi, n_q, ppw, dt_log, l_init, occ_init, sig_thresh;
-            rel=rel)
+            rel=rel,
+            tr=(transverse ? Transverse(E_th + eps[ie], T0) : nothing))
         dNde[ie, :] = row
         match_resid[ie] = mres
         ortho[ie] = orec
@@ -336,12 +347,17 @@ const MODEL_ID_REL = "DHFS-KS23-DiracB-SRC-jsplit-fullrange-sym-v3"
   `rel`   放出電子のスカラー相対論 (第 3.5 章)
   `dscf`  SCF 自体を Dirac で解く (260807Cl)。既定
   α       交換係数。Slater の 1 以外なら -XaNN が付く (既定は 2/3 → -Xa67)
-  `xc`    交換処方。`:kli` なら -KLI が付き、α は意味を失うので出さない"""
+  `xc`    交換処方。`:kli` なら -KLI が付き、α は意味を失うので出さない
+  `fs`    終状態の処方 (260807Cl)。`:frozen` は -FZ、`:frozen_static` は -FZS。
+          既定 `:relaxed` は無印
+  `tr`    横断的 (Møller) 相互作用 (260807Cl)。有効なら -TR"""
 model_id_of(rel::Bool, dscf::Bool, x_alpha::Float64=X_ALPHA,
-            xc::Symbol=:xalpha) =
+            xc::Symbol=:xalpha, fs::Symbol=:relaxed, tr::Bool=false) =
     (rel ? MODEL_ID_REL : MODEL_ID) * (dscf ? "-DSCF" : "") *
     (xc === :kli ? "-KLI" :
-     (x_alpha == 1.0 ? "" : "-Xa$(round(Int, x_alpha * 100))"))
+     (x_alpha == 1.0 ? "" : "-Xa$(round(Int, x_alpha * 100))")) *
+    (fs === :frozen ? "-FZ" : fs === :frozen_static ? "-FZS" : "") *
+    (tr ? "-TR" : "")
 
 # ---- SCF/Dirac 結果のキャッシュ (Serialization。Python の pickle とは独立) ----
 const _cache = Dict{Tuple,Any}()
@@ -436,9 +452,13 @@ get_ion(z::Int, shell; relativistic::Bool=false, x_alpha::Float64=X_ALPHA,
                 (relativistic ? "irel" : "i", z, shell[1], shell[2],
                  xc_tag(x_alpha, exchange)))
 
-"SCF の収束を保証 (未収束なら混合を弱めて再試行、それでも駄目なら停止)"
+"""SCF の収束を保証 (未収束なら混合を弱めて再試行、それでも駄目なら停止)。
+
+`need_ion=false` は**厳密 frozen core** 用 — 終状態を中性場で解くので空孔イオンの
+SCF がそもそも要らない (元素あたり SCF 1 回分の節約)。"""
 function ensure_converged(z::Int, shell; relativistic::Bool=false,
-                          x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha)
+                          x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
+                          need_ion::Bool=true)
     rl = relativistic
     xt = xc_tag(x_alpha, exchange)
     for (kind, key, rebuild) in (
@@ -450,6 +470,7 @@ function ensure_converged(z::Int, shell; relativistic::Bool=false,
              () -> build_ion(z, shell; relativistic=rl, x_alpha=x_alpha,
                              exchange=exchange,
                              beta=SCF_RETRY.beta, max_iter=SCF_RETRY.max_iter)))
+        kind == "ion" && !need_ion && continue
         a = kind == "neutral" ?
             get_neutral(z; relativistic=rl, x_alpha=x_alpha, exchange=exchange) :
             get_ion(z, shell; relativistic=rl, x_alpha=x_alpha, exchange=exchange)
@@ -472,14 +493,47 @@ F(s) 出口 (`compute_channel`) も EELS 出口 (`compute_edge`) もここまで
 戻り値の NamedTuple:
   `E_th`, `T0`   閾値と入射エネルギー [Ha] (E_th は Bote 表の吸収端が正本)
   `r_b`, `u_b`   始状態の Dirac 大成分 (第 4 章)
-  `ion_pot`      終状態の場 = 緩和 core-hole イオン + KS(2/3) 交換 (第 5 章)
+  `ion_pot`      終状態の場 (第 5 章)。`final_state` で処方が決まる
   `rel`          放出電子のスカラー相対論設定 (nothing = 非相対論)
+
+## `final_state` — 終状態の処方 (260807Cl 追加)
+
+`:relaxed` (既定・v3 出荷処方)
+  束縛は中性場の KS ポテンシャル (Latter 補正 −1/r 込み)、連続は**緩和
+  core-hole イオン** (z_asym = 1) + KS(2/3) 交換。**別のポテンシャル**なので
+  始状態と終状態は厳密には直交せず、`orthogonalize_l0!` の Gram–Schmidt が
+  要る。Oxley–Allen / µSTEM との A/B で選ばれた処方で、F(s) を最も動かした要素。
+
+`:frozen` (厳密 frozen core。**Zhang らの Dirac GOS DB と同じ規約**)
+  "the potential remains unchanged for the initial and final states"
+  (Zhang ら 2024 §5、`refs/Zhang_2024_*.pdf` p.25)。**束縛と連続をまったく
+  同じ 1 つのポテンシャル**、すなわち中性原子の KS ポテンシャル (Latter 補正
+  込み、z_asym = 1) で解く。彼らの FAC も「交換エネルギーの漸近を直した局所
+  密度近似」= Latter 型の自己相互作用補正を使うので、中性原子でも尾は −1/r。
+  ⚠ **束縛軌道は `:relaxed` とビット同一** (同じ場で解くので)。変わるのは
+  連続状態が見る場だけ。だから束縛のキャッシュ鍵も共有してよい。
+
+`:frozen_static` (中性標的の静的場で凍結。z_asym = 0)
+  同じ「同一ポテンシャル」でも、尾を 0 に落とした**静的場** (Latter クリップ
+  無し・局所交換) を使う版。`phase` 出口 (弾性 δ_l) が使う場と同一。
+  KS ポテンシャルの −1/r の尾は「自分自身を含まない電子が感じる場」なので、
+  放出されるのが**その原子の電子**である電離では `:frozen` の方が筋が通る。
+  比較用に残してある (どちらが Zhang らに近いかは docs 参照)。
+
+どちらの frozen 版でも、束縛と連続が**同じ動径ハミルトニアンの固有関数**に
+なるので**厳密に直交**する。`orthogonalize_l0!` の重なり c が丸め誤差まで
+落ちることが実装が正しいことの証明 (selftest T21)。
+
+⚠ 処方を切り替えると F(s) も σ も動く。出荷既定は `:relaxed` のまま。
 """
 function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
                          rel_continuum::Bool=false, dirac_scf::Bool=true,
                          x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
+                         final_state::Symbol=:relaxed,
                          rel_override::Union{Nothing,RelCont}=nothing)
     haskey(CHANNELS, tag) || error("unknown channel $tag (K/L1/L2/L3)")
+    final_state in (:relaxed, :frozen, :frozen_static) ||
+        error("final_state は :relaxed / :frozen / :frozen_static ($final_state)")
     shell, j_lower, occ_init, subshell = CHANNELS[tag]
 
     eth_keV = bote_edge_eV(z, subshell) / 1e3   # 閾値 = Bote 表の吸収端
@@ -487,29 +541,47 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
     e0_keV === nothing || e0_keV > eth_keV ||
         error("E0=$(e0_keV) keV は $tag 端 $(eth_keV) keV 以下 (σ=0)")
 
+    frozen = final_state !== :relaxed
+    static_field = final_state === :frozen_static
     ensure_converged(z, shell; relativistic=dirac_scf, x_alpha=x_alpha,
-                     exchange=exchange)
+                     exchange=exchange, need_ion=!frozen)
     neutral = get_neutral(z; relativistic=dirac_scf, x_alpha=x_alpha,
                           exchange=exchange)
-    ion = get_ion(z, shell; relativistic=dirac_scf, x_alpha=x_alpha,
-                  exchange=exchange)
 
-    # ---- 始状態: 同じ HFS 場の中の Dirac 大成分 (第 4 章) ----
+    # ---- 束縛と終状態が見る場 (frozen core では同一物) ----
+    # :frozen_static だけ尾を 0 に落とした静的場。Latter クリップ無し・局所交換で
+    # 組む (KLI の V_eff は −1/r の尾を持つので、そのままでは静的場にならない)。
+    # :relaxed と :frozen は**同じ** KS ポテンシャル (Latter 補正込み) を使う
+    v_bound = static_field ? V_bound_callable(neutral; latter_charge=0.0,
+                                              local_exchange=true) :
+                             V_bound_callable(neutral)
+
+    # ---- 始状態: その場の中の Dirac 大成分 (第 4 章) ----
     n_b, l_b = shell
     kap = (j_lower && l_b > 0) ? l_b : -(l_b + 1)    # j = l∓1/2 → κ = +l / −(l+1)
     # ⚠ 鍵に **SCF 種別と交換係数を必ず含める**。始状態はここで作った `neutral` の
     # ポテンシャルの中で解くので、鍵が (z, n, l, κ) だけだと Dirac SCF で作った 1s を
     # 非相対論 SCF の実行が黙って読む。260807Cl に実際に起き、refcheck が
     # |dE_b/E_b| = 2.2e-3 で検出した (K 殻だけ、L 殻は無傷という症状で切り分けた)
+    # ⚠ 鍵は「**どの場で解いたか**」で決まる。`:relaxed` と `:frozen` は同じ場なので
+    # 鍵を共有してよい (共有する = 束縛軌道がビット同一であることの担保になる)。
+    # `:frozen_static` だけ別の場なので要素を足す — 入れ忘れると別処方の 1s を
+    # 黙って読む。要素を足す (長さを変える) 形にしたのは既存キャッシュを生かすため
+    bkey_base = ("d", z, n_b, l_b, kap, dirac_scf ? "rel" : "nr",
+                 xc_tag(x_alpha, exchange))
     E_b, r_b, u_b, frac_small = disk_cached(
-        ("d", z, n_b, l_b, kap, dirac_scf ? "rel" : "nr",
-         xc_tag(x_alpha, exchange))) do
-        solve_dirac_bound(V_bound_callable(neutral), z; kappa=kap,
-                          n_nodes=n_b - l_b - 1)
+        static_field ? (bkey_base..., "fzs") : bkey_base) do
+        solve_dirac_bound(v_bound, z; kappa=kap, n_nodes=n_b - l_b - 1)
     end
 
-    # ---- 終状態の場: 緩和 core-hole イオン + KS(2/3) 交換 (第 5 章) ----
-    ion_pot = IonPotential(z, neutral, ion)
+    # ---- 終状態の場 (第 5 章) ----
+    # frozen は★束縛と同じ場をそのまま渡す。IonPotential は (z, z_asym, r, V) の
+    # 既定コンストラクタを持つので新しい型は要らない
+    ion_pot = frozen ?
+              IonPotential(z, static_field ? 0.0 : 1.0, neutral.r, v_bound) :
+              IonPotential(z, neutral,
+                           get_ion(z, shell; relativistic=dirac_scf,
+                                   x_alpha=x_alpha, exchange=exchange))
 
     rel = rel_override !== nothing ? rel_override :
           (rel_continuum ? RelCont(z) : nothing)
@@ -521,8 +593,9 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
             T0=(e0_keV === nothing ? nothing : e0_keV * 1000.0 / HARTREE_EV),
             E_b=E_b, r_b=r_b, u_b=u_b, frac_small=frac_small,
             ion_pot=ion_pot, rel=rel, dirac_scf=dirac_scf, x_alpha=x_alpha,
-            exchange=exchange,
-            model_id=model_id_of(rel !== nothing, dirac_scf, x_alpha, exchange))
+            exchange=exchange, final_state=final_state,
+            model_id=model_id_of(rel !== nothing, dirac_scf, x_alpha, exchange,
+                                 final_state))
 end
 
 "入射エネルギーを伴わない準備 (GOS のように E0 非依存な出口用)"

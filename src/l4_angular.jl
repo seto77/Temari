@@ -235,6 +235,86 @@ function legendre_sum(rl::RlTable, Qa::Vector{Float64}, Qb::Vector{Float64},
     return vec(S2)
 end
 
+# ====================================================================
+# 第 6.5 章  横断的 (Møller) 相互作用 — 260807Cl 追加
+# ====================================================================
+# 第 1 Born の相互作用核はクーロン (縦) 項 1/q⁴ だけではない。飛来電子の運動が
+# 作る磁場との結合 (Coulomb ゲージでの遅延効果) が**横断項**を生み、200-300 keV
+# では数 % 効く。EELS の magic angle が観測できるのはこの項があるからで、
+# 定量には欠かせない。
+#
+# Zhang ら 2024 (arXiv:2405.10151) 式 38-39 (refs/Zhang_2024_*.pdf):
+#
+#   ∂²σ/∂E∂Ω = (2γ/a₀)²(k_f/k_i) W(q) Σ|⟨f|e^{iqr}|i⟩|²
+#   β_t² = β² − ΔE²/(cq)² · (1 + ((cq)² − ΔE²)/(2ΔE(E₀ + m_ec²)))      … 式 39
+#
+# つまり**行列要素側は一切変わらず、1/q⁴ を核 W(q) に置き換えるだけ**。
+# 原子単位 (ħ = m_e = 1、c = 1/α) では ΔE/ħc = ΔE/c、m_ec² = c²、E₀ = T0。
+#
+# ⚠ **式 38 の印字は横断項の分母に q² が落ちている** (2026-08-07 に検出)。
+#   印字どおりだと第 1 項が [長さ⁴]、第 2 項が [長さ²] で**次元が合わない**。
+#   実際に組むと Fe K @200 keV の σ が 21 倍になって破綻する。正しい核は
+#
+#       W(q) = 1/q⁴ + β_t² (ΔE/ħc)² / [ q² (q² − (ΔE/ħc)²)² ]
+#
+#   これは次元が合う上に、**同じ論文の式 42 と双極子極限で厳密に一致する**
+#   (下記)。式 42 は独立な出典 [60,65,66] からの引用なので、外部照合になる。
+#
+#   照合の中身: 小角では q² = k_i²(θ² + θ_E²)、θ_E = ΔE/(γm v₀²)、
+#   (ΔE/ħc)² = β²k_i²θ_E² なので q² − (ΔE/ħc)² = k_i²(θ² + θ_E²(1−β²))。
+#   双極子 S ∝ q² を当てて θ₀ まで積分すると、式 42
+#       σ_rel/σ_conv = [ln((1+x)/(1−β²)) − β²x/(1−β²+x)] / ln(1+x),  x = θ₀²/θ_E²
+#   の被積分関数 1/C − β²(1−β²)θ_E²/C² (C = θ²+θ_E²(1−β²)) に**厳密に**なる。
+#   q² 抜きの印字どおりの形はここで合わない。検証は selftest T22。
+#
+# ⚠ **K = 0 の分岐 (σ・EELS) 専用**。F(s) の MDFF は Q₊ ≠ Q₋ の混合形式で、
+#   横断項の混合形をどう取るか (Q₊·Q₋ か、Q± それぞれか) に処方判断が要る。
+#   まず σ 側で効きを測ってから広げる (docs/next_phase_2026-08-07.md §3)。
+
+"""横断的 (Møller) 相互作用の運動学。ε ノード 1 点につき 1 つ作る。
+
+  `dE`  損失エネルギー ΔE = E_th + ε [Ha]
+  `T0`  入射電子の運動エネルギー [Ha]
+  `c`   光速 [a.u.]。**c → ∞ で横断項が厳密に消える** (構造検査 T21a)"""
+struct Transverse
+    dE::Float64
+    T0::Float64
+    c::Float64
+end
+Transverse(dE::Float64, T0::Float64) = Transverse(dE, T0, C_LIGHT)
+
+"""相互作用核 W(Q²) [a₀⁴] — 引数は Q² (平方根を避ける)。
+
+    W = 1/Q⁴ + β_t² (ΔE/ħc)² / [ Q² (Q² − (ΔE/ħc)²)² ]
+
+`tr === nothing` は素の 1/Q⁴ で、**出荷処方はこちら** (呼び出し側の式ごと
+分岐させてあるのでビット同一)。
+
+⚠ 横断項の分母の **Q²** は Zhang ら式 38 の印字には無い。次元 (第 1 項と
+揃わない) と式 42 との突き合わせの両方から補った — 上の章コメント参照。
+
+β_t² は運動学的下限 q_min = k_i − k_f のごく近傍で ΔE(1−β²)/(2(E₀+c²)) 程度
+**負**になる (式 39 が薄い近似を含むため)。β_t は速度の横成分なので物理的には
+非負で、0 で下から抑える。Fe K @200 keV では |負の値| ≲ 0.003 に対し β² ≈ 0.4
+なので、抑えが効くのは求積の最下端 1 点のみ。
+
+分母 q² − (ΔE/ħc)² は**物理領域で常に正** — dp/dE = 1/v > 1/c より
+k_i − k_f > ΔE/c が厳密に成り立つので、極は積分域の外にある。
+下のガードは数値上の保険 (発火したら運動学の組み立てが壊れている)。"""
+@inline function coulomb_kernel(Q2::Float64, tr::Union{Nothing,Transverse})
+    tr === nothing && return 1.0 / (Q2 * Q2)
+    qE2 = (tr.dE / tr.c)^2                    # (ΔE/ħc)² [a₀⁻²]
+    den = Q2 - qE2
+    den <= 0.0 && return 1.0 / (Q2 * Q2)      # 保険 (物理領域では起きない)
+    c2 = tr.c * tr.c
+    g = 1.0 + tr.T0 / c2                      # γ = 1 + T0/c²
+    beta2 = 1.0 - 1.0 / (g * g)               # β² = 1 − 1/γ²
+    cq2 = c2 * Q2                             # (cq)²
+    dE2 = tr.dE * tr.dE
+    bt2 = beta2 - dE2 / cq2 * (1.0 + (cq2 - dE2) / (2.0 * tr.dE * (tr.T0 + c2)))
+    return 1.0 / (Q2 * Q2) + max(bt2, 0.0) * qE2 / (Q2 * den * den)
+end
+
 """∫dΩ_f S(Q₊,Q₋)/(Q₊²Q₋²) — 対称 Ewald 運動学 (Python 版 angular_integral)。
 
 入射波対 k_± = (±K/2, 0, √(k_i²−K²/4)) (STEM の干渉項)。被積分関数は
@@ -278,7 +358,8 @@ function AngWS(k_i::Float64, k_f::Float64, n_x::Int, n_phi::Int, lam_max::Int)
                  zeros(n_x, 1))
 end
 
-function angular_integral(ws::AngWS, rl::RlTable, K::Float64, occ::Float64)
+function angular_integral(ws::AngWS, rl::RlTable, K::Float64, occ::Float64;
+                          tr::Union{Nothing,Transverse}=nothing)
     k_i = ws.k_i; k_f = ws.k_f
     wx = ws.wx; jac_t = ws.jac_t; cth = ws.cth; sth = ws.sth
     nx = length(wx); np_ = length(ws.wphi)
@@ -295,9 +376,16 @@ function angular_integral(ws::AngWS, rl::RlTable, K::Float64, occ::Float64)
         # ★総和は旧実装と同じ sum(broadcast) を使う。Base.sum は内部で @simd を
         #   使うため、自前の逐次ループに置き換えると丸め順が変わりビット同一性が
         #   壊れる (ここだけは小配列 2 本の割り当てを許容する)
-        return 2.0 * pi * sum(wx .* 2.0 .* jac_t .* vec(Sv) ./ Q2 .^ 2)
+        # ★横断項は**式ごと別分岐**にしてある。既定 (tr === nothing) の式に
+        #   1 文字も触れないのがビット同一性の担保 (掟: 総和順序を変えない)
+        tr === nothing &&
+            return 2.0 * pi * sum(wx .* 2.0 .* jac_t .* vec(Sv) ./ Q2 .^ 2)
+        return 2.0 * pi * sum(wx .* 2.0 .* jac_t .* vec(Sv) .*
+                              coulomb_kernel.(Q2, Ref(tr)))
     end
 
+    tr === nothing ||
+        error("横断項は K=0 (σ・EELS) 専用 — MDFF への拡張は未実装 (指示書 §3)")
     K >= 2.0 * k_i && error("sym kinematics requires K < 2*k_i")
     kz = sqrt(k_i^2 - K * K / 4.0)             # k_± の z 成分 (Ewald 球上)
     cphi = ws.cphi
@@ -324,6 +412,8 @@ end
 
 "互換ラッパ (単発呼び出し用)。値は AngWS 経由と同一"
 function angular_integral(rl::RlTable, K::Float64, k_i::Float64, k_f::Float64,
-                          occ::Float64, n_x::Int, n_phi::Int)
-    return angular_integral(AngWS(k_i, k_f, n_x, n_phi, rl.lam_max), rl, K, occ)
+                          occ::Float64, n_x::Int, n_phi::Int;
+                          tr::Union{Nothing,Transverse}=nothing)
+    return angular_integral(AngWS(k_i, k_f, n_x, n_phi, rl.lam_max), rl, K, occ;
+                            tr=tr)
 end

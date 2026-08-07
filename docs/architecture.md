@@ -30,8 +30,8 @@ concatenating the files in include order reproduces a single-file build.
 | `l1_atomic.jl` | L1 | self-consistent HFS — non-relativistic, or a **full Dirac SCF** (DHFS) resolved in κ with the small component in the density — with local Xα exchange or **exact exchange in the KLI form** (no Latter correction); bound Schrödinger and Dirac states, relaxed core-hole potential |
 | `l2_continuum.jl` | L2 | `ContinuumSet` — distorted waves, energy normalization, Coulomb matching, orthogonalization, the scalar-relativistic option |
 | `l3_radial.jl` | L3 | `RlTable` — the multipole integrals and their PCHIP interpolation |
-| `l4_angular.jl` | L4 | 3j symbols, Legendre recursion, MDFF assembly |
-| `l5_channel.jl` | L5 | everything an exit shares: the channel table, the SCF/Dirac caches, `prepare_channel`, the ε quadrature, the per-ε driver, the N(K) contraction, Bote–Salvat absolute cross sections |
+| `l4_angular.jl` | L4 | 3j symbols, Legendre recursion, MDFF assembly, and the interaction kernel — Coulomb (longitudinal) alone, or with the **transverse (Møller)** term added |
+| `l5_channel.jl` | L5 | everything an exit shares: the channel table, the SCF/Dirac caches, `prepare_channel` (including the `:relaxed` / `:frozen` / `:frozen_static` final-state prescription), the ε quadrature, the per-ε driver, the N(K) contraction, Bote–Salvat absolute cross sections |
 | `l5_exit_edx.jl` | L5 | the F(s, E₀) exit — K on an s grid, reported as N(K)/N(0) |
 | `l5_exit_eels.jl` | L5 | the dσ/dΔE exit — K = 0 only, reported as an edge shape plus the stopping-power contraction |
 | `l5_exit_phase.jl` | L5 | the δ_l exit — elastic phase shifts in the neutral atom's static field |
