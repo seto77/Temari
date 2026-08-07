@@ -76,7 +76,9 @@ const COMPUTE_TIMEOUT_S = 7200.0                             # 2 時間 (寛大�
 const PORT_SCAN_RANGE   = 20                                 # 希望ポートから +20 まで探索
 const LOG_TAIL_BYTES    = 2048                               # /progress が返すログ末尾
 
-const CHANNEL_TAGS = ("K", "L1", "L2", "L3")                 # エンジン CHANNELS と同じ
+# エンジン CHANNELS と同じ。M 殻は元素によって存在しない (Bote 表の副殻数と
+# 3d の占有で決まる) ので、エンジン側の `available_channels(z)` が弾く
+const CHANNEL_TAGS = ("K", "L1", "L2", "L3", "M1", "M2", "M3", "M4", "M5")
 const MODES        = ("quick", "prod", "high")               # → --quick / (無印) / --high
 
 # 同時 1 ジョブ。true の間は新規 /compute を 423 で断る (エンジン多重起動で

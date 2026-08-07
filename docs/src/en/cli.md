@@ -50,7 +50,7 @@ julia -e 'include("src/ionization.jl"); exit(refcheck() < 1e-5 ? 0 : 1)'
 | Argument | Meaning |
 | --- | --- |
 | `Z` | Atomic number. |
-| `channel` | `K`, `L1`, `L2` or `L3` (case-insensitive). |
+| `channel` | `K`, `L1`, `L2`, `L3`, or `M1`–`M5` (case-insensitive). M subshells exist only where the Bote table carries them and the 3d shell is occupied; asking for one that does not exist lists what does. |
 | `E0_keV` | Incident electron energy in keV. The shipped grids cover 30–400 keV. |
 
 ### Options

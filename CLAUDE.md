@@ -37,7 +37,12 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
   `l4_angular` / `l5_exit_edx` / `selftest`。**module は導入せずフラット名前空間**
   (include するだけで全名前が見える / 連結すれば単一ファイルに戻る)。純粋な移動で
   5 チャネル === ビット同一。層とファイルの対応は `docs/architecture.md`
-- **現状の残務・次の一手の正本 = `docs/next_phase_2026-08-07.md`**
+- **⭐ 現状の残務・次の一手の正本 = `docs/next_phase_2026-08-08.md`**
+  (v4 の生成とリリース仕上げ。**冒頭でこれを読む**)。処方は作者判断で確定済 —
+  **連続状態 = κ 分解 Dirac / イオン化の交換 = Xα / f_x の交換 = KLI /
+  終状態 = 緩和 core-hole / チャネル = K,L1,L2,L3,M1–M5 / σ = Bote–Salvat**。
+  未決は `--transverse` を EELS 出口の既定にするかだけ (再生成不要)
+- 一世代前の残務 = `docs/next_phase_2026-08-07.md`
   (`..._2026-08-06.md` は P1 完了時点の旧版)。**§2 (A 厳密 frozen core) と
   §3 (B 横断的 Møller) は 2026-08-07 に実施済** — 測定の正本は
   `docs/frozen_core_and_transverse_2026-08-07.md`。出荷既定を Dirac+KLI にするか (§4)、
