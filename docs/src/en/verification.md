@@ -77,23 +77,65 @@ the density too diffuse and $f_x$ falling off too fast. **The full Dirac SCF
 closes that gap: Au now agrees to ~1 % at high $s$** (the correction moves $f_x$
 by 10.8 % at $s = 4$ Å⁻¹).
 
-The exchange coefficient was the next layer down. RMS relative difference in
-$f_x$ over $s$ = 0.1–6 Å⁻¹, scanning α:
+The exchange treatment was the next layer down, and it is where the comparison
+stopped being about parameterizations. Every published fit — Waasmaier–Kirfel,
+Cromer–Mann, Peng, Kirkland — is a fit to relativistic Hartree–Fock, so once the
+engine's error reached the fit's own residual the comparison ran out of
+resolution. Thorkildsen (2023) quantifies that: Waasmaier–Kirfel's mean absolute
+error is about 50× what modern methods achieve.
 
-| α | Z=6 | Z=14 | Z=26 | Z=79 |
+The reference is therefore now **OFFV1**, the numerical Dirac–Hartree–Fock form
+factors of Olukayode, Froese Fischer & Volkov (2023) — a computed table, not a
+fit. Relative RMS in $f_x$ over $s \le 2$ Å⁻¹:
+
+| Z | Waasmaier–Kirfel | Cromer–Mann | Dirac + Xα | **Dirac + KLI** |
 | --- | --- | --- | --- | --- |
-| 1.000 (Slater) | 4.51 % | 1.94 % | 1.44 % | 0.72 % |
-| 0.750 | 2.36 % | 0.92 % | 0.43 % | 0.33 % |
-| **0.667 (Kohn–Sham, adopted)** | 2.62 % | 1.14 % | 0.43 % | 0.36 % |
+| 6 | 0.161 % | 0.265 % | 2.450 % | **0.153 %** |
+| 14 | 0.065 % | 0.117 % | 1.794 % | 0.087 % |
+| 26 | 0.119 % | 0.048 % | 1.508 % | **0.079 %** |
+| 79 | 0.079 % | 0.054 % | 0.711 % | **0.030 %** |
 
-α = 1 is the worst value for every element, and the scan lands unprompted in the
-range Schwarz's Xα values occupy — so this is a physics choice, not a fit to the
-thing being compared against. Carbon is the outlier that remains, which is where
-the self-interaction error lives.
+With exact exchange the engine matches the accuracy of the standard
+parameterizations and beats them for C, Fe and Au — for gold by 2.6×. Over the
+full range to $s = 6$ Å⁻¹ the worst $|\Delta f_x|$ is 0.030 e, against 7.8 e for
+Cromer–Mann at gold, where a four-Gaussian form simply runs out.
 
-Beyond $s \approx 3$ Å⁻¹ the comparison inverts: a sum of Gaussians decays as
-$\exp(-bs^2)$ while $f_e$ genuinely falls as $s^{-2}$, so the fits collapse and
-the Mott–Bethe value is the correct one.
+This measures fidelity to the same physics rather than completeness of it: OFFV1
+is Dirac–Hartree–Fock, exchange-exact and correlation-free, and so is Dirac + KLI.
+
+### The GOS exit against the Dirac GOS database
+
+The generalized oscillator strengths were checked against the open Dirac-based
+GOS database of Zhang *et al.* (2023, CC-BY), computed with the Flexible Atomic
+Code from self-consistent Dirac–Fock–Slater orbitals — the only modern reference
+that covers this exit.
+
+The unit convention was pinned without assuming it, using **hydrogen**, where our
+own GOS is already verified against the exact dipole limit and the Bethe sum rule
+(T11). The ratio came out at 27.2121 against 1 Ha = 27.211386 eV — so the two
+tabulate the same quantity, ours per Hartree and theirs per eV, and for hydrogen
+they agree to **3×10⁻⁵ relative** across $q$ = 0.1 … 15 Å⁻¹. Their `data` is
+stored per $(n,l)$ shell; the `occupancy_ratio` attribute converts it to the
+$j$-subshell, which the near-equality of their L2 and L3 integrals confirms.
+
+For real elements, ratio of ours to theirs over $q \le 6$ Å⁻¹:
+
+| Edge | ε = 2 eV | 10 eV | 40 eV | 155 eV | 580 eV |
+| --- | --- | --- | --- | --- | --- |
+| Fe K | 0.93 | 0.95 | 0.95 | 0.94 | 0.94 |
+| Fe L1 | 0.94–1.19 | 0.96–1.08 | 0.96–1.08 | 0.96–1.07 | 0.96–0.97 |
+| Fe L3 | 1.15–1.28 | 0.97–1.08 | 0.96–1.07 | 0.97–1.05 | 0.97–1.01 |
+| Au L3 | 1.17 | 1.03 | 0.97 | 0.96 | 0.97 |
+
+Agreement is within a few percent everywhere except the first few eV above
+threshold. Part of the offset is definitional: the edge energies differ by
+1.5–4 % (ours from Bote–Salvat, theirs a computed DFS ionization energy) and the
+GOS carries an explicit $\Delta E$ prefactor. The rest is missing physics that is
+already on the roadmap — their transition matrix element keeps the small
+components, $\int [P_a P_b + Q_a Q_b] j_\lambda(qr)\,\mathrm{d}r$, while ours uses
+the large component alone; their continuum is resolved in κ where ours is
+scalar-relativistic; and their final state is a Dirac–Fock–Slater field where
+ours is a relaxed core-hole ion.
 
 Both comparisons were performed locally during development. **Neither the
 published tables, the fitted coefficients, nor the GPL-code output is included in
