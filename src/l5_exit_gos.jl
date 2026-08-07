@@ -43,7 +43,9 @@ function gos_surface(pot_ion, r_b, u_b, E_th::Float64, z::Int,
                      l_init::Int, occ::Float64;
                      l_cap::Int=96, n_q::Int=240, ppw::Float64=CONT_PPW,
                      dt_log::Float64=CONT_DT_LOG, sig_thresh::Float64=1e-12,
-                     rel::Union{Nothing,RelCont}=nothing, progress::Bool=false)
+                     rel::Union{Nothing,RelCont}=nothing,
+                     dirac::Union{Nothing,NamedTuple}=nothing,
+                     progress::Bool=false)
     # 束縛軌道の実効的な拡がり → 行列要素の積分域 (compute_NK と同一の式)
     cum = cumsum(u_b .^ 2 .* gradient_(r_b))
     idx = clamp(searchsortedfirst(cum, 1.0 - 1e-12), 1, length(r_b))
@@ -66,7 +68,7 @@ function gos_surface(pot_ion, r_b, u_b, E_th::Float64, z::Int,
         q_hi = 1.05 * maximum(qgrid)
         _, rl, mres, _, lm, bd, rtl = eps_setup(
             pot_ion, r_b, u_b, e, z, r_core, q_lo, q_hi, l_cap, n_q,
-            ppw, dt_log, l_init, sig_thresh, Inf; rel=rel)
+            ppw, dt_log, l_init, sig_thresh, Inf; rel=rel, dirac=dirac)
         S = legendre_sum(rl, qgrid, qgrid, ones_q, occ)   # S(Q, Q, cosΘ=1)
         dE = E_th + e
         @inbounds for iq in 1:nq
@@ -111,11 +113,13 @@ function compute_gos(z::Int, tag::String;
                      n_q_out::Int=48, verbose::Bool=true,
                      rel_continuum::Bool=false, dirac_scf::Bool=true,
                      x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
-                     final_state::Symbol=:relaxed)
+                     final_state::Symbol=:relaxed,
+                     dirac_continuum::Bool=false)
     t0 = time()
     ch = prepare_channel(z, tag; rel_continuum=rel_continuum, dirac_scf=dirac_scf,
                           x_alpha=x_alpha, exchange=exchange,
-                          final_state=final_state)
+                          final_state=final_state,
+                          dirac_continuum=dirac_continuum)
     eps_max = eps_max_Ha === nothing ? 10.0 * ch.E_th : eps_max_Ha
     eps_max > 0 || error("eps_max_Ha は正")
     # 和則を評価できる Q の上限: 尾根 Q²/2 とその Compton 幅 ~3pQ が ε 域に収まること
@@ -136,7 +140,7 @@ function compute_gos(z::Int, tag::String;
                           ppw=Float64(get(settings, :ppw, CONT_PPW)),
                           dt_log=Float64(get(settings, :dt_log, CONT_DT_LOG)),
                           sig_thresh=settings.sig_thresh, rel=ch.rel,
-                          progress=verbose)
+                          dirac=ch.dirac, progress=verbose)
 
     # 和則の左辺 ∫ (df/dΔE) dΔE を各 Q で。dΔE = dε なので ε の重みがそのまま使える
     f_sum = [sum(we[ie] * gos[ie, iq] for ie in 1:ne) for iq in 1:n_q_out]

@@ -53,6 +53,65 @@ end
 wigner3j(j1::Int, j2::Int, j3::Int, m1::Int, m2::Int, m3::Int) =
     wigner3j2(2j1, 2j2, 2j3, 2m1, 2m2, 2m3)
 
+"""一般の Wigner 6j 記号 (Racah 式)。**引数は全て 2 倍した整数** (tj = 2j)。
+
+    {j1 j2 j3}
+    {j4 j5 j6}
+
+κ 分解 Dirac の行列要素 (第 6.6 章) に要る。スピノル球面調和関数で角度部を
+組むと、非相対論の [3j]² に加えて {6j}² が 1 つ現れる (Zhang ら 2024 式 41)。
+半整数を扱うので倍角表現、BigInt 有理数 + 平方根で評価する (3j と同じ流儀)。
+
+    {..} = Δ(j1j2j3)Δ(j1j5j6)Δ(j4j2j6)Δ(j4j5j3)
+           Σ_t (−1)^t (t+1)! / [ (t−a1)!(t−a2)!(t−a3)!(t−a4)!
+                                 (b1−t)!(b2−t)!(b3−t)! ]
+    a = 三角形の和、b = 四角形の和、Δ(abc)² = (a+b−c)!(a−b+c)!(−a+b+c)!/(a+b+c+1)!
+
+検証は selftest T23a (既知値 + 直交性 Σ_j3 (2j3+1)(2j6+1){..}² = 1)。"""
+function wigner6j2(tj1::Int, tj2::Int, tj3::Int, tj4::Int, tj5::Int, tj6::Int)
+    # 4 つの三角則。破れていれば 0 (整数性も含めて判定)
+    tri(a, b, c) = (c >= abs(a - b)) && (c <= a + b) && iseven(a + b + c)
+    (tri(tj1, tj2, tj3) && tri(tj1, tj5, tj6) &&
+     tri(tj4, tj2, tj6) && tri(tj4, tj5, tj3)) || return 0.0
+    ft(k) = factorial(big(k))
+    del(a, b, c) = ft((a + b - c) ÷ 2) * ft((a - b + c) ÷ 2) *
+                   ft((-a + b + c) ÷ 2) // ft((a + b + c) ÷ 2 + 1)
+    Δ = del(tj1, tj2, tj3) * del(tj1, tj5, tj6) *
+        del(tj4, tj2, tj6) * del(tj4, tj5, tj3)
+    a1 = (tj1 + tj2 + tj3) ÷ 2
+    a2 = (tj1 + tj5 + tj6) ÷ 2
+    a3 = (tj4 + tj2 + tj6) ÷ 2
+    a4 = (tj4 + tj5 + tj3) ÷ 2
+    b1 = (tj1 + tj2 + tj4 + tj5) ÷ 2
+    b2 = (tj2 + tj3 + tj5 + tj6) ÷ 2
+    b3 = (tj3 + tj1 + tj6 + tj4) ÷ 2
+    s = zero(Rational{BigInt})
+    for t in max(a1, a2, a3, a4):min(b1, b2, b3)
+        d = ft(t - a1) * ft(t - a2) * ft(t - a3) * ft(t - a4) *
+            ft(b1 - t) * ft(b2 - t) * ft(b3 - t)
+        s += (isodd(t) ? -1 : 1) * ft(t + 1) // d
+    end
+    s == 0 && return 0.0
+    return sqrt(Float64(Δ)) * Float64(s)
+end
+
+"""κ 分解 Dirac の角度因子 (2l+1)(2l′+1)(2j′+1)[3j(l′,λ,l;000)]² {6j(j λ j′; l′ ½ l)}²。
+
+`tj`, `tjp` は 2j と 2j′、`l`, `lp` は始状態と終状態の軌道角運動量、`lam` は多重極。
+`occ` (= 2j+1) と (2λ+1) は呼び出し側が掛ける (Zhang ら 2024 式 41 の
+[l, l′, j′, λ] = (2l+1)(2l′+1)(2j′+1)(2λ+1) のうち λ 以外)。
+
+**c → ∞ でこの因子を κ′ (= j′ の 2 択) について足すと、非相対論の
+(2l′+1)[3j(λ,l,l′;000)]² に厳密に戻る** — 6j の直交性
+
+    Σ_{j′} (2j′+1)(2l+1) {j λ j′; l′ ½ l}² = 1
+
+による。これが退化テスト (T23b) の根で、実装中に**(2l′+1) を落としていたのを
+この検査が捕まえた**。"""
+dirac_angular_factor(l::Int, tj::Int, lp::Int, tjp::Int, lam::Int) =
+    (2l + 1) * (2lp + 1) * (tjp + 1) * threej000_sq_c(lam, l, lp) *
+    wigner6j2(tj, 2lam, tjp, 2lp, 1, 2l)^2
+
 """[3j(j_a k j_b; ½, 0, −½)]²。`tja`, `tjb` は 2j、`k` は整数の多重極。
 
 **Dirac の交換に現れる角度因子**。非相対論の [3j(l_a k l_b; 0,0,0)]² に対応するが、

@@ -69,10 +69,15 @@ function eps_setup(pot_ion, r_b, u_b, e::Float64, z::Int, r_core::Float64,
                    q_lo::Float64, q_hi::Float64, l_cap::Int, n_q::Int,
                    ppw::Float64, dt_log::Float64, l_init::Int,
                    sig_thresh::Float64, q_kin_max::Float64;
-                   rel::Union{Nothing,RelCont}=nothing)
+                   rel::Union{Nothing,RelCont}=nothing,
+                   dirac::Union{Nothing,NamedTuple}=nothing)
     # 放出電子の波数。相対論 (第 3.5 章) では k_rel — グリッド密度・部分波上限・
-    # マッチ半径の全てが正しい (短い) 波長基準になる
-    kappa = rel === nothing ? sqrt(2.0 * e) : krel(e, rel.c)
+    # マッチ半径の全てが正しい (短い) 波長基準になる。
+    # `dirac` を渡すと κ 分解 Dirac 連続状態 (第 3.6 章) へ切り替わる。中身は
+    # (G_b, F_b, kappa) = 2 成分規格化した始状態と、その κ
+    c_light = dirac === nothing ? (rel === nothing ? C_LIGHT : rel.c) : dirac.c
+    kappa = (rel === nothing && dirac === nothing) ? sqrt(2.0 * e) :
+            krel(e, c_light)
     r_c = r_core + 2.0
     L_cut = 2.0 * r_c + 2.0 * e * r_c * r_c    # 障壁の転回点 = r_c となる l(l+1)
     l_barrier = floor(Int, sqrt(L_cut))
@@ -82,11 +87,36 @@ function eps_setup(pot_ion, r_b, u_b, e::Float64, z::Int, r_core::Float64,
     lam = 2.0 * pi / kappa                     # 放出電子の波長
     r_match = min(max(r_match_for(pot_ion, e), r_core + 5.0, r_t + 3.0 * lam),
                   400.0)
-    cont = ContinuumSet(V_for(pot_ion, e), e, l_max, r_core, r_match;
-                        q_resolve=q_hi, ppw=ppw, dt_log=dt_log,
-                        z_asym=pot_ion.z_asym, rel=rel)
-    c_ortho, resid_ortho = orthogonalize_l0!(cont, r_b, u_b; l=l_init)
-    rl = RlTable(cont, r_b, u_b, q_lo, q_hi, n_q, l_init)
+    local cont, rl, c_ortho, resid_ortho, resid_l, ok_l
+    if dirac === nothing
+        cont = ContinuumSet(V_for(pot_ion, e), e, l_max, r_core, r_match;
+                            q_resolve=q_hi, ppw=ppw, dt_log=dt_log,
+                            z_asym=pot_ion.z_asym, rel=rel)
+        c_ortho, resid_ortho = orthogonalize_l0!(cont, r_b, u_b; l=l_init)
+        rl = RlTable(cont, r_b, u_b, q_lo, q_hi, n_q, l_init)
+        resid_l = cont.match_resid
+        ok_l = cont.ok
+    else
+        cont = DiracContinuumSet(V_for(pot_ion, e), e, l_max, r_core, r_match, z;
+                                 q_resolve=q_hi, ppw=ppw, dt_log=dt_log,
+                                 z_asym=pot_ion.z_asym, c=dirac.c)
+        # ★格子は `dirac.r_b` を使う (positional の r_b は大成分のみ規格化した
+        #   出荷処方の格子。同じ _dirac_gf から出るので一致するはずだが、
+        #   2 成分側の格子を明示的に使って取り違えを構造的に防ぐ)
+        c_ortho, resid_ortho = orthogonalize_dirac!(cont, dirac.r_b, dirac.G_b,
+                                                    dirac.F_b, dirac.kappa)
+        rl = RlTable(cont, dirac.r_b, dirac.G_b, dirac.F_b, q_lo, q_hi, n_q,
+                     dirac.kappa)
+        # 診断は l 単位に畳む (下流のフィルタが l 添字で書かれているため)。
+        # 残差は同じ l の κ′ の最大、ok は全部 ok のときだけ ok
+        resid_l = zeros(l_max + 1)
+        ok_l = trues(l_max + 1)
+        for ic in eachindex(cont.kappas)
+            li = cont.ls[ic] + 1
+            resid_l[li] = max(resid_l[li], cont.match_resid[ic])
+            ok_l[li] &= cont.ok[ic]
+        end
+    end
     # 部分波の有意性フィルタ (相対寄与 > sig_thresh の l' のみ採用)
     w_ch = [A * maximum(abs2, view(rl.R, ic, :))
             for (ic, (_, _, A)) in enumerate(rl.channels)]
@@ -95,7 +125,7 @@ function eps_setup(pot_ion, r_b, u_b, e::Float64, z::Int, r_core::Float64,
         b_l[lp+1] += w
     end
     significant = b_l ./ max(sum(b_l), 1e-300) .> sig_thresh
-    bad_count = count(significant .& (cont.match_resid .> 1e-4) .& cont.ok)
+    bad_count = count(significant .& (resid_l .> 1e-4) .& ok_l)
     # R(q_hi) の尾の診断 (運動学的上限に一致する場合は打ち切り誤差でない)
     r_tail = 0.0
     if q_hi < 0.999 * q_kin_max
@@ -109,10 +139,10 @@ function eps_setup(pot_ion, r_b, u_b, e::Float64, z::Int, r_core::Float64,
         end
     end
     for li in 1:rl.nL
-        (!significant[li] || !cont.ok[li]) && zero_l!(rl, li - 1)
+        (!significant[li] || !ok_l[li]) && zero_l!(rl, li - 1)
     end
-    sig_ok = significant .& cont.ok
-    mres = any(sig_ok) ? maximum(cont.match_resid[sig_ok]) : 0.0
+    sig_ok = significant .& ok_l
+    mres = any(sig_ok) ? maximum(resid_l[sig_ok]) : 0.0
     return cont, rl, mres, (c_ortho, resid_ortho), l_max, bad_count, r_tail
 end
 
@@ -132,13 +162,16 @@ function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
                     dt_log::Float64, l_init::Int, occ_init::Float64,
                     sig_thresh::Float64;
                     rel::Union{Nothing,RelCont}=nothing,
-                    tr::Union{Nothing,Transverse}=nothing)
-    kappa = rel === nothing ? sqrt(2.0 * e) : krel(e, rel.c)
+                    tr::Union{Nothing,Transverse}=nothing,
+                    dirac::Union{Nothing,NamedTuple}=nothing)
+    kappa = (rel === nothing && dirac === nothing) ? sqrt(2.0 * e) :
+            krel(e, dirac === nothing ? rel.c : dirac.c)
     q_hi = min(k_i + kf, kappa + 15.0 * z + 2.0 * maximum(K_nodes))
     q_lo = max(1e-4, 0.9 * (k_i - kf))
     cont, rl, mres, orec, l_max, bad_count, r_tail =
         eps_setup(pot_ion, r_b, u_b, e, z, r_core, q_lo, q_hi, l_cap, n_q,
-                  ppw, dt_log, l_init, sig_thresh, k_i + kf; rel=rel)
+                  ppw, dt_log, l_init, sig_thresh, k_i + kf; rel=rel,
+                  dirac=dirac)
     # 260805Cl 変更: K 非依存の角度幾何・作業領域を 1 回だけ作る (旧: K ごとに再構築)
     ws = AngWS(k_i, kf, n_x, n_phi, rl.lam_max)
     row = [kf / k_i * angular_integral(ws, rl, K, occ_init; tr=tr)
@@ -225,7 +258,8 @@ function compute_NK(pot_ion, r_b, u_b, E_th::Float64, T0::Float64,
                     l_init::Int=0, occ_init::Float64=2.0,
                     sig_thresh::Float64=1e-8, progress::Bool=false,
                     rel::Union{Nothing,RelCont}=nothing,
-                    transverse::Bool=false)
+                    transverse::Bool=false,
+                    dirac::Union{Nothing,NamedTuple}=nothing)
     eps_max = T0 - E_th
     eps_max <= 0 && error("below threshold")
     transverse && any(!=(0.0), K_nodes) &&
@@ -251,7 +285,7 @@ function compute_NK(pot_ion, r_b, u_b, E_th::Float64, T0::Float64,
         row, mres, orec, lm, bd, rtl = eps_worker(
             pot_ion, r_b, u_b, eps[ie], kf, k_i, z, r_core, K_nodes,
             l_cap, n_x, n_phi, n_q, ppw, dt_log, l_init, occ_init, sig_thresh;
-            rel=rel,
+            rel=rel, dirac=dirac,
             tr=(transverse ? Transverse(E_th + eps[ie], T0) : nothing))
         dNde[ie, :] = row
         match_resid[ie] = mres
@@ -340,6 +374,11 @@ const MODEL_ID = "DHFS-KS23-Dirac-jsplit-fullrange-sym-v2"
 # 260804Cl 追加: スカラー相対論連続状態 (第 3.5 章) を有効にした処方の ID。
 # SRC = Scalar-Relativistic Continuum (Koelling–Harmon 型 + 有限核)
 const MODEL_ID_REL = "DHFS-KS23-DiracB-SRC-jsplit-fullrange-sym-v3"
+# 260807Cl 追加: κ 分解 Dirac 連続状態 + 2 成分行列要素 (第 3.6 章)。SRC (v3) の
+# 上位互換なので**別の基底 ID** を与える — `-KD` を v2 (非相対論連続状態) に
+# 付けると「非相対論なのに相対論の上位版」という矛盾した ID になる。
+# 出荷世代ではないので v4 は名乗らない (v4 は指示書 §5.6 の物理一式)
+const MODEL_ID_KD = "DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v3k"
 
 """処方 ID の唯一の組み立て口。**表示も JSON も必ずここを通す** — 分岐が増えるたびに
 文字列連結を書き足すと、片方だけ古い ID を出す事故が起きる (実際に起こした)。
@@ -350,10 +389,13 @@ const MODEL_ID_REL = "DHFS-KS23-DiracB-SRC-jsplit-fullrange-sym-v3"
   `xc`    交換処方。`:kli` なら -KLI が付き、α は意味を失うので出さない
   `fs`    終状態の処方 (260807Cl)。`:frozen` は -FZ、`:frozen_static` は -FZS。
           既定 `:relaxed` は無印
-  `tr`    横断的 (Møller) 相互作用 (260807Cl)。有効なら -TR"""
+  `tr`    横断的 (Møller) 相互作用 (260807Cl)。有効なら -TR
+  `kd`    κ 分解 Dirac 連続状態 + 小成分行列要素 (260807Cl)。基底 ID ごと
+          `MODEL_ID_KD` に替わる。`rel` (スカラー相対論連続状態) の上位互換なので排他"""
 model_id_of(rel::Bool, dscf::Bool, x_alpha::Float64=X_ALPHA,
-            xc::Symbol=:xalpha, fs::Symbol=:relaxed, tr::Bool=false) =
-    (rel ? MODEL_ID_REL : MODEL_ID) * (dscf ? "-DSCF" : "") *
+            xc::Symbol=:xalpha, fs::Symbol=:relaxed, tr::Bool=false,
+            kd::Bool=false) =
+    (kd ? MODEL_ID_KD : rel ? MODEL_ID_REL : MODEL_ID) * (dscf ? "-DSCF" : "") *
     (xc === :kli ? "-KLI" :
      (x_alpha == 1.0 ? "" : "-Xa$(round(Int, x_alpha * 100))")) *
     (fs === :frozen ? "-FZ" : fs === :frozen_static ? "-FZS" : "") *
@@ -530,10 +572,15 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
                          rel_continuum::Bool=false, dirac_scf::Bool=true,
                          x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
                          final_state::Symbol=:relaxed,
+                         dirac_continuum::Bool=false,
                          rel_override::Union{Nothing,RelCont}=nothing)
     haskey(CHANNELS, tag) || error("unknown channel $tag (K/L1/L2/L3)")
     final_state in (:relaxed, :frozen, :frozen_static) ||
         error("final_state は :relaxed / :frozen / :frozen_static ($final_state)")
+    # κ 分解 Dirac (第 3.6 章) はスカラー相対論 (第 3.5 章) の上位互換。両方
+    # 立てると「どちらの連続状態か」が曖昧になるので排他にする
+    !(dirac_continuum && (rel_continuum || rel_override !== nothing)) ||
+        error("dirac_continuum と rel_continuum は排他 (前者が上位互換)")
     shell, j_lower, occ_init, subshell = CHANNELS[tag]
 
     eth_keV = bote_edge_eV(z, subshell) / 1e3   # 閾値 = Bote 表の吸収端
@@ -586,16 +633,30 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
     rel = rel_override !== nothing ? rel_override :
           (rel_continuum ? RelCont(z) : nothing)
 
+    # ---- κ 分解 Dirac 用の始状態 (第 3.6 章): **2 成分規格化**の (G, F) ----
+    # ⚠ 出荷処方の `u_b` (大成分のみ ∫G²=1) とは振幅が 1/√(1−frac_small) 違う。
+    # 行列要素が 2 成分なら規格化も 2 成分でなければ整合しない。別キャッシュ鍵
+    # ("d2c") にしてあるので、既存の "d" キャッシュはそのまま生きる
+    dirac_cont = nothing
+    if dirac_continuum
+        _, r_b2, G_b2, F_b2, _ = disk_cached(
+            static_field ? (bkey_base..., "fzs", "2c") : (bkey_base..., "2c")) do
+            solve_dirac_bound_2c(v_bound, z; kappa=kap, n_nodes=n_b - l_b - 1)
+        end
+        dirac_cont = (r_b=r_b2, G_b=G_b2, F_b=F_b2, kappa=kap, c=C_LIGHT)
+    end
+
     return (z=z, tag=tag, e0_keV=e0_keV, shell=shell, subshell=subshell,
             occ_init=occ_init, n_b=n_b, l_b=l_b, kappa=kap,
             eth_keV=eth_keV,
             E_th=eth_keV * 1000.0 / HARTREE_EV,     # keV → Ha
             T0=(e0_keV === nothing ? nothing : e0_keV * 1000.0 / HARTREE_EV),
             E_b=E_b, r_b=r_b, u_b=u_b, frac_small=frac_small,
-            ion_pot=ion_pot, rel=rel, dirac_scf=dirac_scf, x_alpha=x_alpha,
+            ion_pot=ion_pot, rel=rel, dirac=dirac_cont,
+            dirac_scf=dirac_scf, x_alpha=x_alpha,
             exchange=exchange, final_state=final_state,
             model_id=model_id_of(rel !== nothing, dirac_scf, x_alpha, exchange,
-                                 final_state))
+                                 final_state, false, dirac_continuum))
 end
 
 "入射エネルギーを伴わない準備 (GOS のように E0 非依存な出口用)"

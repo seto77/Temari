@@ -17,9 +17,9 @@ dependency order, plus the command line. There is no Julia `module`, so
 ```text
 julia -t auto src/ionization.jl selftest
 julia -t auto src/ionization.jl refcheck
-julia -t auto src/ionization.jl      <Z> <channel> <E0_keV> [--quick|--high] [--rel] [--frozen] [--s ...] [--json <path>]
-julia -t auto src/ionization.jl edge <Z> <channel> <E0_keV> [--quick|--high] [--rel] [--frozen] [--transverse] [--json <path>]
-julia -t auto src/ionization.jl gos  <Z> <channel>          [--quick|--high] [--rel] [--frozen] [--epsmax <Ha>] [--qmax <a0^-1>] [--json <path>]
+julia -t auto src/ionization.jl      <Z> <channel> <E0_keV> [--quick|--high] [--rel|--kdirac] [--frozen] [--s ...] [--json <path>]
+julia -t auto src/ionization.jl edge <Z> <channel> <E0_keV> [--quick|--high] [--rel|--kdirac] [--frozen] [--transverse] [--json <path>]
+julia -t auto src/ionization.jl gos  <Z> <channel>          [--quick|--high] [--rel|--kdirac] [--frozen] [--epsmax <Ha>] [--qmax <a0^-1>] [--json <path>]
 julia -t auto src/ionization.jl phase <Z> <eps_eV> [--lmax <N>] [--json <path>]
 julia -t auto src/ionization.jl fx   <Z> [--s s1 s2 ...] [--json <path>]
 ```
@@ -63,13 +63,15 @@ julia -e 'include("src/ionization.jl"); exit(refcheck() < 1e-5 ? 0 : 1)'
 | `--kli` | Replace local Xα exchange with **exact exchange** in the KLI form, and drop the Latter correction — the $-(Z-N+1)/r$ tail then comes out of the physics. Adds `-KLI` to the model id. Works with either SCF, so `--kli` alone gives Dirac + exact exchange and `--kli --nodscf` the non-relativistic comparison. Costs 1.9× the SCF time (Au 56 s, once per element, then cached). It brings $f_x$ and $f_e$ down to the level at which published parameterizations disagree with each other — see [Physics](physics.md#exact-exchange-kli). |
 | `--frozen` | **Exact frozen core**: solve the bound *and* the continuum state in one and the same potential — the neutral atom's KS potential, Latter tail included (`z_asym = 1`) — instead of putting the continuum in the relaxed core-hole ion's field. Adds `-FZ` to the model id. This is the convention of Zhang et al.'s Dirac GOS database ("the potential remains unchanged for the initial and final states"). Because the two states then share a Hamiltonian, they are *exactly* orthogonal and the Gram–Schmidt projection has nothing left to remove. Also skips the ion SCF, so it is cheaper. The bound orbital is bit-identical to the default. |
 | `--frozen-static` | The same frozen core built on the neutral atom's **static** field instead (tail clipped to 0, `z_asym = 0`) — the field the `phase` exit uses. Adds `-FZS`. Differs from `--frozen` by under 0.2 % except right at threshold. |
+| `--kdirac` | **κ-resolved Dirac continuum plus the small-component matrix element.** Solves the coupled radial Dirac equations for each κ instead of the scalar-relativistic one-component reduction, keeps both G and F, and uses $R^\lambda = \int [G_aG_b + F_aF_b] j_\lambda(qr)\,dr$ with the Wigner 6j angular factor. Strictly more than `--rel`, so the two are mutually exclusive; the model id switches to the `-KDIRAC2C-…-v3k` base. Matters for heavy elements: it moves the Au L3 GOS 8 % toward Zhang et al.'s Dirac database and shrinks the disagreement across six channels from 11.2 % to 4.0 %. Roughly 2× the partial waves and a costlier integrator. |
 | `--transverse` | Add the **transverse (Møller) interaction** to the interaction kernel: $1/q^4 \to 1/q^4 + \beta_t^2 (\Delta E/\hbar c)^2 / [q^2 (q^2 - (\Delta E/\hbar c)^2)^2]$. The matrix elements are untouched. Adds `-TR`. **`edge` exit only** — the mixed form for the F(s) MDFF ($Q_+ \neq Q_-$) is a separate prescription decision and is not implemented. Worth a few percent at 200–300 keV, and it largely removes the E₀ drift of σ_own/σ_Bote. |
 | `--s s1 s2 ...` | Explicit s nodes in Å⁻¹, replacing the default grid. Consumes every following argument until the next `--`. F(s) exit only — `edge` evaluates K = 0 alone. |
 | `--json <path>` | Write the full result object to `<path>` as JSON. |
 
-`--frozen`, `--frozen-static` and `--transverse` are all **off by default**; the
-shipped prescription is unchanged and bit-identical. Measurements for both are in
-`docs/frozen_core_and_transverse_2026-08-07.md`.
+`--frozen`, `--frozen-static`, `--transverse` and `--kdirac` are all **off by
+default**; the shipped prescription is unchanged and bit-identical. Measurements
+live in `docs/frozen_core_and_transverse_2026-08-07.md` and
+`docs/kappa_dirac_continuum_2026-08-07.md`.
 
 The two model ids are printed at the start of every run and stored in the JSON
 output; they identify the prescription, not the quadrature.

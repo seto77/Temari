@@ -368,6 +368,282 @@ function ContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
     return ContinuumSet(eps, kappa, r_int, u_int, w_int, resid, collect(ok), delta)
 end
 
+# ====================================================================
+# 第 3.6 章  κ 分解 Dirac 連続状態 (260807Cl 追加、Julia 版のみ)
+# ====================================================================
+# 第 3.5 章 (SRC) は Dirac 方程式から κ 依存部 (スピン軌道) を落とし、小成分を
+# 消去した 1 成分の方程式を解いていた。本章は**落とさない** — 連立動径 Dirac
+#
+#   dG/dr = −(κ/r)G + [2c + (ε−V)/c] F
+#   dF/dr = +(κ/r)F − [(ε−V)/c] G
+#
+# を κ ごとに解き、大成分 G と小成分 F の両方を保持する。同じ l に対して
+# κ = −(l+1) (j = l+½) と κ = +l (j = l−½) の 2 本が別の解になるので、
+# 部分波の本数は約 2 倍になる。これが要るのは 2 つの理由から:
+#
+#   * **行列要素の小成分** — 遷移行列要素は R^λ = ∫[G_a G_b + F_a F_b] j_λ(qr) dr
+#     (Zhang ら 2024 式 40)。我々は大成分のみだった。Au 2p3/2 では小成分が
+#     ノルムの 1.9 %、1s では 4.7 % を占める
+#   * **スピン軌道分裂した終状態** — 重元素では j = l±½ の位相シフトが目に見えて
+#     違う。SRC は両者の平均しか持てない
+#
+# ---- 規格化 (エネルギー規格化 ⟨ε|ε′⟩ = δ(ε−ε′)) ------------------------
+# 漸近形 G → A sin θ、F → A b cos θ、b = √(ε/(ε+2c²)) に対し
+#   ∫[G G′ + F F′]dr → A²(1+b²)(π/2)δ(k−k′)、δ(k−k′) = (dε/dk)δ(ε−ε′)、
+#   dε/dk = k c²/W  (W = ε + c²)
+# を課すと
+#   **A = √( (ε + 2c²) / (π k c²) ) = √(2/(πk)) · √(1 + ε/(2c²))**
+# 非相対論極限で √(2/πk) に戻る。これは第 3.5 章の `norm2c=true` と同一で、
+# **2 成分の行列要素を使うならこちらが正しい** (`norm2c=false` の一成分整合は
+# 「束縛も大成分のみ」と対称にするための折衷だった)。
+#
+# ---- 漸近マッチ --------------------------------------------------------
+# 大成分 G の末尾を第 3.5 章と同じ参照ペア (F_λ, G_λ) に最小二乗フィットする。
+# η_rel = −z_a(1+ε/c²)/k、λ(λ+1) = l(l+1) − z_a²/c²。κ 依存性は**解いた方程式**
+# から出るので、参照の次数は l 基準でよい (差は (z_a/c)² ~ 5e-5)。
+#
+# ---- 原点の種 ----------------------------------------------------------
+# G = r^s と置き、**F は第 1 式そのものから**出す:
+#
+#     F = (s + κ) G / [ r (2c + (ε − V(r))/c) ]
+#
+# この 1 本で 2 つの領域を跨げる。r ≪ Z/(2c²) では分母が Z/(cr) に支配され
+# F/G = c(s+κ)/Z — 点核 Dirac の指標方程式の解そのもの (s = γ = √(κ²−(Z/c)²))。
+# r ≫ Z/(2c²) では分母が 2c になり、自由粒子の F/G = (s+κ)/(2cr) に落ちる。
+# ⚠ **「F/G = c(γ+κ)/Z を固定値で使う」のは誤り** — 高 l では種の位置が
+# 深い Coulomb 域の外に出るので、κ>0 で F を 2 桁以上過大に置くことになる。
+# c→∞ でも発散する (この形なら 1/c で 0 に落ちる)。
+#
+# 指数 s は領域で選ぶ: Coulomb 支配なら γ、遠心力支配なら l+1。どちらにせよ
+# 不正則解の混入は外向き積分で r^{−2γ} で減衰するので即座に洗い流される。
+#
+# 種の位置は非相対論版と同じ「r^{l+1} が e^{−60} になる半径」。ただし RK4 は
+# 1 ステップの増幅 e^{(l+1)dt} が大きいと精度を落とすので、A セグメントの
+# 対数刻みを (l_max+1)·dt ≤ 0.5 に絞る (B・C は影響を受けない)。
+
+"""1 つの ε について κ 分解 Dirac 連続状態を解いて保持 (第 3.6 章)。
+
+`kappas` の並びは l 昇順、同じ l の中では κ = −(l+1) (j=l+½) → κ = +l (j=l−½)。
+`G_int` / `F_int` は行列要素領域 r ≤ r_core の大成分と小成分で、エネルギー
+規格化済み。`w_int` は `ContinuumSet` と**同じ** Simpson 重み (c→∞ の比較を
+格子由来の差なしで行うため)。"""
+struct DiracContinuumSet
+    eps::Float64
+    k::Float64                       # 相対論的波数 k_rel
+    c::Float64
+    kappas::Vector{Int}
+    ls::Vector{Int}                  # κ に対応する軌道角運動量 l
+    tjs::Vector{Int}                 # 2j (= 2|κ| − 1)
+    r_int::Vector{Float64}
+    G_int::Matrix{Float64}           # (nch × n_int)
+    F_int::Matrix{Float64}
+    w_int::Vector{Float64}
+    match_resid::Vector{Float64}
+    ok::Vector{Bool}
+    delta::Vector{Float64}           # 短距離位相シフト δ_κ [rad]
+end
+
+"κ → (l, 2j)。κ<0 は j=l+½ で l=−κ−1、κ>0 は j=l−½ で l=κ。2j = 2|κ|−1 は共通"
+kappa_l(kap::Int) = kap < 0 ? -kap - 1 : kap
+kappa_tj(kap::Int) = 2 * abs(kap) - 1
+
+"l_max までの κ の並び (l 昇順、同じ l では j=l+½ → j=l−½)"
+function kappa_list(l_max::Int)
+    ks = Int[]
+    for l in 0:l_max
+        push!(ks, -(l + 1))                    # j = l + ½
+        l >= 1 && push!(ks, l)                 # j = l − ½
+    end
+    return ks
+end
+
+"""(G, F) を r[i] → r[i+1] へ RK4 で 1 ステップ。V は端点と**真の中点**で与える
+(束縛側 `_dirac_rk4_step` は中点を線形補間していて、振動する連続解では
+そこが誤差の主因になる)。"""
+@inline function _dirac_rk4_c(ra::Float64, rb::Float64, va::Float64, vm::Float64,
+                              vb::Float64, eps::Float64, G0::Float64, F0::Float64,
+                              kap::Float64, c::Float64)
+    rhsG(rr, vv, G, F) = -(kap / rr) * G + (2.0 * c + (eps - vv) / c) * F
+    rhsF(rr, vv, G, F) = (kap / rr) * F - ((eps - vv) / c) * G
+    h = rb - ra
+    rm = (ra + rb) / 2.0
+    k1G = rhsG(ra, va, G0, F0);              k1F = rhsF(ra, va, G0, F0)
+    g2 = G0 + h / 2.0 * k1G;  f2 = F0 + h / 2.0 * k1F
+    k2G = rhsG(rm, vm, g2, f2);              k2F = rhsF(rm, vm, g2, f2)
+    g3 = G0 + h / 2.0 * k2G;  f3 = F0 + h / 2.0 * k2F
+    k3G = rhsG(rm, vm, g3, f3);              k3F = rhsF(rm, vm, g3, f3)
+    g4 = G0 + h * k3G;        f4 = F0 + h * k3F
+    k4G = rhsG(rb, vb, g4, f4);              k4F = rhsF(rb, vb, g4, f4)
+    return (G0 + h / 6.0 * (k1G + 2k2G + 2k3G + k4G),
+            F0 + h / 6.0 * (k1F + 2k2F + 2k3F + k4F))
+end
+
+function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
+                           r_match::Float64, z::Int;
+                           q_resolve::Float64=0.0, dt_log::Float64=CONT_DT_LOG,
+                           ppw::Float64=CONT_PPW, eta_bessel::Float64=ETA_BESSEL,
+                           z_asym::Float64=1.0, c::Float64=C_LIGHT,
+                           n_sub::Int=4)
+    k = krel(eps, c)
+    # ---- グリッド: ContinuumSet と同一の 3 セグメント構成 ----
+    # A だけ RK4 の増幅率のために刻みを絞る (章頭参照)。l_max が小さいときは
+    # dt_log そのままなので、非相対論版との比較は格子差なしで行える
+    dtA = min(dt_log, 0.5 / (l_max + 1))
+    rA0 = 1e-6
+    k_tot = k + q_resolve
+    rA1 = max(min(2.0 * pi / (ppw * k_tot) / dt_log, r_core / 2.0, 1.0), 1e-4)
+    nA = ceil(Int, (log(rA1) - log(rA0)) / dtA)
+    tA = log(rA0) .+ dtA .* (0:nA-1)
+    rA = exp.(tA)
+    drB = 2.0 * pi / (ppw * k_tot)
+    nB = ceil(Int, (r_core - rA[end]) / drB) + 1
+    rB = rA[end] .+ drB .* (1:nB)
+    k_eff = sqrt(k^2 + 4.0 / max(r_core, 0.3))
+    drC = 2.0 * pi / (ppw * k_eff)
+    nC = ceil(Int, (r_match - rB[end]) / drC) + 9
+    rC = rB[end] .+ drC .* (1:nC)
+
+    r = vcat(rA, rB, rC)                       # 1 本に連結して RK4 で通す
+    n = length(r)
+    v = pot_V.(r)
+    # ★区間内を n_sub 分割して RK4 を刻む。**格子そのものは変えない**ので
+    #   r_int も Simpson 重みも非相対論版と同一のまま、誤差だけ 1/n_sub⁴ に落ちる。
+    #   必要な理由: 同じ格子だと RK4 は Numerov より 6-70 倍粗い (自由粒子で実測)。
+    #   Numerov は y″ = Wy 専用で誤差定数が桁違いに小さく、連立 1 階系には使えない。
+    #   分割しないと c→∞ の退化残差 (1.1e-3) が物理効果 (2.6e-3) と同程度になり、
+    #   構造検査として成立しない
+    nf = (n - 1) * n_sub + 1
+    rf = zeros(nf)
+    @inbounds for i in 1:n-1, j in 0:n_sub-1
+        rf[(i-1)*n_sub+j+1] = r[i] + (r[i+1] - r[i]) * j / n_sub
+    end
+    rf[nf] = r[n]
+    vf = pot_V.(rf)
+    vmf = [pot_V((rf[i] + rf[i+1]) / 2.0) for i in 1:nf-1]
+
+    kappas = kappa_list(l_max)
+    nch = length(kappas)
+    Gall = zeros(nch, n)
+    Fall = zeros(nch, n)
+    zf = Float64(z)
+    for (ic, kap) in enumerate(kappas)
+        kapf = Float64(kap)
+        lp = kappa_l(kap)
+        gam = sqrt(max(kapf * kapf - (zf / c)^2, 1e-12))
+        # 種を蒔く位置: r^{l+1} が e^{−60} になる半径 (下は格子の左端で頭打ち)
+        i0 = clamp(searchsortedfirst(r, exp(-60.0 / (lp + 1))), 1, n - 2)
+        rs = r[i0]
+        # 指数は領域で選ぶ: Coulomb 支配 (r ≪ Z/2c²) なら γ、遠心力支配なら l+1
+        s = rs < zf / (2.0 * c * c) ? gam : Float64(lp + 1)
+        g = 1e-30
+        f = (s + kapf) * g / (rs * (2.0 * c + (eps - v[i0]) / c))
+        Gall[ic, i0] = g
+        Fall[ic, i0] = f
+        j0 = (i0 - 1) * n_sub + 1              # 細分格子での種の位置
+        @inbounds for jf in j0:nf-1
+            g, f = _dirac_rk4_c(rf[jf], rf[jf+1], vf[jf], vmf[jf], vf[jf+1],
+                                eps, g, f, kapf, c)
+            if abs(g) > 1e250 || abs(f) > 1e250      # 発散前にまとめてリスケール
+                sc = 1e-200
+                g *= sc; f *= sc
+                @inbounds for jj in i0:((jf - 1) ÷ n_sub + 1)
+                    Gall[ic, jj] *= sc
+                    Fall[ic, jj] *= sc
+                end
+            end
+            if (jf % n_sub) == 0               # 元の格子点に着いたら記録
+                ii = jf ÷ n_sub + 1
+                Gall[ic, ii] = g
+                Fall[ic, ii] = f
+            end
+        end
+    end
+
+    # ---- エネルギー規格化: 大成分の末尾 N_FIT 点を (F_λ, G_λ) にフィット ----
+    r_fit = r[end-N_FIT+1:end]
+    eta = -z_asym * (1.0 + eps / (c * c)) / k
+    x_fit = k .* r_fit
+    Cl = zeros(nch)
+    ok = trues(nch)
+    resid = zeros(nch)
+    delta = zeros(nch)
+    use_bessel = abs(eta) < eta_bessel
+    jl_buf = zeros(l_max + 1)
+    yl_buf = zeros(l_max + 1)
+    Fb = zeros(N_FIT, l_max + 1)
+    Gb = zeros(N_FIT, l_max + 1)
+    if use_bessel                              # 中性場 (z_asym = 0) / 試験経路
+        for (i, x) in enumerate(x_fit)
+            sph_jl_all!(jl_buf, l_max, x)
+            sph_yl_all!(yl_buf, l_max, x)
+            @. Fb[i, :] = x * jl_buf
+            @. Gb[i, :] = -x * yl_buf
+        end
+    else
+        for li in 1:l_max+1                    # 非整数次数は第 3.5 章と同じ
+            lamL = (-1.0 + sqrt((2.0 * (li - 1) + 1.0)^2 -
+                                4.0 * z_asym^2 / (c * c))) / 2.0
+            Fw, Gw = coulomb_fg_window(lamL, eta, x_fit)
+            Fb[:, li] = Fw
+            Gb[:, li] = Gw
+        end
+    end
+    for ic in 1:nch
+        li = kappa_l(kappas[ic]) + 1
+        gfit = Gall[ic, end-N_FIT+1:end]
+        fmax = maximum(abs.(gfit))
+        if fmax == 0.0 || !isfinite(fmax)
+            ok[ic] = false
+            continue
+        end
+        M = hcat(Fb[:, li], Gb[:, li])
+        ab = M \ (gfit ./ fmax)
+        Cl[ic] = hypot(ab[1], ab[2]) * fmax
+        delta[ic] = atan(ab[2], ab[1])
+        pred = (M * ab) .* fmax
+        nrm = norm(pred)
+        resid[ic] = norm(gfit .- pred) / (nrm > 0 ? nrm : 1.0)
+    end
+    ok .&= Cl .> 0
+    # 2 成分エネルギー規格化 (章頭の導出)。c→∞ で √(2/πk) に戻る
+    amp = sqrt(2.0 / (pi * k) * (1.0 + eps / (2.0 * c * c)))
+    scale = [ok[ic] ? amp / Cl[ic] : 0.0 for ic in 1:nch]
+
+    # ---- 行列要素用の格子 (r ≤ r_core) と Simpson 重み (ContinuumSet と同一) ----
+    nA_keep = count(<=(r_core), rA)
+    nB_keep = count(<=(r_core + 1e-12), rB)
+    r_int = vcat(rA[1:nA_keep], rB[1:nB_keep])
+    idx = vcat(1:nA_keep, nA+1:nA+nB_keep)
+    G_int = Gall[:, idx] .* scale
+    F_int = Fall[:, idx] .* scale
+    wtA = simpson_weights(nA_keep, dtA) .* rA[1:nA_keep]
+    wtB = simpson_weights(nB_keep, drB)
+    w_int = vcat(wtA, wtB)
+    if nA_keep > 0 && nB_keep > 0
+        gap = rB[1] - rA[nA_keep]
+        w_int[nA_keep] += gap / 2.0
+        w_int[nA_keep+1] += gap / 2.0
+    end
+    return DiracContinuumSet(eps, k, c, kappas, kappa_l.(kappas), kappa_tj.(kappas),
+                             r_int, G_int, F_int, w_int, resid, collect(ok), delta)
+end
+
+"""κ 分解 Dirac 連続波を始状態と直交化する (第 3.6 章)。
+
+重なりは 2 成分の内積 ∫[G_b G_c + F_b F_c]dr で、**始状態と同じ κ の 1 本だけ**が
+対象 (他の κ′ は角度部で直交している)。戻り値 (除いた重なり c, 射影後の残差)。"""
+function orthogonalize_dirac!(cont::DiracContinuumSet, r_b, G_b, F_b, kap::Int)
+    ic = findfirst(==(kap), cont.kappas)
+    ic === nothing && return 0.0, 0.0
+    gb = u_on_grid(r_b, G_b, cont.r_int)
+    fb = u_on_grid(r_b, F_b, cont.r_int)
+    ov(g, f) = sum(cont.w_int .* (gb .* g .+ fb .* f))
+    cc = ov(view(cont.G_int, ic, :), view(cont.F_int, ic, :))
+    cont.G_int[ic, :] .-= cc .* gb
+    cont.F_int[ic, :] .-= cc .* fb
+    return cc, ov(view(cont.G_int, ic, :), view(cont.F_int, ic, :))
+end
+
 "束縛軌道 u(r) を別グリッドへ log-spline 補間 (定義域外は 0、Python 版 _u_on_grid)"
 function u_on_grid(r_b::AbstractVector, u_b::AbstractVector, r_dst::AbstractVector)
     sp = CubicSplineNAK(log.(r_b), collect(u_b))

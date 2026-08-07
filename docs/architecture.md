@@ -28,9 +28,9 @@ concatenating the files in include order reproduces a single-file build.
 | `l0_numerics.jl` | L0 | constants, accuracy knobs, splines, Gauss–Legendre, spherical Bessel (scalar and 8-lane), Coulomb functions, Numerov |
 | `l0_json.jl` | L0 | the minimal JSON reader/writer that stands in for a stdlib that does not exist |
 | `l1_atomic.jl` | L1 | self-consistent HFS — non-relativistic, or a **full Dirac SCF** (DHFS) resolved in κ with the small component in the density — with local Xα exchange or **exact exchange in the KLI form** (no Latter correction); bound Schrödinger and Dirac states, relaxed core-hole potential |
-| `l2_continuum.jl` | L2 | `ContinuumSet` — distorted waves, energy normalization, Coulomb matching, orthogonalization, the scalar-relativistic option |
-| `l3_radial.jl` | L3 | `RlTable` — the multipole integrals and their PCHIP interpolation |
-| `l4_angular.jl` | L4 | 3j symbols, Legendre recursion, MDFF assembly, and the interaction kernel — Coulomb (longitudinal) alone, or with the **transverse (Møller)** term added |
+| `l2_continuum.jl` | L2 | `ContinuumSet` — distorted waves, energy normalization, Coulomb matching, orthogonalization, the scalar-relativistic option; `DiracContinuumSet` — the **κ-resolved** coupled radial Dirac solution keeping both components |
+| `l3_radial.jl` | L3 | `RlTable` — the multipole integrals and their PCHIP interpolation, from either continuum (the Dirac one folds $G_aG_b+F_aF_b$ before integrating, so it returns the same struct) |
+| `l4_angular.jl` | L4 | 3j and **6j** symbols, Legendre recursion, MDFF assembly, and the interaction kernel — Coulomb (longitudinal) alone, or with the **transverse (Møller)** term added |
 | `l5_channel.jl` | L5 | everything an exit shares: the channel table, the SCF/Dirac caches, `prepare_channel` (including the `:relaxed` / `:frozen` / `:frozen_static` final-state prescription), the ε quadrature, the per-ε driver, the N(K) contraction, Bote–Salvat absolute cross sections |
 | `l5_exit_edx.jl` | L5 | the F(s, E₀) exit — K on an s grid, reported as N(K)/N(0) |
 | `l5_exit_eels.jl` | L5 | the dσ/dΔE exit — K = 0 only, reported as an edge shape plus the stopping-power contraction |

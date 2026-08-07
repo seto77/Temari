@@ -1013,6 +1013,31 @@ function solve_dirac_bound(pot_V, z::Int; kappa::Int=-1, n_nodes::Int=0,
     return E, r2, u, frac_small
 end
 
+"""束縛 Dirac 解を**2 成分規格化** ∫(G²+F²)dr = 1 で返す (260807Cl 追加)。
+戻り値 `(E, r2, G, F, frac_small)`。
+
+`solve_dirac_bound` (電離処方の始状態) との違いは規格化だけ:
+
+  * `solve_dirac_bound`  大成分のみ ∫G²dr = 1。小成分を捨てる代わりに振幅を
+    1/√(1−frac_small) だけ持ち上げている (v3 処方)
+  * こちら             真の 2 成分規格化。**小成分を含む行列要素**
+    R^λ = ∫[G_aG_b + F_aF_b]j_λ dr (第 3.6 章) を使うならこちらが正しい
+
+Au 1s では frac_small = 4.7 %、2p3/2 では 1.9 % なので、両者は振幅で 1-2 %
+違う。どちらが正しいかは**どの行列要素を使うか**で決まり、混ぜてはいけない。"""
+function solve_dirac_bound_2c(pot_V, z::Int; kappa::Int=-1, n_nodes::Int=0,
+                              r0::Float64=GRID_R0, rmax::Float64=BOUND_RMAX,
+                              dt::Float64=GRID_DT, tol::Float64=EIG_TOL,
+                              e_lo::Union{Nothing,Float64}=nothing,
+                              e_hi::Float64=-1e-4, c::Float64=C_LIGHT)
+    E, r2, G, F = _dirac_gf(pot_V, z, kappa, n_nodes, r0, rmax, dt, tol,
+                            e_lo, e_hi, c)
+    norm2 = trapz(G .* G .+ F .* F, r2)
+    frac_small = trapz(F .* F, r2) / norm2
+    s = 1.0 / sqrt(norm2)
+    return E, r2, G .* s, F .* s, frac_small
+end
+
 """Dirac 軌道を**呼び出し側の全格子** `r_full` 上へ、2 成分規格化
 ∫(G²+F²)dr = 1 で返す (Dirac SCF の密度用)。戻り値 `(E, G, F)`。
 

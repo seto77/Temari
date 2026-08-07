@@ -23,6 +23,7 @@ function compute_channel(z::Int, tag::String, e0_keV::Float64;
                          rel_continuum::Bool=false, dirac_scf::Bool=true,
                          x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
                          final_state::Symbol=:relaxed,
+                         dirac_continuum::Bool=false,
                          rel_override::Union{Nothing,RelCont}=nothing)
     # rel_continuum=true: 放出電子をスカラー相対論で解く (第 3.5 章、モデル v3)。
     # final_state=:frozen: 束縛と連続を同一 (中性) ポテンシャルで解く (l5_channel.jl)
@@ -33,7 +34,8 @@ function compute_channel(z::Int, tag::String, e0_keV::Float64;
     t0 = time()
     ch = prepare_channel(z, tag, e0_keV; rel_continuum=rel_continuum,
                          dirac_scf=dirac_scf, x_alpha=x_alpha, exchange=exchange,
-                         final_state=final_state, rel_override=rel_override)
+                         final_state=final_state, dirac_continuum=dirac_continuum,
+                         rel_override=rel_override)
     K_nodes = 4.0 * pi .* s_nodes .* BOHR_ANG   # s [Å⁻¹] → K [a0⁻¹] (4π 規約!)
 
     N, diag = compute_NK(ch.ion_pot, ch.r_b, ch.u_b, ch.E_th, ch.T0, K_nodes, z;
@@ -44,7 +46,7 @@ function compute_channel(z::Int, tag::String, e0_keV::Float64;
                          ppw=Float64(get(settings, :ppw, CONT_PPW)),
                          dt_log=Float64(get(settings, :dt_log, CONT_DT_LOG)),
                          l_init=ch.l_b, occ_init=ch.occ_init, progress=verbose,
-                         rel=ch.rel)
+                         rel=ch.rel, dirac=ch.dirac)
     return Dict{String,Any}(
         "model_id" => ch.model_id,
         "z" => z, "channel" => tag, "e0_keV" => e0_keV,

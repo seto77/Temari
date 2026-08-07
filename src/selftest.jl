@@ -20,6 +20,10 @@ PureCoulomb() = PureCoulomb(1.0)
 V_for(p::PureCoulomb, eps) = r -> -1.0 / r
 r_match_for(p::PureCoulomb, eps; kw...) = 30.0
 
+"自由粒子テスト用: V ≡ 0 (T2 / T23c)。呼び出し可能オブジェクトとして渡す"
+struct PureZero end
+(::PureZero)(r) = 0.0
+
 """T0c 用の高精度参照: BigFloat 512 bit で Miller 下方漸化 → j_0 で規格化。
 
 Float64 版と同じアルゴリズムだが、規格化の悪条件 (~ε/|sin x|) が 512 bit では
@@ -742,6 +746,93 @@ function selftest()
         @printf("[T22b] 式 42 (双極子・厳密化) との最大差 = %.2e (18 ケース、x = 0.03-9.6e3)\n",
                 worst)
         @assert worst < 2e-3 "T22b FAIL: 横断項が式 42 と合わない (核の形が違う)"
+    end
+
+    # ---- T23: κ 分解 Dirac 連続状態 + 小成分の行列要素 (第 3.6 章) ----
+    # (a) 6j 記号そのもの — 既知の閉形式 {a b c; 0 c b} と直交性
+    # (b) **角度因子の退化** — Σ_{κ′} で非相対論の (2l′+1)[3j]² に戻ること。
+    #     これが実装中に (2l′+1) の欠落を捕まえた検査
+    # (c) 自由粒子で大成分が Riccati-Bessel、位相シフトが 0
+    # (d) **c → ∞ で GOS 面が非相対論経路へ退化** (T8 と同じ思想の総合検査 —
+    #     ソルバ・規格化・直交化・2 成分行列要素・角度因子を一度に通す)
+    let
+        # (a) 閉形式 {a b c; 0 c b} = (−1)^(a+b+c)/√((2b+1)(2c+1))
+        w6 = 0.0
+        for tb in 1:7, tc in 1:7, ta in 0:2:8
+            (tc >= abs(ta - tb) && tc <= ta + tb && iseven(ta + tb + tc)) || continue
+            v = wigner6j2(ta, tb, tc, 0, tc, tb)
+            ref = (-1.0)^((ta + tb + tc) ÷ 2) / sqrt((tb + 1.0) * (tc + 1.0))
+            w6 = max(w6, abs(v - ref))
+        end
+        # 直交性 Σ_{j3} (2j3+1)(2j6+1) {j1 j2 j3; j4 j5 j6}² = 1
+        wo = 0.0
+        for (tj1, tj2, tj4, tj5, tj6) in ((3, 4, 5, 2, 3), (7, 6, 5, 4, 3),
+                                          (2, 2, 2, 2, 2), (5, 4, 3, 2, 3))
+            s = sum((t + 1) * (tj6 + 1) * wigner6j2(tj1, tj2, t, tj4, tj5, tj6)^2
+                    for t in 0:60)
+            wo = max(wo, abs(s - 1.0))
+        end
+        @printf("[T23a] 6j: 閉形式との最大差 %.2e / 直交性 Σ−1 の最大 %.2e\n", w6, wo)
+        @assert w6 < 1e-13 "T23a FAIL: 6j が閉形式と合わない"
+        @assert wo < 1e-13 "T23a FAIL: 6j の直交性が壊れている"
+
+        # (b) 角度因子の退化 (κ′ = j′ の 2 択について足す)
+        wd = 0.0
+        for l in 0:5, lam in 0:7, lp in 0:9, tj in (2l - 1, 2l + 1)
+            tj < 1 && continue
+            s = sum(tjp < 1 ? 0.0 : dirac_angular_factor(l, tj, lp, tjp, lam)
+                    for tjp in (2lp - 1, 2lp + 1))
+            wd = max(wd, abs(s - (2lp + 1) * threej000_sq_c(lam, l, lp)))
+        end
+        @printf("[T23b] Dirac 角度因子 Σ_κ′ → (2l′+1)[3j]²: 最大差 %.2e\n", wd)
+        @assert wd < 1e-12 "T23b FAIL: 角度因子が非相対論へ退化しない"
+    end
+
+    let eps_t = 2.0, lmax = 6
+        # (c) 自由粒子: 大成分は Riccati-Bessel、短距離位相は厳密に 0
+        cont = DiracContinuumSet(PureZero(), eps_t, lmax, 6.0, 30.0, 1;
+                                 q_resolve=5.0, z_asym=0.0)
+        k = krel(eps_t, C_LIGHT)
+        amp = sqrt(2.0 / (pi * k) * (1.0 + eps_t / (2.0 * C_LIGHT^2)))
+        jlb = zeros(lmax + 1)
+        eG = 0.0
+        for ic in eachindex(cont.kappas)
+            l = cont.ls[ic]
+            ex = [(sph_jl_all!(jlb, lmax, k * rr); amp * k * rr * jlb[l+1])
+                  for rr in cont.r_int]
+            m = maximum(abs, ex)
+            m < 1e-12 && continue
+            eG = max(eG, maximum(abs.(cont.G_int[ic, :] .- ex)) / m)
+        end
+        b_ref = sqrt(eps_t / (eps_t + 2.0 * C_LIGHT^2))
+        @printf("[T23c] 自由粒子 Dirac (κ %d 本): 大成分 max 相対誤差 %.2e / max|δ_κ| %.2e / 小成分比 ~%.1e (理論 %.1e)\n",
+                length(cont.kappas), eG, maximum(abs, cont.delta),
+                maximum(abs, cont.F_int[1, :]) / maximum(abs, cont.G_int[1, :]),
+                b_ref)
+        @assert eG < 1e-5 "T23c FAIL: Dirac 連続状態が Riccati-Bessel と合わない"
+        @assert maximum(abs, cont.delta) < 1e-4 "T23c FAIL: 自由粒子で位相シフトが 0 でない"
+    end
+
+    let z = 1, eps_g = [0.5, 2.0, 8.0],
+        qg = exp.(range(log(0.3), log(6.0), length=9))
+        # (d) c→∞ の総合退化。水素 1s + 純 Coulomb 場 (SCF を通さない)
+        rb = exp.(range(log(1e-6), log(40.0), length=2400))
+        gb = 2.0 .* rb .* exp.(-rb)             # u = 2r e^{−r} (∫u² = 1)
+        fb = zeros(length(rb))                  # 非相対論極限では小成分ゼロ
+        gos_n, _ = gos_surface(PureCoulomb(), rb, gb, 1.0, z, eps_g, qg, 0, 1.0;
+                               l_cap=8, n_q=160)
+        dev(cc) = begin
+            g, _ = gos_surface(PureCoulomb(), rb, gb, 1.0, z, eps_g, qg, 0, 1.0;
+                               l_cap=8, n_q=160,
+                               dirac=(r_b=rb, G_b=gb, F_b=fb, kappa=-1, c=cc))
+            maximum(abs.(g .- gos_n) ./ max.(abs.(gos_n), 1e-300))
+        end
+        d_inf = dev(C_LIGHT * 1e4)
+        d_phys = dev(C_LIGHT)
+        @printf("[T23d] GOS の c→∞ 退化: %.2e (消える) / 物理 c %.2e (残る) — 比 %.0f\n",
+                d_inf, d_phys, d_phys / d_inf)
+        @assert d_inf < 2e-4 "T23d FAIL: c→∞ で非相対論 GOS へ退化しない"
+        @assert d_phys > 20 * d_inf "T23d FAIL: 物理の c で相対論効果が出ていない"
     end
 
     # ---- T13b: 交換係数が二重に掛かっていないこと ----

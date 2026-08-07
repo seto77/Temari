@@ -202,6 +202,82 @@ function RlTable(cont::ContinuumSet, r_b, u_b, q_lo::Float64, q_hi::Float64,
     return RlTable(collect(q), nL, channels, lam_max, R, interp)
 end
 
+"""κ 分解 Dirac 版の R テーブル (260807Cl 追加、第 3.6 章)。
+
+    R^λ_{κκ′}(Q) = ∫ [G_b(r) G_{εκ′}(r) + F_b(r) F_{εκ′}(r)] j_λ(Qr) dr
+
+**戻り値は通常の `RlTable`** なので、`legendre_sum` 以降 (角度積分・N(K) 縮約・
+GOS 組み立て) は 1 行も変わらない。仕掛けは 2 つ:
+
+  * 被積分関数を先に畳む — `gw[ic, i] = w_i (G_b G_c + F_b F_c)` を κ′ ごとに
+    作ってしまえば、あとは非相対論版と**同じ形**の Σ_i gw·j_λ(Q r_i) になる
+  * チャネルの重み A に Dirac の角度因子を入れる
+    A = (2l+1)(2j′+1)(2λ+1)[3j(l′λl;000)]² {6j(j λ j′; l′ ½ l)}²
+    `channels` の第 1 要素は l′ のまま (有意性フィルタ・`zero_l!` がそのまま効く)。
+    **同じ l′ を 2 本の κ′ が共有する** — 別チャネルとして並ぶだけ
+
+⚠ 求積は素直な逐次和 (非相対論版の SIMD/タイル最適化は入れていない)。
+この経路は比較・検証用で、出荷テーブルには使わないため。"""
+function RlTable(cont::DiracContinuumSet, r_b, G_b, F_b, q_lo::Float64,
+                 q_hi::Float64, n_q::Int, kap_init::Int)
+    l_init = kappa_l(kap_init)
+    tj_init = kappa_tj(kap_init)
+    gb = u_on_grid(r_b, G_b, cont.r_int)
+    fb = u_on_grid(r_b, F_b, cont.r_int)
+    q = exp.(range(log(q_lo), log(q_hi), length=n_q))
+    nch_c = length(cont.kappas)
+    nL = maximum(cont.ls) + 1
+    channels = Tuple{Int,Int,Float64}[]
+    src = Int[]                                # チャネル → κ′ の行番号
+    for ic in 1:nch_c
+        lp = cont.ls[ic]
+        tjp = cont.tjs[ic]
+        for lam in abs(lp - l_init):(lp + l_init)
+            A = (2 * lam + 1) *
+                dirac_angular_factor(l_init, tj_init, lp, tjp, lam)
+            if A > 0.0
+                push!(channels, (lp, lam, A))
+                push!(src, ic)
+            end
+        end
+    end
+    isempty(channels) && error("Dirac RlTable: 有効なチャネルが無い (κ=$kap_init)")
+    lam_max = maximum(ch[2] for ch in channels)
+    # 被積分関数を先に畳む: gw[ic, i] = w_i (G_b G_c + F_b F_c)
+    n_int = length(cont.r_int)
+    gw = zeros(nch_c, n_int)
+    @inbounds for i in 1:n_int, ic in 1:nch_c
+        gw[ic, i] = cont.w_int[i] *
+                    (gb[i] * cont.G_int[ic, i] + fb[i] * cont.F_int[ic, i])
+    end
+    R = zeros(length(channels), n_q)
+    tile = 128
+    jl_tab = zeros(tile * (lam_max + 1))
+    xb = zeros(tile)
+    tmpj = zeros(lam_max + 1)
+    for i0 in 1:tile:n_int
+        m = min(i0 + tile - 1, n_int) - i0 + 1
+        for (iq, qv) in enumerate(q)
+            @inbounds for j in 1:m
+                xb[j] = qv * cont.r_int[i0+j-1]
+            end
+            sph_jl_tile!(jl_tab, tile, m, lam_max, xb, tmpj)
+            @inbounds for (ic, (_, lam, _)) in enumerate(channels)
+                s = R[ic, iq]
+                base = lam * tile
+                row = src[ic]
+                for j in 1:m
+                    s += gw[row, i0+j-1] * jl_tab[base+j]
+                end
+                R[ic, iq] = s
+            end
+        end
+    end
+    lq = log.(q)
+    interp = Union{Pchip,Nothing}[Pchip(lq, R[ic, :]) for ic in 1:length(channels)]
+    return RlTable(collect(q), nL, channels, lam_max, R, interp)
+end
+
 "部分波 l' = l の全チャネルを無効化 (非有意 or Coulomb フィット不良)"
 function zero_l!(rl::RlTable, l::Int)
     for (ic, (lp, _, _)) in enumerate(rl.channels)
