@@ -45,16 +45,19 @@ v4 は Temari 側のコードで生成した (計画書の移行条件 =「P2 �
 
 ### 1.3 `generator_commit` の扱い — **✅ 決着 (2026-08-09)**
 
-出荷 JSON の `generator_commit` は生成時の HEAD (`3828778`) を記録しているが、
+出荷 JSON の `generator_commit` は生成時の HEAD を記録しているが、
 **その commit は v4 を生成できない** (既定が v3 のまま)。実際の生成器は
 「その commit + 未コミットの v4 変更」だった。**世代の識別は `model_id` で行うのが確実。**
 
-⇒ **その未コミット変更を `6d24cbe` としてコミットした** (2026-08-09、
+⇒ **その未コミット変更を `42dce7b` としてコミットした** (2026-08-09、
 "Promote v4 to the shipping prescription and make it fast enough to generate")。
-**v4 の生成器 = `6d24cbe`** で、hash は `src/prod_v4_jl/MANIFEST.md` に追記済。
+**v4 の生成器 = `42dce7b`** で、hash は `src/prod_v4_jl/MANIFEST.md` に追記済。
 コミット前にゲートを再走させて確認してある (selftest ALL PASS / refcheck
 WORST 9.044e-08 = 基準値 / `verify_e5_qlane_dirac` 75 ケース ·
 `verify_angular_pack` 61440 要素ともビット同一)。
+
+⚠ **JSON が名乗る `3828778` は既に存在しない。**同日の公開前履歴書き換え
+(§2.2) で `4a0daf8` になった。対応表は `src/prod_v4_jl/MANIFEST.md`。
 
 **運用も決着 (作者判断)**: **「生成の直前に必ず commit する」を規律とする。**
 `_git_head()` がそれを機械で支える (2026-08-09 実装):
@@ -102,13 +105,23 @@ formatVersion で弾かれることを確認する。
 
 ### 2.2 GitHub への公開
 
-- ⚠ **2026-08-09 訂正: リモートは既にある。**`origin` =
+- ⚠ **2026-08-09 訂正: リモートは既にあった。**`origin` =
   `https://github.com/seto77/Temari.git` (`README.md` のバッジと整合)。
-  ただし **remote `main` は `0868fc1`** ("Add the repository documents and a
-  minimal CI") **で止まっており、ローカルが大きく先行**している
-  (2026-08-09 時点で 37 コミット。層分割・M 殻・kdirac・KLI・Mott・
-  v4 一式 `6d24cbe` が丸ごと未 push)。
-  **push するかは作者判断** — 押した時点で公開扱いになる
+  remote `main` は `0868fc1` で止まっていたので、v4 一式まで push した
+- **⚠⚠ 2026-08-09: 公開前に履歴を書き換えた** (作者判断)。
+  `docs/src_defect_2026-08-07.md` §7.5 に **µSTEM / OA2000 の値そのもの**
+  (1−F の絶対値・生の f 値・(1−F)/s² の絶対値) が残っていた。
+  **public 化は HEAD だけでなく全履歴を公開する**ので、`git filter-repo` で
+  当該 blob を差し替えた。全 71 コミットで検出ゼロを確認済:
+  - 引き継ぎ書が「公開前の最終確認は済んでいる」と書いていたのは
+    **`fs_external_validation` しか見ていなかった**。CLAUDE.md が正本と呼ぶ
+    `src_defect` の §7.5 が丸ごと残っていた
+  - **`c86e555` 以前のハッシュは不変、`88f916b` 以降は全部変わった**
+    (`3828778`→`4a0daf8`、`6d24cbe`→`42dce7b`)
+  - **乖離・比の数値は残してある。**`CONTRIBUTING.md` の線引きを
+    「先方の表の書き写しを禁じる / 乖離や比は書いてよい」に改めた
+    ("agrees to within 1 %" を消して "agrees well" にする方が不誠実、という判断)
+  - 書き換え前の全 ref は bundle で退避してある (scratchpad、セッション限り)
 - `CITATION.cff` と `Project.toml` は**作成済**
   - `Project.toml` は **パッケージではなく環境** (`name`/`uuid` を持たない)。
     フラット名前空間のスクリプト群なので `using Temari` はできない。
