@@ -148,23 +148,24 @@ end
 # unsafe 操作は無く @threads も互いに素な添字への書き込みのみなので、ランタイム側
 # の問題と判断し、露出そのものを断つ。値は同じ関数で作るので **ビット同一**。
 # 三角則・パリティで 0 になる組は既定値 0.0 が閉形式の返り値と一致する。
+# 260807Cl: **l_init = 2 まで拡張** (M4/M5 = 3d の始状態)。d 殻を閉形式のままに
+# すると BigInt 階乗の malloc が M 殻の本番生成でそのまま再燃するので、
+# 表を 1 枚足して露出を断つ。値は同じ関数で作るので**ビット同一**。
 const _TJ_LMAX = 400                           # l_cap は HIGH で 128、監査でも 160
-const _TJ0, _TJ1 = let
-    mats = map(0:1) do l_init
-        m = zeros(_TJ_LMAX + 2, _TJ_LMAX + 1)  # 添字 (lam+1, lp+1)
+const _TJ_TAB = let
+    map(0:2) do l_init
+        m = zeros(_TJ_LMAX + 3, _TJ_LMAX + 1)  # 添字 (lam+1, lp+1)。lam ≤ lp+l_init
         for lp in 0:_TJ_LMAX, lam in abs(lp - l_init):(lp + l_init)
             m[lam+1, lp+1] = threej000_sq(lam, l_init, lp)
         end
         m
     end
-    (mats[1], mats[2])
 end
 
-"[3j(λ,l,l';000)]² — 表引き (l_init≤1)。範囲外は閉形式へ委譲 (M 殻の l_init=2 等)"
+"[3j(λ,l,l';000)]² — 表引き (l_init≤2)。範囲外は閉形式へ委譲"
 function threej000_sq_c(lam::Int, l_init::Int, lp::Int)
-    if 0 <= lp <= _TJ_LMAX && 0 <= lam <= _TJ_LMAX + 1
-        l_init == 0 && return @inbounds _TJ0[lam+1, lp+1]
-        l_init == 1 && return @inbounds _TJ1[lam+1, lp+1]
+    if 0 <= lp <= _TJ_LMAX && 0 <= lam <= _TJ_LMAX + 2 && 0 <= l_init <= 2
+        return @inbounds _TJ_TAB[l_init+1][lam+1, lp+1]
     end
     return threej000_sq(lam, l_init, lp)
 end

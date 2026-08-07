@@ -368,7 +368,24 @@ const CHANNELS = Dict(
     "L1" => ((2, 0), false, 2.0, 2),     # 2s      κ=−1  節1
     "L2" => ((2, 1), true, 2.0, 3),      # 2p½     κ=+1  節0
     "L3" => ((2, 1), false, 4.0, 4),     # 2p³ᐟ²   κ=−2  節0
+    # 260807Cl 追加: M 殻。κ の割り当ては上と同じ規約 (j_lower → κ=+l)。
+    # 節数 n−l−1 は M1=2 / M2,M3=1 / M4,M5=0。
+    # ⚠ **M4/M5 は bote_salvat.json が 9 副殻を持つ元素にしか無い** (Fe は 7 まで)。
+    #   `bote_edge_eV` が範囲外で落ちるので `prepare_channel` が先に弾く
+    "M1" => ((3, 0), false, 2.0, 5),     # 3s      κ=−1  節2
+    "M2" => ((3, 1), true, 2.0, 6),      # 3p½     κ=+1  節1
+    "M3" => ((3, 1), false, 4.0, 7),     # 3p³ᐟ²   κ=−2  節1
+    "M4" => ((3, 2), true, 4.0, 8),      # 3d³ᐟ²   κ=+2  節0
+    "M5" => ((3, 2), false, 6.0, 9),     # 3d⁵ᐟ²   κ=−3  節0
 )
+
+"その元素で使えるチャネル名 (Bote 表の副殻数と、占有電子の有無で決まる)"
+function available_channels(z::Int)
+    ns = length(bote()[string(z)]["edge_eV"])
+    occ = Dict((n, l) => q for (n, l, q) in ORBITALS[z])
+    return [t for t in ("K", "L1", "L2", "L3", "M1", "M2", "M3", "M4", "M5")
+            if CHANNELS[t][4] <= ns && get(occ, CHANNELS[t][1], 0.0) > 0.0]
+end
 
 const MODEL_ID = "DHFS-KS23-Dirac-jsplit-fullrange-sym-v2"
 # 260804Cl 追加: スカラー相対論連続状態 (第 3.5 章) を有効にした処方の ID。
@@ -574,7 +591,12 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
                          final_state::Symbol=:relaxed,
                          dirac_continuum::Bool=false,
                          rel_override::Union{Nothing,RelCont}=nothing)
-    haskey(CHANNELS, tag) || error("unknown channel $tag (K/L1/L2/L3)")
+    haskey(CHANNELS, tag) || error("unknown channel $tag (K/L1/L2/L3/M1..M5)")
+    # ⚠ M 殻は元素によって Bote 表の副殻が足りない (Fe は M1-M3 まで) し、
+    # 3d が空の軽元素もある。落ちる前に読める形で弾く
+    tag in available_channels(z) ||
+        error("Z=$z に $tag は無い (使えるのは: " *
+              join(available_channels(z), ", ") * ")")
     final_state in (:relaxed, :frozen, :frozen_static) ||
         error("final_state は :relaxed / :frozen / :frozen_static ($final_state)")
     # κ 分解 Dirac (第 3.6 章) はスカラー相対論 (第 3.5 章) の上位互換。両方

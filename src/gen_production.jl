@@ -79,8 +79,23 @@ function _git_head()
     return _GIT_HEAD[]::String
 end
 
-"チャネル一覧: K は Z=6..50、L1/L2/L3 は Z=20..86 (v2 と同じ範囲)"
-function all_channels()
+"""チャネル一覧: K は Z=6..50、L1/L2/L3 は Z=20..86 (v2 と同じ範囲)。
+260807Cl: **M 殻 (M1..M5) を Z=30..86 で追加**。ただし元素ごとに
+`available_channels(z)` で弾く — Bote 表の副殻数が足りない元素と、
+3d が空の元素があるため。"""
+function all_channels(tags=("K", "L1", "L2", "L3"))
+    ch = Tuple{Int,String}[]
+    zr = Dict("K" => 6:50, "L1" => 20:86, "L2" => 20:86, "L3" => 20:86,
+              "M1" => 30:86, "M2" => 30:86, "M3" => 30:86,
+              "M4" => 30:86, "M5" => 30:86)
+    for tag in tags, z in zr[tag]
+        tag in available_channels(z) && push!(ch, (z, tag))
+    end
+    return ch
+end
+
+"旧シグネチャ (K/L のみ) の互換ラッパ"
+function all_channels_legacy()
     ch = Tuple{Int,String}[]
     for z in 6:50
         push!(ch, (z, "K"))
@@ -184,9 +199,19 @@ function append_partial(outdir, tag, z, row)
     end
 end
 
+"""処方一式 (260807Cl 追加)。v3 出荷は `PRESC_V3`。v4 候補は `--kdirac` 等で
+組み替える。**`compute_channel` に渡す keyword をそのまま持つ NamedTuple** に
+してあるので、新しいつまみが増えてもここに 1 行足すだけで通る。"""
+const PRESC_V3 = (rel_continuum=true, dirac_continuum=false,
+                  exchange=:xalpha, final_state=:relaxed)
+
+presc_model_id(p) = model_id_of(p.rel_continuum, true, X_ALPHA, p.exchange,
+                                p.final_state, false, p.dirac_continuum)
+
 "1 チャネル (Z, tag) の全 E0 行を計算して JSON に書く"
 function run_channel(z::Int, tag::String, outdir::String;
-                     settings=HIGH_SETTINGS, rel::Bool=true)
+                     settings=HIGH_SETTINGS, presc=PRESC_V3)
+    rel = presc.rel_continuum
     path = joinpath(outdir, "F_$(tag)_Z$(z).json")
     if isfile(path)
         println("skip (exists): $path")
@@ -209,7 +234,7 @@ function run_channel(z::Int, tag::String, outdir::String;
             continue
         end
         o = compute_channel(z, tag, e0; settings=settings, s_nodes=S_GRID,
-                            verbose=false, rel_continuum=rel)
+                            verbose=false, presc...)
         retried = 0
         d = o["diag"]
         if d["bad_significant_l"] > 0 || d["max_match_resid"] > GATE_MRES ||
@@ -219,7 +244,7 @@ function run_channel(z::Int, tag::String, outdir::String;
                     z, tag, e0, d["bad_significant_l"], d["max_match_resid"],
                     d["r_tail_max"])
             o = compute_channel(z, tag, e0; settings=(; settings..., ppw=35.0),
-                                s_nodes=S_GRID, verbose=false, rel_continuum=rel)
+                                s_nodes=S_GRID, verbose=false, presc...)
             retried = 1
             d = o["diag"]
             if d["bad_significant_l"] > 0 || d["max_match_resid"] > GATE_MRES ||
@@ -273,7 +298,7 @@ function run_channel(z::Int, tag::String, outdir::String;
         "kappa" => (j_lower && shell[2] > 0) ? shell[2] : -(shell[2] + 1),
         "j_lower" => j_lower, "occ_init" => occ_init,
         "s_grid_A_inv" => S_GRID,
-        "model_id" => rel ? MODEL_ID_REL : MODEL_ID,
+        "model_id" => presc_model_id(presc),
         "dataset_version" => "3.0.0", "schema_version" => 1,
         "generator" => "ionization.jl (Julia)",
         "generator_commit" => _git_head(),
@@ -361,7 +386,7 @@ function main_gen(args)
     end
     outdir = OUT_DEFAULT
     lane_i, lane_n = 0, 1
-    tags = ["K", "L1", "L2", "L3"]
+    tags = ["K", "L1", "L2", "L3"]      # M 殻は --tags で明示的に要求する
     quick = "--quick" in args
     rel = !("--norel" in args)
     i = 1
@@ -379,16 +404,23 @@ function main_gen(args)
         i += 1
     end
     settings = quick ? QUICK_SETTINGS : HIGH_SETTINGS
-    ch = [(z, t) for (z, t) in all_channels() if t in tags]
+    # 260807Cl: 処方をコマンドラインから組む。v3 出荷は既定 (SRC)。
+    # ⚠ `--kdirac` は SRC の欠陥を外す v4 候補 (docs/src_defect_2026-08-07.md)。
+    #    `--rel` と排他なので rel_continuum を false にする
+    kd = "--kdirac" in args
+    presc = (rel_continuum=(rel && !kd), dirac_continuum=kd,
+             exchange=("--kli" in args ? :kli : :xalpha),
+             final_state=("--frozen" in args ? :frozen : :relaxed))
+    ch = [(z, t) for (z, t) in all_channels(Tuple(tags))]
     mine = [(z, t) for (k, (z, t)) in enumerate(ch) if (k - 1) % lane_n == lane_i]
-    println("gen_production v3: $(length(mine))/$(length(ch)) チャネル " *
+    println("gen_production: $(length(mine))/$(length(ch)) チャネル " *
             "(lane $lane_i/$lane_n, tags=$(join(tags,",")), " *
-            (quick ? "QUICK" : "HIGH") * (rel ? ", SRC" : ", 非相対論") *
-            ", スレッド $(Threads.nthreads()))")
+            (quick ? "QUICK" : "HIGH") * ", スレッド $(Threads.nthreads()))")
+    println("処方: ", presc_model_id(presc))
     println("出力: $outdir\n")
     n_done = n_skip = 0
     for (z, t) in mine
-        r = run_channel(z, t, outdir; settings=settings, rel=rel)
+        r = run_channel(z, t, outdir; settings=settings, presc=presc)
         r == :done ? (n_done += 1) : (n_skip += 1)
     end
     println("完了: $n_done 計算 / $n_skip skip (既存)")
