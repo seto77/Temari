@@ -28,7 +28,7 @@ chan=${4:-+1.11}
 tags=${5:-}
 outdir=${6:-}
 cd "$(dirname "$0")/.." || exit 1
-log="../temari_v4_lane${lane}_log.txt"
+log="../temari_v5_lane${lane}_log.txt"   # 260810Cl: v4 → v5 (s ≤ 16 Å⁻¹ の全再生成)
 opts=""
 [ -n "$tags" ] && opts="$opts --tags $tags"
 [ -n "$outdir" ] && opts="$opts --out $outdir"
