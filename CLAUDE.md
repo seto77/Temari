@@ -103,9 +103,14 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
   `l4_angular` / `l5_exit_edx` / `selftest`。**module は導入せずフラット名前空間**
   (include するだけで全名前が見える / 連結すれば単一ファイルに戻る)。純粋な移動で
   5 チャネル === ビット同一。層とファイルの対応は `docs/architecture.md`
-- **⭐ 現状の残務・次の一手の正本 = `docs/next_phase_2026-08-09.md`**
-  (v4 は生成・QC 済。残るは配布と公開。**冒頭でこれを読む**)。
-  出荷データの正本 = **`src/prod_v4_jl/MANIFEST.md`**
+- **⭐ 現状の残務・次の一手の正本 = `docs/next_phase_2026-08-10.md`**
+  (**冒頭でこれを読む**)。次の仕事 = **s グリッドを 16 Å⁻¹ へ延ばす全再生成**
+  (dataset v5.0.0 / formatVersion 4)。技術的決定の正本 =
+  **`docs/tail_contract_2026-08-09.md`**。出荷データの正本 = `src/prod_v4_jl/MANIFEST.md`
+  - **⚠⚠ 出荷中の tail は間違っている。**s>8 の指数外挿は 43 % の行で hard fail し、
+    **残りのうち高 l では黙って符号の逆の値を返す** (Au L3 @300kV s=12 で
+    +4.15e-5 vs 真値 −1.62e-3 を実測)。原因は F が負になること (null 行の 91.6 %)
+  - 一世代前 = `docs/next_phase_2026-08-09.md` (公開と v4 配備。**全部実施済**)
 - 一世代前 = `docs/next_phase_2026-08-08.md` (v4 の生成指示。**§2 は全部実施済**、
   §1 の未決 `--transverse` も決着)。処方は作者判断で確定済 —
   **連続状態 = κ 分解 Dirac / イオン化の交換 = Xα / f_x の交換 = KLI /
