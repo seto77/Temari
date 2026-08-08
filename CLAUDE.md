@@ -71,11 +71,16 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
   (v4 生成中に **5 回**発生)。**うち 2 回は wedged** (プロセスが死に切らずログだけ
   止まる) で、mtime 監視でしか検知できない (15 分停滞で kill → 再起動)。
   残り 3 回はプロセスが死んで即時再起動
-- **⚠ 単発 CLI (`src/ionization.jl`) の連続状態の既定は今も v2 (非相対論)。**
-  `gen_production.jl` だけが v4 既定。つまり `julia src/ionization.jl 26 K 200` は
-  **出荷処方ではない** (`--kdirac` で v4、`--rel` で v3)。refcheck と解析階段が
-  素の既定に固定されているので意図的だが、**公開リポとしては罠**。
-  docs/src/en/cli.md に警告を入れてある。**既定を揃えるかは作者判断**
+- **★ 2026-08-09: 単発 CLI (`src/ionization.jl`) の既定も v4 (出荷処方) に揃えた**
+  (作者判断)。`julia src/ionization.jl 26 K 200` は
+  `...-KDIRAC2C-...-v4-DSCF` を出す。戻し口は **`--rel` = v3 (SRC。⚠ 欠陥あり) /
+  `--no-kdirac` = v2 (旧既定)** で、両者は排他。実体は `parse_continuum`
+  - ⚠⚠ **`compute_channel` / `compute_gos` / `compute_edge` の既定は変えていない。**
+    `refcheck` は `dirac_continuum` を明示せず**関数の既定に依存**しているため。
+    **既定処方を持つのは CLI の引数解釈だけ**。この切り分けを崩さないこと
+  - 検証: 両スナップショット**差分ゼロ** / refcheck 9.044e-08 (基準値) / selftest ALL PASS
+  - `src/gui.jl` の `--rel` チェックボックス文言も直した (既定が v2 の頃の
+    「相対論を足す」から、「v3 の SRC を再現 ⚠ 欠陥あり」へ)
 
 ## 現在地 (2026-08-05)
 

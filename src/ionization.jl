@@ -107,8 +107,12 @@ const USAGE = """
   julia -t auto ionization.jl fx   Z [--s ...] [--nonrel] [--json path]  # 原子散乱因子
                                    # 既定は完全 Dirac SCF 密度。--nonrel で比較用の非相対論
 
-opts: [--quick|--high] [--rel] [--nodscf] [--kli] [--frozen] [--no-transverse]
-      [--s s1 s2 ...] [--json path]
+opts: [--quick|--high] [--rel|--no-kdirac] [--nodscf] [--kli] [--frozen]
+      [--no-transverse] [--s s1 s2 ...] [--json path]
+      ★ 連続状態の既定は **出荷処方 v4** (κ 分解 Dirac + 小成分の行列要素)。
+               260809Cl に gen_production.jl と揃えた (旧既定は v2 = 非相対論)。
+               --rel で v3 (SRC。⚠ 欠陥あり)、--no-kdirac で v2 (旧既定) へ戻す。
+               どれを使ったかは 1 行目の model_id に必ず出る
       SCF は既定で完全 Dirac (DHFS)。--nodscf で旧来の非相対論 SCF (比較用)
       --kli は厳密交換 (Latter 補正なし)。Dirac・非相対論のどちらとも組める
       --frozen は厳密 frozen core = 束縛も連続も**同一の中性 KS ポテンシャル**
@@ -118,11 +122,45 @@ opts: [--quick|--high] [--rel] [--nodscf] [--kli] [--frozen] [--no-transverse]
                K=0 専用なので F(s) 出口には無関係。--no-transverse で縦成分のみに戻す
                (旧既定。model_id の -TR の有無でどちらか分かる)
       --kdirac は κ 分解 Dirac 連続状態 + 小成分の行列要素 (--rel の上位互換)。
+               **260809Cl に既定へ昇格**したので指定は不要 (受け付けるが no-op)。
                重元素で効く: Au L3 の GOS が Zhang らの DB へ 8 % 寄る
       --s は F(s) 出口のみ (edge は K=0 の 1 点で、その分だけ安い)"""
 
 "`--kli` の有無を交換処方の Symbol へ (:xalpha | :kli)"
 parse_exchange(args) = "--kli" in args ? :kli : :xalpha
+
+"""連続状態の処方を引数から決めて `(rel_continuum, dirac_continuum)` を返す (260809Cl 追加)。
+
+**★ 既定は出荷処方 (v4 = κ 分解 Dirac 連続状態 + 小成分の行列要素)** — 作者判断
+2026-08-09。それまで単発 CLI の既定は v2 (非相対論) で、`gen_production.jl` の既定
+(v4) と食い違っていた。「`julia src/ionization.jl 26 K 200` が出荷処方ではない」のは
+公開リポでは罠なので揃えた (`docs/next_phase_2026-08-09.md` §1.1)。
+
+戻し口は 2 つ。どちらも model_id に出るので、出力を見れば必ず判別できる:
+
+| 指定 | 連続状態 | 世代 |
+|---|---|---|
+| (既定) | κ 分解 Dirac + 小成分 | **v4 = 出荷処方** |
+| `--rel` | スカラー相対論 (SRC) | v3 |
+| `--no-kdirac` | 非相対論 | v2 (**旧既定**) |
+
+⚠ **`--rel` (SRC) には欠陥がある** — 真の相対論効果の 5〜20 倍の偽項を持つ
+(`docs/src_defect_2026-08-07.md`)。v3 の再現のためだけに残してある処方で、
+新しい計算に選ぶ理由は無い。
+
+⚠⚠ **`compute_channel` / `compute_gos` / `compute_edge` の既定は変えていない。**
+変えると `refcheck` (dirac_continuum を明示せず既定に依存している) と v3 の
+ビット同一スナップショットが動く。**既定処方を持つのは CLI の引数解釈だけ**という
+切り分けにしてある (`gen_production.jl` も同じ構造で、処方は NamedTuple で明示的に渡す)。
+
+⚠ 明示の `--kdirac` も受け付ける (既定になったので no-op)。既存のスクリプトと
+docs のコマンド例を黙って壊さないため — `--transverse` を残したのと同じ理由。"""
+function parse_continuum(args)
+    rel = "--rel" in args
+    nokd = "--no-kdirac" in args
+    rel && nokd && error("--rel と --no-kdirac は排他 (前者が v3 = SRC、後者が v2 = 非相対論)")
+    return (rel, !rel && !nokd)
+end
 
 "終状態処方の Symbol へ (:relaxed | :frozen | :frozen_static)"
 parse_final_state(args) = "--frozen-static" in args ? :frozen_static :
@@ -179,7 +217,7 @@ function main_gos(args)
     tag = uppercase(args[2])
     quick = "--quick" in args
     high = "--high" in args
-    rel = "--rel" in args
+    rel, kd = parse_continuum(args)             # 260809Cl: 既定 = 出荷処方 (v4)
     dscf = !("--nodscf" in args)
     eps_max = nothing
     q_max = nothing
@@ -198,7 +236,6 @@ function main_gos(args)
     settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
     xc = parse_exchange(args)
     fs = parse_final_state(args)
-    kd = "--kdirac" in args
     println("Z=$z $tag   出口: GOS df/dΔE(Q)   処方: ",
             model_id_of(rel, dscf, X_ALPHA, xc, fs, false, kd))
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
@@ -339,7 +376,7 @@ function main_(args)
     e0 = parse(Float64, args[3])
     quick = "--quick" in args
     high = "--high" in args                     # 260804Cl 強化求積 (v3 テーブル用)
-    rel = "--rel" in args                       # 260804Cl スカラー相対論連続状態
+    rel, kd = parse_continuum(args)             # 260809Cl: 既定 = 出荷処方 (v4)
     dscf = !("--nodscf" in args)                # 260807Cl 完全 Dirac SCF (既定)
     s_nodes = nothing
     json_path = nothing
@@ -366,7 +403,6 @@ function main_(args)
     # ⚠ **明示の --transverse も受け付ける** — 既存のスクリプトと docs のコマンド例を
     #   黙って壊さないため。--no-transverse が旧既定 (縦成分のみ) への戻し口
     trans = edge_mode && !("--no-transverse" in args)
-    kd = "--kdirac" in args                     # 260807Cl κ 分解 Dirac 連続状態
     "--transverse" in args && !edge_mode &&
         error("--transverse は edge 出口のみ (K=0 専用。指示書 §3)")
     println("Z=$z $tag @ $e0 keV   出口: ", edge_mode ? "dσ/dΔE (EELS)" : "F(s) (EDX)",

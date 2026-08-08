@@ -662,8 +662,13 @@ footer p { color: var(--muted); font-size: 12px; }
             <option value="high">high (強化・v3 テーブル用)</option>
           </select>
         </label>
-        <label class="chk"><input id="rel" type="checkbox">
-          --rel (スカラー相対論連続状態 = モデル v3)</label>
+        <!-- 260809Cl: CLI 既定が v4 (κ 分解 Dirac) になったので文言を書き換えた。
+             旧: "--rel (スカラー相対論連続状態 = モデル v3)" — 既定が v2 だった頃は
+             「相対論を足す」チェックだったが、今は既定の方が相対論的で、これは
+             **欠陥のある旧処方へ落とす**スイッチになっている。 -->
+        <label class="chk" title="既定は出荷処方 v4 (κ 分解 Dirac)。これを入れると v3 の SRC に落ちる — 真の相対論効果の 5-20 倍の偽項を持つ処方で、v3 の再現用にだけ残してある">
+          <input id="rel" type="checkbox">
+          --rel (v3 の SRC を再現 ⚠ 欠陥あり。既定は v4)</label>
       </div>
       <div class="runrow">
         <button id="run" type="submit">計算</button>
