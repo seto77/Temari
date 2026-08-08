@@ -21,14 +21,25 @@ ReciPro 側の `check_tables.py` (v3 の QC に使ったもの) を Julia へ移
   C1  F(0)=1 が厳密、F が有限、s グリッドが全ファイルで一致
   C2  K 殻: **s≤4 の窓で** F>0 かつ単調減少 (s>4 と L/M 殻は符号反転が
       物理的に起きるので回数だけ報告する)
-  C3  tail 外挿: 有効なら a,b>0 かつ F(s_max)=a·e^{−b·s_max} が整合
+  C3  tail 契約 (schema 2): 全行に kind があり、kind=2 / s_cert がグリッド点 /
+      s_cert_A_inv と valid_to が一致
+      ⚠ 旧 (schema 1) は「有効なら a,b>0 かつ F(s_max)=a·e^{−b·s_max}」だった。
+        **指数 tail は撤去**した — 上界でも近似でもなかったため
+        (docs/tail_contract_2026-08-09.md §1)
   C6  E0 ノードを 1 つ抜いて PCHIP(ln(u−1)) を再構築し、抜いた点での誤差を測る
       (leave-one-out)。ゲートは絶対 5e-3。**補間器は出荷と同じ `Pchip`**
+      260810Cl: ノードを s≤16 まで広げ、**s_cert < s_j の行を基底から外す**
+      (出荷 C# の `GridAt` の基底 subsetting と同じ規則)
   C7  σ_own/σ_Bote が 0.7..1.4 (u≥2 のみ。閾値近傍は形状 F だけが問われる)
   C8  生成時のゲート失敗 (failures 配列) がゼロ
   C9  軌道の割り当て: C9a 絶対値 / C9b スピン軌道分裂 (--eb)
   C10 メタデータの一致
   C11 N0 の桁外れ (破損行の検出)
+  C12 ε が規則値 (= 2.0 × sup|F| on [s_cert−2, s_cert]、床 1e-6) を下回らない
+      ⚠ 窓を 2 Å⁻¹ にしたのは実測。0.25 (6 点) では 1 Å⁻¹ 外挿の上界に
+        なるのが 77.4 % しかなく、最悪 17.2 倍の過小になる
+  C13 ε が数値床 1e-6 を下回らない (s>8 の求積誤差の実測最悪 3.22e-07 の約 3 倍)
+  C14 s > s_cert の埋め草が厳密に 0 (低 E0 行は運動学的に 16 Å⁻¹ へ届かない)
 
   C4 (廃止) E0 方向の 2 階差分 — 不等間隔グリッド上の真の曲率を誤検知する
   C5 (無効) Z 方向平滑性 — 自動判定できる閾値が見つからなかった
@@ -78,30 +89,63 @@ function check_file(path::String)
             end
         end
     end
-    # ---- C3 ----
+    # ---- C3 / C12 / C13 / C14 (260810Cl: schema 2 の tail 契約) ----
+    # 旧 C3 は指数 tail の a,b>0 と F(s_max) 整合を見ていた。schema 2 では
+    # tail は **実測上界 ε** なので、検査するのは「規則どおりに作られているか」
+    # (C12)・「床を割っていないか」(C13)・「保証域の外が埋め草か」(C14)。
+    s_cert = Float64[]
     for (i, r) in enumerate(rows)
         t = r["tail"]
-        t === nothing && continue
-        a = Float64(t["a"]); b = Float64(t["b"])
-        if a <= 0.0 || b <= 0.0
-            push!(probs, "C3: tail の a,b≤0 @E0=$(e0[i])")
-        elseif abs(a * exp(-b * s[end]) / F[i][end] - 1.0) > 1e-6
-            push!(probs, "C3: tail が F(s_max) と不整合 @E0=$(e0[i])")
+        if t === nothing
+            push!(probs, "C3: tail が null (schema 2 では全行に kind が要る) @E0=$(e0[i])")
+            push!(s_cert, s[end]); continue
         end
+        kind = round(Int, Float64(t["kind"]))
+        eps = Float64(t["eps"]); vt = Float64(t["valid_to"])
+        push!(s_cert, vt)
+        kind == 2 || push!(probs, "C3: 未知の tail kind=$kind @E0=$(e0[i])")
+        # s_cert は必ずグリッド点で、かつ表の内側
+        n_cert = searchsortedlast(s, vt + 1e-9)
+        if n_cert < 1 || abs(s[n_cert] - vt) > 1e-9 || vt > s[end] + 1e-9
+            push!(probs, "C3: s_cert=$vt が s グリッド上に無い @E0=$(e0[i])")
+            continue
+        end
+        haskey(r, "s_cert_A_inv") && abs(Float64(r["s_cert_A_inv"]) - vt) > 1e-9 &&
+            push!(probs, "C3: s_cert_A_inv と tail.valid_to が食い違う @E0=$(e0[i])")
+        # C14: 保証域の外は厳密に 0 (埋め草)。ゴミが残っていると C# が拾ってしまう
+        if n_cert < length(s) && any(!=(0.0), @view F[i][n_cert+1:end])
+            push!(probs, "C14: s>s_cert の埋め草が 0 でない @E0=$(e0[i])")
+        end
+        # C12: ε が窓の実測 sup × 安全係数を下回らない (= 規則どおりに作られている)
+        i0 = searchsortedfirst(s, vt - 2.0 - 1e-12)
+        sup = maximum(abs, @view F[i][i0:n_cert])
+        want = max(2.0 * sup, 1e-6)
+        eps < want * (1 - 1e-9) &&
+            push!(probs, "C12: ε=$eps が規則値 $want を下回る @E0=$(e0[i])")
+        # C13: 数値床。s>8 の求積誤差の実測最悪 3.22e-07 の約 3 倍を下限とする
+        (isfinite(eps) && eps >= 1e-6) ||
+            push!(probs, "C13: ε=$eps が数値床 1e-6 を下回る @E0=$(e0[i])")
     end
     # ---- C6 (leave-one-out、出荷と同じ補間座標 ln(u−1) と同じ Pchip) ----
+    # 260810Cl: ノードを延長域まで広げ (旧 5..80 = s≤4 しか見ていなかった)、
+    # **s_cert < s_j の行を基底から外す** — 低 E0 行は s>s_cert が 0 の埋め草なので、
+    # そのまま混ぜると LOO が埋め草を「補間誤差」として報告する。
+    # 除外は出荷 C# の `GridAt` の基底 subsetting と同じ規則にすること
     worst = 0.0
     if length(e0) >= 5
         x = log.(u .- 1.0 .+ 1e-12)
-        for j in (5, 20, 40, 60, 80)
+        for j in (5, 20, 40, 60, 80, 120, 161, 220, 281, 321)
             j <= length(s) || continue
-            col = [f[j] for f in F]
+            keep = [i for i in eachindex(e0) if s_cert[i] >= s[j] - 1e-9]
+            length(keep) >= 5 || continue
+            xk = x[keep]
+            col = [F[i][j] for i in keep]
             pos = all(>(0.0), col)
             yy = pos ? log.(col) : col
-            for k in 3:length(e0)-2
-                xs = vcat(x[1:k-1], x[k+1:end])
+            for k in 3:length(keep)-2
+                xs = vcat(xk[1:k-1], xk[k+1:end])
                 ys = vcat(yy[1:k-1], yy[k+1:end])
-                v = Pchip(xs, ys)(x[k])
+                v = Pchip(xs, ys)(xk[k])
                 pred = pos ? exp(v) : v
                 worst = max(worst, abs(pred - col[k]))
             end

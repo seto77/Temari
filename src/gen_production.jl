@@ -43,7 +43,7 @@ resume: 出力 JSON が既に存在するチャネルは飛ばす (チャネル�
 
 include(joinpath(@__DIR__, "ionization.jl"))
 
-const OUT_DEFAULT = joinpath(@__DIR__, "prod_v4_jl")
+const OUT_DEFAULT = joinpath(@__DIR__, "prod_v5_jl")   # 260810Cl: v4 → v5 (s ≤ 16 Å⁻¹)
 
 # ---- 出荷グリッド (v2 と同じ s、E0 は密化) ----
 # 260805Cl 変更: s 上限 4.0 → 8.0 Å⁻¹ (81 → 161 点)。
@@ -54,8 +54,15 @@ const OUT_DEFAULT = joinpath(@__DIR__, "prod_v4_jl")
 # の高 s が押し下げられ窓内でゼロ交差するため tail が張れず、外挿要求が例外になる。
 # s 方向の刻みを粗くして上限を伸ばす案は補間誤差 2-4e-2 (E0 補間誤差の 100 倍) で不可。
 # ノード追加のコストは実測 +48 % (L1 Z=38 QUICK: 2.77s → 4.11s)。
-const S_GRID = collect(0.0:0.05:8.0)           # 161 点 [Å⁻¹] (C# 側の契約)
-# const S_GRID = collect(0.0:0.05:4.0)         # 260804Cl まで: 81 点 (s≤4)
+# 260810Cl 変更: s 上限 8.0 → 16.0 Å⁻¹ (161 → 321 点)。dataset v5.0.0 / formatVersion 4。
+# 正本 = docs/tail_contract_2026-08-09.md、実施手順 = docs/next_phase_2026-08-10.md。
+# 理由: ALCHEMI は μ_hg が 2 反射の差 ΔG で決まるので要求 s = max|g| に達する。
+# **出荷中の指数 tail は上界でも近似でもない** — 43 % の行で hard fail し、残りのうち
+# 高 l では符号の逆の値を返す (Au L3 @300kV s=12 で +4.15e-5 vs 真値 −1.62e-3)。
+# 外挿をやめて実データで覆うのが唯一の正直な解。16 の根拠は指示書 §1.2。
+const S_GRID = collect(0.0:0.05:16.0)          # 321 点 [Å⁻¹] (C# 側の契約)
+# const S_GRID = collect(0.0:0.05:8.0)         # 260809Cl まで: 161 点 (s≤8, dataset v4)
+# const S_GRID = collect(0.0:0.05:4.0)         # 260804Cl まで:  81 点 (s≤4, dataset v1/v2)
 # E0 絶対ノード: v2 の 13 点 → 22 点 (中間点を挿入)
 const E0_ABS_KEV = [30.0, 35.0, 40.0, 45.0, 50.0, 60.0, 70.0, 80.0, 90.0,
                     100.0, 110.0, 120.0, 135.0, 150.0, 170.0, 200.0, 225.0,
@@ -69,6 +76,39 @@ const E0_MIN, E0_MAX = 30.0, 400.0
 
 const GATE_MRES = 1e-4
 const GATE_RTAIL = 1e-4
+
+# ---- 運動学的天井と行ごとの保証上限 (260810Cl 追加) ----
+#
+# s の上限は表の都合ではなく**運動学**で決まる。`l4_angular.jl` の
+# `kz = sqrt(k_i² − K²/4)` が実数である条件 `K < 2·k_i` と `K = 4π·s·a0`
+# (`l5_exit_edx.jl`) から **s_kin = 1/λ**。
+# ⚠ **これは近似の限界ではない。**「Ewald 球上に差ベクトル K を持つビーム対が
+# 存在しない」という幾何的不可能性なので、契約をどう書いても越えられない。
+# 30 kV で 14.33 Å⁻¹ しかないため、**E0 が低い行は 16 Å⁻¹ に届かない**。
+
+"相対論的電子波長 λ [Å] (加速電圧 [kV])。"
+electron_wavelength_A(e0_keV) =
+    12.2639 / sqrt(e0_keV * 1e3 * (1.0 + 0.97845e-6 * e0_keV * 1e3))
+
+"s の運動学的天井 [Å⁻¹] = 1/λ。これ以上の s は物理的に存在しない。"
+s_kin_A_inv(e0_keV) = 1.0 / electron_wavelength_A(e0_keV)
+
+# 天井ちょうどは kz = 0 の特異点なので、余裕を取ってから格子点に丸める。
+# 0.98 は tail_contract §3.1 が ε 格子に使っていた係数と同じ。
+const S_CERT_MARGIN = 0.98
+
+"""この行が保証できる s の上限と、その格子点の添字。
+
+戻り値 `(s_cert, n_cert)` は `S_GRID[n_cert] == s_cert` を満たす。
+**行の F は `S_GRID[1:n_cert]` だけを計算し、残りは 0 で埋める** —
+届かない領域を 0 で埋めても、C# 側は `s_cert` を見て
+「その s ノードでこの行を補間基底に入れない」ので埋め草には触らない
+(素朴に 0 を混ぜると `GridAt` の PCHIP が低圧行に引きずられる)。"""
+function s_cert_of(e0_keV)
+    lim = min(S_GRID[end], S_CERT_MARGIN * s_kin_A_inv(e0_keV))
+    n = searchsortedlast(S_GRID, lim + 1e-12)
+    return S_GRID[n], n
+end
 
 """260808Cl 追加: 1 行が「そもそも数として成立しているか」。
 
@@ -247,23 +287,47 @@ function e0_grid(z::Int, tag::String)
     return out, eth
 end
 
-"""s_max (= S_GRID[end]) の外側への指数外挿 F ≈ a·exp(−b·s)
-(Python 版 tail_fit と同一の規則)。末尾 6 点が正・単調減少・b>0 の全てを満たす
-ときだけ有効で、a は F(s_max) を厳密に通す。
-⚠ L1 (2s) の中程度 Z は高 s で符号反転するため、この規則では tail を張れない
-(v3 で新たに発生。260805Cl に s_max を 8 へ伸ばしたのは、外挿に頼らず実データで
-実用域を覆うため)。tail=null の行を挟む s>s_max 要求は C# 側で明示エラーになる。"""
-function tail_fit(s::AbstractVector, F::AbstractVector)
-    ts = s[end-5:end]
-    tF = F[end-5:end]
-    (any(tF .<= 0.0) || any(diff(tF) .>= 0.0)) && return nothing
-    y = -log.(tF)                              # 最小二乗直線 y = b·s − ln a
-    n = length(ts)
-    sx = sum(ts); sy = sum(y)
-    b = (n * sum(ts .* y) - sx * sy) / (n * sum(ts .^ 2) - sx^2)
-    b <= 0.0 && return nothing
-    a = tF[end] * exp(b * ts[end])
-    return Dict{String,Any}("a" => a, "b" => b)
+#=== s > s_cert の契約 (260810Cl。指数 tail からの置き換え) ==========================
+⚠⚠ **旧 `tail_fit` (a·exp(−b·s)) は撤去した。**上界でも近似でもなかったため:
+
+- 14,796 行中 6,359 行 (43.0 %) で条件を満たせず `null` → C# が hard fail
+- 張れた 8,437 本も **s_max の外で誤る**。Au L3 (Z=79) @300 kV, s=12 で
+  出荷 tail は +4.151e-05、実際に計算すると **−1.615e-03** (符号が逆で 39 倍)。
+  同種の符号誤りが L2 23 % / L3 32 % / M3 24 %
+- 棄却理由の内訳は符号 86.3 % / 非単調 13.7 %。**減衰しないからではなく F が負になるから**
+  (null 行の 91.6 % が s ≤ 8 内でゼロ交差)
+
+代わりに **実測した上界 ε だけ**を宣言する。主張してはならないことは
+docs/tail_contract_2026-08-09.md §4 に列挙してある (指数減衰・べき則・
+|F(s_max)| が上界・ε の E0 内挿・符号の引き継ぎ — **すべて実データで否定済み**)。
+=================================================================================#
+
+"tail の意味論 (C# 側 `kind` バイトと 1:1)。0 = 宣言なし / 2 = 実測上界 ε"
+const TAIL_KIND_NONE = 0
+const TAIL_KIND_BOUND = 2
+
+# ε の窓幅。⚠ **6 点窓 (0.25 Å⁻¹) から取ってはいけない** — 出荷データでの
+# out-of-sample 検証で、1 Å⁻¹ 外挿の上界になった割合は
+# 窓 0.25 → 77.4 % (最悪 17.2 倍の過小) / 1.0 → 88.9 % / 2.0 → 99.1 % / 3.0 → 100 %。
+# 減衰包絡を 6 点に当てる案は論外 (63.7 %、最悪 6e8 倍)。
+const EPS_WINDOW_A_INV = 2.0
+const EPS_SAFETY = 2.0        # 上界破れ 4.8 %・最悪 1.55 倍を吸収する係数
+const EPS_FLOOR = 1e-6        # 数値床。s>8 の求積誤差の実測最悪 3.22e-07 の約 3 倍
+
+"""s > s_cert に対して宣言する上界 ε。
+
+規則 = `ε = 2.0 × max|F(s)| over s ∈ [s_cert − 2, s_cert]`、絶対床 1e-6。
+**窓は表の内側から取る** (延長格子は要らない)。`n_cert` はこの行が保証する
+最終ノードの添字で、それ以降の `F` は埋め草なので窓に入れない。"""
+function tail_bound(s::AbstractVector, F::AbstractVector, n_cert::Integer)
+    s_cert = s[n_cert]
+    i0 = searchsortedfirst(s, s_cert - EPS_WINDOW_A_INV - 1e-12)
+    m = maximum(abs, @view F[i0:n_cert])
+    return Dict{String,Any}(
+        "kind" => TAIL_KIND_BOUND,
+        "eps" => max(EPS_SAFETY * m, EPS_FLOOR),
+        "valid_to" => s_cert,
+        "source" => "sup|F| on [s_cert-$(EPS_WINDOW_A_INV), s_cert] x $(EPS_SAFETY), floor $(EPS_FLOOR)")
 end
 
 """260805Cl 追加: E0 行単位のチェックポイント。
@@ -355,13 +419,29 @@ presc_provenance(p) =
     replace(p.dirac_continuum ? MODEL_ID_KD : p.rel_continuum ? MODEL_ID_REL :
             MODEL_ID, r"-v[0-9]+[a-z]*$" => "")
 
+"""出荷 JSON のスキーマ版。**1 → 2 で行の `tail` の意味が変わった** —
+`{a, b}` (指数外挿の係数) から `{kind, eps, valid_to, source}` (実測上界) へ。
+`s_cert_A_inv` が行に増えたのも 2 から。"""
+const SCHEMA_VERSION = 2
+
+"出荷形式 (s グリッド + スキーマ版) が v5 の契約どおりか"
+is_shipping_format() =
+    SCHEMA_VERSION == 2 && length(S_GRID) == 321 && S_GRID[end] == 16.0
+
 """出荷世代の番号。**処方一式に対して定義される。**つまみを 1 つでも出荷処方から
 外したら `0.0.0-dev` になる — `pack_resource.py` は全チャネルで
 dataset_version と model_id が**一致すること**しか見ないので、ここで名乗り分けないと
 研究用の処方 (--kli / --frozen / --norel) で作った一式がそのまま出荷版として
-梱包できてしまう。"""
+梱包できてしまう。
+
+⚠⚠ **260810Cl バグ修正: 処方 NamedTuple しか見ていなかった。**S_GRID や
+`SCHEMA_VERSION` を変えても `"4.0.0"` を名乗り続けたので、**s グリッドを
+16 Å⁻¹ へ延ばした一式が v4 を騙って梱包できる**状態だった。出荷版であることは
+「処方 **かつ** 出荷形式」で決まるので、両方を版キーに含める。
+⚠ v3/v4 は s グリッドが違う (161 点) ので、このコードからは**もう名乗れない** —
+過去世代を再現したいときは S_GRID ごと戻す必要がある (意図的にそうしてある)。"""
 presc_dataset_version(p) =
-    p == PRESC_V4 ? "4.0.0" : p == PRESC_V3 ? "3.0.0" : "0.0.0-dev"
+    (is_shipping_format() && p == PRESC_V4) ? "5.0.0" : "0.0.0-dev"
 
 """JSON の `prescription` ブロック。**処方から引く** — ここを固定文字列にすると、
 つまみを変えたのに説明文が古いまま出る (v3 の provenance で実際に起きた)。"""
@@ -425,7 +505,11 @@ function run_channel(z::Int, tag::String, outdir::String;
             push!(rows, resumed[e0])
             continue
         end
-        o = compute_channel(z, tag, e0; settings=settings, s_nodes=S_GRID,
+        # 260810Cl: 行ごとの保証上限。E0 が低い行は運動学的に 16 Å⁻¹ へ届かないので、
+        # **届く範囲だけを計算する** (それ以上を頼むと l4_angular が error を投げる)
+        s_cert, n_cert = s_cert_of(e0)
+        s_nodes_row = n_cert == length(S_GRID) ? S_GRID : S_GRID[1:n_cert]
+        o = compute_channel(z, tag, e0; settings=settings, s_nodes=s_nodes_row,
                             verbose=false, presc...)
         retried = 0
         # ★260808Cl 追加: **明らかな破損はその場で作り直す。**
@@ -441,7 +525,7 @@ function run_channel(z::Int, tag::String, outdir::String;
                     z, tag, e0, o["N0"],
                     o["sigma_own_nm2"] / max(o["sigma_bote_nm2"], 1e-300))
             flush(stdout)
-            o = compute_channel(z, tag, e0; settings=settings, s_nodes=S_GRID,
+            o = compute_channel(z, tag, e0; settings=settings, s_nodes=s_nodes_row,
                                 verbose=false, presc...)
             if !is_sane_row(o)
                 push!(failures, Dict{String,Any}(
@@ -458,7 +542,7 @@ function run_channel(z::Int, tag::String, outdir::String;
                     z, tag, e0, d["bad_significant_l"], d["max_match_resid"],
                     d["r_tail_max"])
             o = compute_channel(z, tag, e0; settings=(; settings..., ppw=35.0),
-                                s_nodes=S_GRID, verbose=false, presc...)
+                                s_nodes=s_nodes_row, verbose=false, presc...)
             retried = 1
             d = o["diag"]
             if d["bad_significant_l"] > 0 || d["max_match_resid"] > GATE_MRES ||
@@ -468,21 +552,29 @@ function run_channel(z::Int, tag::String, outdir::String;
                     "mres" => d["max_match_resid"], "rtail" => d["r_tail_max"]))
             end
         end
+        # 260810Cl: 届かなかった上端を 0 で埋めて全行を 321 点に揃える
+        # (C# 側は固定長グリッド契約。埋め草は s_cert によって補間基底から外れる)
         F = o["F"]
+        if length(F) < length(S_GRID)
+            F = vcat(F, zeros(length(S_GRID) - length(F)))
+        end
         row = Dict{String,Any}(
             "e0_keV" => e0, "u" => e0 / eth, "F" => F, "N0" => o["N0"],
             "sigma_own_nm2" => o["sigma_own_nm2"],
             "sigma_bote_nm2" => o["sigma_bote_nm2"],
-            "tail" => tail_fit(S_GRID, F),
+            "s_cert_A_inv" => s_cert,
+            "tail" => tail_bound(S_GRID, F, n_cert),
             "diag" => Dict{String,Any}(
                 "mres" => d["max_match_resid"], "badL" => d["bad_significant_l"],
                 "rtail" => d["r_tail_max"], "ortho_c" => d["max_ortho_c"],
                 "retried" => retried))
         push!(rows, row)
         append_partial(outdir, tag, z, row)    # 260805Cl: 行単位チェックポイント
-        # 260805Cl: 表示する F は末尾ノード = S_GRID[end] (s_max。4.0 決め打ちをやめた)
-        @printf("  Z=%d %s @%7.1fkV (u=%7.2f) done %d/%d  F(%.0f)=%+.3e  s/B=%.3f [%.1fmin]\n",
-                z, tag, e0, e0 / eth, i, length(e0s), S_GRID[end], F[end],
+        # 260805Cl: 表示する F は末尾ノード (4.0 決め打ちをやめた)
+        # 260810Cl: 末尾は行ごとに違う (低 E0 行は s_cert で切れて以降は埋め草) ので
+        #           S_GRID[end]/F[end] ではなく s_cert/F[n_cert] を出す
+        @printf("  Z=%d %s @%7.1fkV (u=%7.2f) done %d/%d  F(%.2f)=%+.3e  s/B=%.3f [%.1fmin]\n",
+                z, tag, e0, e0 / eth, i, length(e0s), s_cert, F[n_cert],
                 o["sigma_own_nm2"] / max(o["sigma_bote_nm2"], 1e-300),
                 (time() - t0) / 60.0)
         flush(stdout)                          # 260804Cl 追加: ログ redirect 時の mtime 監視用
@@ -501,7 +593,8 @@ function run_channel(z::Int, tag::String, outdir::String;
         "j_lower" => j_lower, "occ_init" => occ_init,
         "s_grid_A_inv" => S_GRID,
         "model_id" => presc_model_id(presc),
-        "dataset_version" => presc_dataset_version(presc), "schema_version" => 1,
+        "dataset_version" => presc_dataset_version(presc),
+        "schema_version" => SCHEMA_VERSION,
         "generator" => "ionization.jl (Julia)",
         "generator_commit" => _git_head(),
         "validated" => note, "validation_summary" => note,
@@ -548,7 +641,10 @@ function audit(; presc=PRESC_V4)
         ("dt_log 1e-3→7e-4",        (; HIGH_SETTINGS..., dt_log=7e-4)),
         ("sig_thresh 1e-13→1e-15",  (; HIGH_SETTINGS..., sig_thresh=1e-15)),
     ]
-    s = collect(0.0:0.25:4.0)
+    # 260810Cl: 延長域込みへ。s ≤ 4 だけを見ていたので、**新しく出荷する 4–16 Å⁻¹ の
+    # 求積誤差を一度も測っていなかった**。3 ケースとも 400 kV 未満なので 16 は
+    # 運動学的に届く (s_kin = 27.0 @100kV / 39.9 @200kV / 50.8 @300kV)
+    s = collect(0.0:0.25:16.0)
     println("audit 処方: ", presc_model_id(presc))
     for (z, tag, e0) in cases
         base = compute_channel(z, tag, e0; settings=HIGH_SETTINGS, s_nodes=s,
