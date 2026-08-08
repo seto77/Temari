@@ -31,8 +31,37 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
   Temari には**データセットを置かない** (コードとドキュメントのみ)
 - ReciPro 側の作業指示書 = `ReciPro/.project-guidance/ReciPro/ReciPro_STEM-EDX_*.md`
 
-## ★ 現在地 (2026-08-08) — **dataset v4.0.0 は生成・QC 完了**
+## ★ 現在地 (2026-08-08) — **dataset v5.0.0 を生成・QC・配備完了**
 
+- **dataset v5.0.0 を生成・QC 済** (525 チャネル / 14,796 行、**6 時間 47 分**、
+  **failures 0 / check_tables 525/525**)。正本 = **`src/prod_v5_jl/MANIFEST.md`**。
+  次フェーズの正本 = **`docs/next_phase_2026-08-11.md`**
+- **v5 = s グリッドを 8 → 16 Å⁻¹ (161 → 321 点) へ延長し、指数 tail を撤回**した世代。
+  **物理は v4 と同一** (`model_id` が同一)。変わったのは s の収録範囲と s>s_max の契約だけ
+  - **⚠⚠ v4 までの指数 tail は上界でも近似でもなかった。**43 % の行で hard fail し、
+    残りのうち高 l では**符号の逆の値**を返す (Au L3 @300kV s=12 で +4.15e-5 vs 真値 −1.62e-3)
+  - 代わりに**行ごとの `s_cert` (= min(16, 0.98/λ) を格子点に丸めた運動学的保証上限) と
+    実測上界 ε (= 2.0 × sup|F| on [s_cert−2, s_cert]、床 1e-6)** を持つ。
+    **1,598 行 (10.8 %) が s_cert < 16** で、その先は厳密に 0 の埋め草
+  - `schema_version` 1 → **2**、ReciPro formatVersion 3 → **4**、`.bin` 3,329,311 bytes
+  - ⚠ **`GridAt` の基底 subsetting と `BuildShape` の台打ち切りはセット。**
+    321 ノードを一度に組むので、届かないノードで throw すると
+    「30 kV では s=0.5 の評価すら落ちる」。0 を置いて台を s_cert で切ること
+  - ⚠ **ε を E0 で内挿しない** (上界の内挿は上界ではない)。挟む 2 行の max を取る
+- **ReciPro へ配備済** (2026-08-08)。`EdxCheck all` / `AlchemiCheck all` /
+  **`AlchemiCheck tail` (ゲート化。57609/57609・欠落 0)** すべて PASS。
+  指示書 = `ReciPro/.project-guidance/ReciPro/ReciPro_STEM-EDX_v5配備指示書.md`
+  - ⚠ **`.bin` と `Crystallography.dll` は必ず同時差し替え** (片方だけだと
+    ReciPro が自分の埋め込みリソースを読めなくなる。実際に例外を確認済)
+  - **ReciPro の Bloch 上限を 1600 にした** (作者決定)。実測の要求 s 最大が
+    N=1600 で 10.54 Å⁻¹ なので、**16 Å⁻¹ は GUI からは使い切れない**
+  - ⚠ **要求 s は加速電圧に依存しない** (実測 k^−0.003)。格子定数依存は**厳密に a⁻¹**。
+    正本 = `docs/basis_s_requirement_2026-08-10.md`。
+    引き継ぎ書 §1.2 の scaling (k^¼·a^−¾) は**指数が 2 つ誤っていた**
+  - ⚠ **v4 配備時の取りこぼしを発見**: `AlchemiCheck golden` は v3 に対して凍結された
+    まま v4 で再凍結されておらず、**その時点から失敗していた**。v5 で再凍結済。
+    ⇒ **dataset 更新時は `EdxCheck all` だけでなく `AlchemiCheck all` も回すこと**
+- **v4 世代の記録** (以下は履歴として残す):
 - **dataset v4.0.0 を生成・QC 済** (525 チャネル / 14,796 行、5 時間 16 分、
   **failures 0 / check_tables 525/525**)。正本 = **`src/prod_v4_jl/MANIFEST.md`**
 - **v4 に切り替えた**。`gen_production.jl` の**既定処方が v4** (κ 分解 Dirac 連続状態 +
@@ -52,7 +81,9 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
   (M1 = 3s・M5 = 3d を含む)。従来の 5 チャネルは v3 処方なので v4 経路を踏まない。
   **両方走らせること**
 - QC は `tools/check_tables.jl` (Julia 版。C1-C8 + **C9 = 軌道の割り当て** +
-  **C10 = メタデータ一致** + **C11 = N0 の桁外れ**)。`--eb` で C9 も回る。
+  **C10 = メタデータ一致** + **C11 = N0 の桁外れ** + **C12 = ε が規則値以上** +
+  **C13 = ε が数値床以上** + **C14 = s>s_cert の埋め草が厳密に 0**)。`--eb` で C9 も回る。
+  ⚠ **C6 は s≤16 まで検査し、s_cert < s_j の行を基底から外す** (C# の `GridAt` と同じ規則)。
   ⚠ **C9 は「E_b が Bote 端と 0.1 % 一致」では駄目**だった — それが成り立つのは
   深い準位だけで、浅い準位は 0.5〜1.6 % ずれる (Koopmans 型固有値と実験端の系統差)。
   **スピン軌道分裂**なら系統差が相殺し、κ の割り当てを直接検査できる
@@ -103,13 +134,13 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
   `l4_angular` / `l5_exit_edx` / `selftest`。**module は導入せずフラット名前空間**
   (include するだけで全名前が見える / 連結すれば単一ファイルに戻る)。純粋な移動で
   5 チャネル === ビット同一。層とファイルの対応は `docs/architecture.md`
-- **⭐ 現状の残務・次の一手の正本 = `docs/next_phase_2026-08-10.md`**
-  (**冒頭でこれを読む**)。次の仕事 = **s グリッドを 16 Å⁻¹ へ延ばす全再生成**
-  (dataset v5.0.0 / formatVersion 4)。技術的決定の正本 =
-  **`docs/tail_contract_2026-08-09.md`**。出荷データの正本 = `src/prod_v4_jl/MANIFEST.md`
-  - **⚠⚠ 出荷中の tail は間違っている。**s>8 の指数外挿は 43 % の行で hard fail し、
-    **残りのうち高 l では黙って符号の逆の値を返す** (Au L3 @300kV s=12 で
-    +4.15e-5 vs 真値 −1.62e-3 を実測)。原因は F が負になること (null 行の 91.6 %)
+- **⭐ 現状の残務・次の一手の正本 = `docs/next_phase_2026-08-11.md`**
+  (**冒頭でこれを読む**)。技術的決定の正本 = **`docs/tail_contract_2026-08-09.md`**、
+  要求 s の実測 = **`docs/basis_s_requirement_2026-08-10.md`**。
+  **出荷データの正本 = `src/prod_v5_jl/MANIFEST.md`**
+  - 一世代前 = `docs/next_phase_2026-08-10.md` (s グリッド延長の計画。**全部実施済**)。
+    ⚠ 同書 §1.2 の scaling と §4.3 のビット同一の数値は**実測と食い違う**
+    (前者は指数 2 つ、後者は 72 行での量子化コード変化)。正しい値は上記 2 書
   - 一世代前 = `docs/next_phase_2026-08-09.md` (公開と v4 配備。**全部実施済**)
 - 一世代前 = `docs/next_phase_2026-08-08.md` (v4 の生成指示。**§2 は全部実施済**、
   §1 の未決 `--transverse` も決着)。処方は作者判断で確定済 —
