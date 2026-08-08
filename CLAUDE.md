@@ -9,8 +9,14 @@ ReciPro の STEM-EDX 機能のデータ生成層を独立させた公開予定�
   (「P2 完了 + v3 の本番生成完走後に Temari へ移し、以後は Temari が正本」) は
   両方とも満たされている。**dataset v4.0.0 は実際に Temari の
   `src/gen_production.jl` から生成した**ので、v4 世代について正本は Temari。
-  ⚠ **ReciPro 側 `handout/` をどうするか (v3 で凍結する / v4 を配備する) は未決。
-  作者判断**。現状は v3 のまま触っていない
+  **★ 2026-08-09: ReciPro へ v4 を配備済 (作者指示)。**`handout/prod_v4_jl/` に
+  525ch + MANIFEST、`pack_resource.py` を formatVersion 3 / shellCode M1–M5 = 5..9 へ、
+  埋め込み `.bin` を 2,636,031 bytes (525ch) へ、C# に `MTotal`/`M1–M5` を追加。
+  `EdxCheck all` ALL PASS。詳細 = `docs/next_phase_2026-08-09.md` §2.1。
+  ⚠ **ReciPro 側は 3 つの git repo に跨る** — `ReciPro` 本体 / `Crystallography`
+  (**サブモジュール**) / `ReciPro/tools` (リモート無しのローカル repo)。
+  ⚠ **生成コードの正本は Temari。**handout の `gen_production.jl` は v3 世代のミラーで
+  v4 を生成できない (既定処方が v3)
 - v3 世代についての記述 (以下) は履歴として残す:
   - 生成コードの正本は ReciPro 側: `C:\Users\seto\source\repos\ReciPro\tools\IonizationGen\handout\`
     (tools ローカルリポの一部)。Temari/src はそのミラー + 最適化実験の先行分

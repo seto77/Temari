@@ -37,11 +37,23 @@
   1 行目に出るが、読まない人は読まない
 - 現状は `docs/src/en/cli.md` に**警告ブロックを入れて**明示してある
 
-### 1.2 ReciPro 側 `handout/` をどうするか
+### 1.2 ReciPro 側 `handout/` をどうするか — **✅ 決着: v4 を配備 (2026-08-09、作者指示)**
 
 v4 は Temari 側のコードで生成した (計画書の移行条件 =「P2 完了 + v3 の本番生成
-完走」は両方満たされている)。`handout/` を **v3 で凍結**するか、**v4 を配備**するか。
-現状は v3 のまま触っていない。
+完走」は両方満たされている)。**`handout/prod_v4_jl/` に 525 チャネル + MANIFEST を配備し、
+M 殻まで含めて ReciPro が使えるようにした。**`prod_v3_jl/` は履歴として残してある。
+
+配備の実体 (詳細は §2.1):
+
+- `handout/prod_v4_jl/` = 525 JSON + MANIFEST (59 MB)
+- `pack_resource.py` を **formatVersion 3 / shellCode M1–M5 = 5..9** へ
+- 埋め込みリソース `Crystallography/Diffraction/Ionization/IonizationFsE0.bin` を
+  **2,636,031 bytes (525ch)** へ差し替え
+- C# は `IonizationShell` に **MTotal / M1–M5** を追加 (既存値は不変)
+
+⚠ **生成コードの正本は Temari で確定**。ReciPro `handout/` にある `gen_production.jl` /
+`ionization.jl` は v3 世代のミラーで、**v4 の生成には使えない** (既定処方が v3)。
+再生成は Temari 側で行うこと。
 
 ### 1.3 `generator_commit` の扱い — **✅ 決着 (2026-08-09)**
 
@@ -77,31 +89,52 @@ WORST 9.044e-08 = 基準値 / `verify_e5_qlane_dirac` 75 ケース ·
 
 ## 2. やること
 
-### 2.1 ReciPro への梱包 — **M 殻で形式変更が要る**
+### 2.1 ReciPro への梱包 — **✅ 完了 (2026-08-09)**
 
-`ReciPro/tools/IonizationGen/pack_resource.py` は **M 殻を知らない**:
+実施した内容 (すべて ReciPro 側。3 つの git repo に跨る点に注意):
 
-```python
-SHELL_CODE = {"K": 0, "L1": 1, "L23": 2, "L2": 3, "L3": 4}   # 2 は欠番として予約
-FORMAT_VERSION = 2
-PACK_LAYOUT = [("K", PROD_V3), ("L1", PROD_V3), ("L2", PROD_V3), ("L3", PROD_V3)]
-```
+| repo | 変更 |
+|---|---|
+| `ReciPro/tools` (ローカル repo) | `pack_resource.py` (fv3 / M1–M5 = 5..9 / `PACK_LAYOUT` を v4 へ)、`gen_golden.py` (M 殻 + `m_total`、出力を `golden_v3.json` へ)、`EdxCheck` (shellCode 表・`m_total` 検査・Inspect 走査を 11 殻へ)、`handout/prod_v4_jl/` に 525 JSON + MANIFEST |
+| `Crystallography` (**サブモジュール**) | `IonizationChannel.cs` (`MTotal`/`M1–M5`、`ShellCodeM1–M5`、`HasMShell`、`CodesFor`、`SigmaOf`)、埋め込み `IonizationFsE0.bin` を 525ch へ |
+| `ReciPro` | サブモジュールポインタのみ |
 
-必要な変更:
+- **`.bin` は 2,636,031 bytes** (見積り 2.6 MiB と一致)。m1 は 8,251,025 bytes
+- **shellCode は M1..M5 = 5..9**、**2 は欠番のまま**。`FORMAT_VERSION = 3`
+- **`IonizationShell` は末尾に追加** (`MTotal=5, M1=6..M5=10`)。既存値は不変なので
+  プリセット blob の互換は保たれる (`preset` テストで確認済)
+- **列挙 (`EnumerateChannels`) には MTotal を足した** — EDS が見るのは Mα/Mβ という
+  線なので、L と同じ扱い。M1–M5 単独は列挙しない (解決はできる)
 
-1. `SHELL_CODE` に **M1..M5 = 5..9** を追加 (**2 は欠番のまま。番号は再利用しない**)
-2. `FORMAT_VERSION` を **3** へ
-3. `PACK_LAYOUT` を v4 のディレクトリに向け、M1..M5 を末尾に追加
-   (索引順 = このリスト順 × Z 昇順)
-4. C# 側: リーダーの formatVersion 検査、shellCode の enum、
-   M 線の重み合成 (LTotal と同じ実行時 Bote σ 重み)
-5. .bin の大きさは 246ch で 1.33 MiB だったので、**525ch では約 2.6 MiB** の見込み
+⚠⚠ **M4/M5 が無い元素がある。**`Z = 30–32 (Zn/Ga/Ge)` は **Bote–Salvat の係数表が
+7 副殻までしか無い**ので M4/M5 の σ が存在しない (3d の占有とは別の話 — Zn の 3d は
+充填されている)。生成側も同じ条件で弾いている。したがって **`MTotal` は「表にある
+副殻だけ」を束ねる契約**にした (`IonizationDataProvider.CodesFor`)。`LTotal` のように
+全副殻を要求すると、これらの元素の M 線がまるごと `UnsupportedElement` で落ちる。
 
-⚠ **v1/v2/v3 の .bin と新リーダーは相互に読めない**契約 (意図した非互換)。
-formatVersion で弾かれることを確認する。
+⚠ **golden はデータセットと対で更新する。**`golden_v2.json` (dataset 3.0.0) を
+残したまま **`golden_v3.json`** を新設した。同じ名前で上書きすると、新しい `.bin` を
+旧 golden と突き合わせて「全件不一致」になる事故が起きる。
+
+**検証 (すべて実測)**:
+
+- `EdxCheck all` → **ALL PASS** (golden / identity / inspect / preset / planewave /
+  byteexact / multichannel / fixture / pathagree)
+- `m_total` 最大相対誤差 **5.68e-15**、`f_eval` 9.55e-15 (3002 pts、525ch)
+- **Inspect ⇔ Resolve 同値性: 99 Z × 11 殻 × 3 E0 で不一致 0** (Available 1947 ケース)。
+  M 殻を足したこの走査が、`Describe` と `Resolve` が別々に副殻を選んでいないことの検査
+- `fixture` は **dataset 変更で SHA ゲートが正しく発火**したので `freeze --force` で再凍結。
+  **v3 → v4 で像の観測量 (plane-wave reference ratio) は最大 0.11 %** しか動かない
+  (Ti-K 10 nm。O-K は 0.02 %、Sr-L は −0.03 %)。F(s) が高 s で数 % 動くのに対し、
+  像に効く低 s 域では小さい
 
 ⚠ **σ の不確かさを利用者に伝えること。**Bote–Salvat 自体の実験との RMS は
 **K 10 % / L 15 % / M 24 %**。M 殻を出す以上、UI かドキュメントに書く。
+**これは未実施** — リソース側の `README.md` には書いたが、**GUI には出していない**。
+
+⚠ **M 殻は σ が大きい。**Au @200 kV で M は σ = 1.18e-6 nm² と **L の 20 倍**
+(5.74e-8)。端が低く過電圧が大きいため。重元素の STEM-EDX では実用上の利得が大きい
+一方、**不確かさも 24 % と最大**なので、両方を伝える必要がある。
 
 ### 2.2 GitHub への公開
 
