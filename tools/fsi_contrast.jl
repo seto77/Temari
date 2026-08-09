@@ -38,7 +38,7 @@ fe ≥ 62.2 eV (Au M5) / 126.6 eV (Fe K)** であり、**その 20 % の領域�
   julia +1.11 --project=. -t auto tools/fsi_contrast.jl
 =====================================================================#
 
-include(joinpath("c:\\Users\\seto\\source\\repos\\Temari", "src", "gen_production.jl"))
+include(joinpath(@__DIR__, "..", "src", "gen_production.jl"))
 
 "PWIA 用: V ≡ 0 かつ z_asym = 0 (Coulomb 尾なし → 自由球面波)"
 struct FreeField
