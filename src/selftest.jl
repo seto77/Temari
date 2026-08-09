@@ -215,14 +215,78 @@ function selftest()
             E_ex = c * c * ((1.0 + (z / c / (n_pr - abs(kap) + g))^2)^-0.5 - 1.0)
             rel = abs(E / E_ex - 1.0)
             got[name] = E
-            @printf("     Z=%2d %-6s: E=%14.6f  厳密=%14.6f  rel=%.2e  小成分=%.4f\n",
-                    z, name, E, E_ex, rel, fs)
+            # 260809Cl: 小成分を**表示するだけで assert していなかった**。
+            # 点核 Coulomb では Dirac virial 定理 ⟨cα·p⟩ = ⟨r dV/dr⟩ から
+            # V + r V′ = 0 なので、ζ = ∫F²/∫(G²+F²) が厳密に −E/(2c²) になる
+            # (E は静止エネルギーを引いた束縛エネルギー = 負)。出典 = Shabaev,
+            # arXiv:physics/0211087 の任意中心場 virial 関係の Coulomb 特殊形。
+            # ⚠ これは**遮蔽場の一般式 (T6b) の特殊形**であって、別の検査ではない。
+            ζ_ex = -E / (2 * c * c)
+            rel_ζ = abs(fs / ζ_ex - 1.0)
+            @printf("     Z=%2d %-6s: E=%14.6f  厳密=%14.6f  rel=%.2e  小成分=%.6e (virial rel=%.1e)\n",
+                    z, name, E, E_ex, rel, fs, rel_ζ)
             @assert rel < 1e-5 "T6 FAIL"
+            # 実測は 2e-11〜7e-11 (Z=14..79 の 1s/2s/2p½/2p³ᐟ²)。2 桁の余裕を取る
+            @assert rel_ζ < 1e-9 "T6 FAIL: 小成分が virial 恒等式 ζ=−E/(2c²) を外れた"
         end
         deg = abs(got["2s"] / got["2p1/2"] - 1.0)
         split = got["2p3/2"] / got["2p1/2"]
         @printf("     Z=%2d 2s/2p½ 縮退: %.2e   2p³ᐟ²/2p½ = %.6f\n", z, deg, split)
         @assert deg < 1e-5 && split < 1.0 "T6 FAIL (degeneracy/splitting)"
+    end
+
+    # ---- T6b: 遮蔽場の Dirac virial 恒等式 (260809Cl 追加) ----
+    # 局所中心場 V(r) の任意の束縛固有状態で ⟨cα·p⟩ = ⟨r dV/dr⟩ が成り立つ
+    # (Shabaev, arXiv:physics/0211087)。静止エネルギーを引いた固有値を ε とすると
+    #
+    #     R = ε + 2c²ζ − ⟨V + r V′⟩ = 0,   ζ = ∫F²/∫(G²+F²)
+    #
+    # 純 Coulomb では V + rV′ = 0 なので T6 の ζ = −ε/(2c²) に退化する。
+    # **T6 と違い、これは遮蔽場 (SCF 後) でも厳密に成立する**ので、点核では
+    # 踏まない経路 — Hartree・交換込みの V、node のある軌道、l>0 の遠心項 — を検査する。
+    #
+    # ⚠ **V + rV′ は d(rV)/dr に等しく、RvSpline は r·V を張っている**ので、
+    #   `v_d012` の解析微分から直接得られる。これが効く理由は数値の都合ではない —
+    #   核 Coulomb 項 −Z/r は r·V では**定数 −Z** なので微分で厳密に消える。
+    #   V と rV′ を別々に作って引くと大きな相殺が出るが、この形では原理的に起きない。
+    #
+    # 検出できるもの: 遮蔽場での G/F・固有値・規格化の不整合、動径求積の誤差、
+    #   有限 rmax、束縛エネルギーの規約違い、V の補間と微分の不整合。
+    # 検出できないもの: Xα/KLI が物理的に妥当か、SCF が別の自己無撞着な誤った場に
+    #   落ちていないか、G と F の相対符号、連続状態、行列要素 A_P/A_Q。
+    #   ⇒ **内部 solver の gate であって、外部の物理検証の代替ではない。**
+    println("[T6b] 遮蔽場の Dirac virial 恒等式 R = ε + 2c²ζ − ⟨V+rV′⟩:")
+    let worst = 0.0, worst_tag = ""
+        for (z, occ) in ((26, ORBITALS[26]), (79, ORBITALS[79]))
+            for xc in (:xalpha, :kli)
+                a = SCFAtom(z, occ; relativistic=true, exchange=xc)
+                V = V_bound_callable(a)
+                for (nm, kap, nod) in (("1s", -1, 0), ("2s", -1, 1),
+                                       ("2p1/2", 1, 0), ("2p3/2", -2, 0),
+                                       ("3d5/2", -3, 0))
+                    E, r, G, F, ζ = solve_dirac_bound_2c(V, z; kappa=kap,
+                                                         n_nodes=nod)
+                    w = similar(r)
+                    @inbounds for i in eachindex(r)
+                        v, v1, _ = v_d012(V, r[i])
+                        w[i] = v + r[i] * v1
+                    end
+                    vv = trapz((G .* G .+ F .* F) .* w, r)
+                    R = E + 2.0 * c * c * ζ - vv
+                    # 相対化は 3 項の絶対値の和で (ε と 2c²ζ は同程度に大きく相殺する)
+                    η = abs(R) / (abs(E) + 2.0 * c * c * ζ + abs(vv))
+                    if η > worst
+                        worst = η
+                        worst_tag = "Z=$z $xc $nm"
+                    end
+                end
+            end
+        end
+        @printf("     最悪 η = %.2e  (%s)\n", worst, worst_tag)
+        # 実測は 5.5e-10〜1.2e-7 (Z=26/79 × xalpha/kli × 5 軌道、最悪 Z=26 3d5/2)。
+        # ⚠ 点核の 1e-9 をここへ要求してはいけない (SCF 格子と rmax の分だけ緩む)。
+        # 規格化を factor 2 間違えれば η は O(0.5) になるので、1e-5 で十分鋭い
+        @assert worst < 1e-5 "T6b FAIL: 遮蔽場で virial 恒等式が破れた"
     end
 
     # ---- T7: 3j の閉形式と K 殻への退化 ----
@@ -243,6 +307,10 @@ function selftest()
         s = [0.0, 1.0, 2.0, 4.0]
         base = compute_channel(z, tag, e0; settings=QUICK_SETTINGS, s_nodes=s,
                                verbose=false)
+        @assert (base["schema_version"] == SINGLE_RUN_SCHEMA_VERSION &&
+                base["exit"] == "edx-form-factor" &&
+                base["quadrature_preset"] == "quick" &&
+                base["settings"]["n_q"] == QUICK_SETTINGS.n_q) "T8 FAIL: 単発 JSON に求積設定が保存されない"
         inf_c = RelCont(1e9, Float64(z), 0.0, false)       # c→∞・点核・Darwin off
         o_inf = compute_channel(z, tag, e0; settings=QUICK_SETTINGS, s_nodes=s,
                                 verbose=false, rel_override=inf_c)
@@ -307,7 +375,9 @@ function selftest()
     let z = 26, eps_eV = 200.0, lm = 24
         o = compute_phase(z, eps_eV; l_max=lm, verbose=false)
         k = o["kappa_a0inv"]
-        pot = V_bound_callable(get_neutral(z); latter_charge=0.0)
+        pot = elastic_scattering_potential(get_neutral(z), eps_eV / HARTREE_EV, :static)
+        @assert o["scattering_potential"] == "static" "T10 FAIL: phase 既定が純静電場でない"
+        @assert o["phase_calibration"] == "same-grid free-particle subtraction" "T10 FAIL: 自由粒子の位相較正が無い"
         r = collect(range(1e-5, 40.0, length=40_000))
         V = [pot(x) for x in r]
         jb = zeros(lm + 1)
@@ -323,7 +393,10 @@ function selftest()
             born[li] = -2.0 * k * trapz(V .* view(jl2, li, :) .* r .^ 2, r)
         end
         d = o["delta_rad"]
-        lo, hi = 8, lm - 2                       # Born が効く窓 (障壁で場が弱い)
+        # 純静電場は Xα 場より短距離なので l≳15 では真の δ が連続状態ソルバの
+        # 自由粒子位相の数値床 (~1e-3 rad、T2) に入る。Born が効き、かつ床より
+        # 十分大きい窓だけを比率ゲートに使う。
+        lo, hi = 8, 14
         worst = maximum(abs(d[l+1] / born[l+1] - 1.0) for l in lo:hi)
         @printf("[T10] 弾性 δ_l vs Born (Z=%d, ε=%.0f eV, l=%d..%d): max|比−1| = %.3f\n",
                 z, eps_eV, lo, hi, worst)
@@ -878,9 +951,8 @@ function selftest()
     # (c) **c → ∞ でスピン軌道分裂が消える**。見るのは g や S ではなく
     #     **δ_{κ=+l} − δ_{κ=−(l+1)} そのもの** — これがスピン軌道の本体で、
     #     1/c² で落ちるので c×10³ なら 10⁻⁶ 倍になるはず。
-    #     ⚠ S を直接ゲートにするのは軽元素では鈍い: Z=6 の物理的な max|S| は
-    #       1.5e-3 しかなく、c→∞ 側は位相シフトの数値床 (~1e-8) に当たって
-    #       2.9e-5 で止まる (比 52 倍にしかならない)。分裂そのものなら鋭い
+    #     ⚠ S を直接ゲートにするのは軽元素では鈍い: Z=6 の物理的な max|S| 自体が
+    #       1.5e-3 と小さい。分裂そのものの方が構造検査として鋭い
     let z = 6, ev = 300.0
         split(o) = begin
             kap = o["kappa"]
@@ -891,6 +963,10 @@ function selftest()
         end
         o = compute_mott(z, ev; verbose=false, l_cap=200)
         oi = compute_mott(z, ev; verbose=false, l_cap=200, c=C_LIGHT * 1e3)
+        @assert o["scattering_potential"] == "static" "T24 FAIL: Mott 既定が純静電場でない"
+        @assert o["settings"]["l_cap"] == 200 "T24 FAIL: Mott 設定が出力に保存されない"
+        @assert o["tail_converged"] == !o["truncated"] "T24 FAIL: 裾の収束診断が矛盾"
+        @assert o["delta_tail"] <= o["delta_tail_raw"] "T24 FAIL: 自由粒子の位相較正で裾が改善しない"
         s0, si = split(o), split(oi)
         @printf("[T24] Mott (Z=%d, ε=%.0f eV, l_max=%d): 閉包 %.2e / 光学定理 %.2e (同じ恒等式)\n",
                 z, ev, o["l_max"], o["closure_rel"], o["optical_rel"])
@@ -900,11 +976,9 @@ function selftest()
         @assert o["max_sherman"] <= 1.0 + 1e-12 "T24 FAIL: |Sherman| が 1 を超えた"
         @assert o["sigma_el_a0_2"] > 0 && o["sigma_tr_a0_2"] > 0 "T24 FAIL: 断面積が非正"
         @assert o["sigma_tr_a0_2"] < 2 * o["sigma_el_a0_2"] "T24 FAIL: σ_tr < 2σ_el が破れた"
-        # ⚠ 分裂は 1/c² なので c×10³ なら 10⁻⁶ 倍が理想だが、実測は 2.9×10³ 倍で
-        #   止まる。**位相シフトの数値床 ~4×10⁻⁷ rad** に当たるため — κ と
-        #   −(κ+1) は c→∞ でも**別の連立系**として積分され (種の F も分割数も
-        #   違う)、その打ち切り誤差の差が残る。δ の打ち切り閾値 (1e-7) と同程度
-        #   なので物理には効かない。ゲートは床の上に置く
+        # ⚠ 共通の自由粒子位相は較正で除けるが、κ と −(κ+1) は c→∞ でも別の
+        #   連立系として積分されるため、その差の数値床は tol_delta と同程度に残る。
+        #   ゲートはこの床の上に置く
         @assert si < s0 / 500 "T24 FAIL: c→∞ でスピン軌道分裂が消えない"
         @assert oi["max_sherman"] < o["max_sherman"] / 20 "T24 FAIL: c→∞ で S が落ちない"
     end

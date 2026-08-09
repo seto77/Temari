@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seto77.github.io/Temari/schema/temari_dataset_v2.schema.json",
+  "title": "Temari ionization form-factor table (schema_version 2)",
+  "description": "One file per channel (Z, subshell). Each row is one incident beam energy E0. This schema is normative for schema_version 2, shipped as dataset v5.x. NOTE the sign and unit conventions in the property descriptions - they are the part most often got wrong by consumers.",
+  "type": "object",
+  "required": [
+    "schema_version", "dataset_version", "model_id", "provenance",
+    "generator", "generator_commit", "z", "shell", "bote_subshell",
+    "kappa", "j_lower", "occ_init", "e_th_keV_bote", "edge_source",
+    "s_grid_A_inv", "rows", "settings", "prescription", "failures"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2,
+      "description": "2 changed the meaning of row.tail from {a,b} (exponential extrapolation) to {kind,eps,valid_to,source} (measured upper bound), and added row.s_cert_A_inv. The exponential tail of schema 1 was neither an approximation nor an upper bound - do not resurrect it."
+    },
+    "dataset_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-dev)?$",
+      "description": "Semantic version of the DATA, independent of the software version. '0.0.0-dev' means the file was produced with a prescription or grid outside the shipping contract and MUST NOT be packed for release."
+    },
+    "model_id": {
+      "type": "string",
+      "description": "Full prescription identifier. Every file in a set must carry the same value; a set with mixed model_id is not a dataset."
+    },
+    "provenance": { "type": "string", "description": "model_id with the generation suffix stripped." },
+    "generator": { "type": "string" },
+    "generator_commit": {
+      "type": "string",
+      "description": "Short git hash of the generator. A '-dirty' suffix means the working tree had uncommitted tracked changes and the result is NOT reproducible from the hash. Different files in one set MAY carry different hashes when a commit landed mid-fleet-run; that is only acceptable if src/ and tools/ are unchanged between them."
+    },
+    "z": { "type": "integer", "minimum": 1, "maximum": 118 },
+    "shell": { "enum": ["K", "L1", "L2", "L3", "M1", "M2", "M3", "M4", "M5"] },
+    "bote_subshell": { "type": "integer", "description": "Bote-Salvat subshell index used for the edge energy and sigma." },
+    "kappa": { "type": "integer", "not": { "const": 0 }, "description": "Dirac quantum number of the initial state. kappa = l for j = l-1/2, kappa = -(l+1) for j = l+1/2." },
+    "j_lower": { "type": "boolean", "description": "true when j = l - 1/2 (kappa > 0)." },
+    "occ_init": { "type": "number", "exclusiveMinimum": 0, "description": "Occupancy of the initial subshell (2j+1 for a closed subshell)." },
+    "e_th_keV_bote": { "type": "number", "exclusiveMinimum": 0, "description": "Edge energy [keV] from the Bote-Salvat tables, NOT the solver's own eigenvalue. The two differ by 0.5-1.6 % for shallow levels (Koopmans-type eigenvalue vs experimental edge); that is expected, not a defect." },
+    "edge_source": { "type": "string" },
+    "s_grid_A_inv": {
+      "type": "array",
+      "minItems": 2,
+      "items": { "type": "number", "minimum": 0 },
+      "description": "Scattering parameter s [A^-1], strictly increasing, s[0] = 0 exactly. CONVENTION: the momentum transfer is q = 4*pi*s [A^-1], equivalently K = 4*pi*s*a0 in atomic units. Identical in every file of a set. v5 ships 321 uniform points 0..16."
+    },
+    "rows": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/row" } },
+    "settings": {
+      "type": "object",
+      "required": ["n1", "n2", "n3", "l_cap", "n_x", "n_phi", "n_q", "ppw", "dt_log", "sig_thresh"],
+      "description": "Quadrature knobs actually used. Present so a consumer can tell HIGH from PROD output.",
+      "additionalProperties": true
+    },
+    "prescription": { "type": "object", "description": "Human-readable statement of the physics (bound state, continuum, exchange, final state).", "additionalProperties": true },
+    "failures": {
+      "type": "array",
+      "description": "Rows that failed a generation gate. MUST be empty in a shipping set. WARNING: empty does not imply healthy - v4 and v5 each produced corrupted rows that passed every generation gate and were caught only by QC (check_tables C11).",
+      "items": { "type": "object" }
+    },
+    "rel_continuum": { "type": "boolean", "description": "true selects the v3 scalar-relativistic continuum, which has a known defect (docs/src_defect_2026-08-07.md). false in every shipping set from v4 on." },
+    "dirac_continuum": { "type": "boolean" },
+    "validated": { "type": "string" },
+    "validation_summary": { "type": "string" },
+    "license_note": { "type": "string" },
+    "generated_utc_note": { "type": "string", "description": "Timestamps are deliberately omitted so output is deterministic." }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "row": {
+      "type": "object",
+      "required": ["e0_keV", "u", "F", "N0", "s_cert_A_inv", "tail", "sigma_own_nm2", "sigma_bote_nm2", "diag"],
+      "properties": {
+        "e0_keV": { "type": "number", "exclusiveMinimum": 0, "description": "Incident beam energy [keV]. Rows are sorted ascending. The E0 axis differs between channels - do not assume a shared axis." },
+        "u": { "type": "number", "exclusiveMinimum": 1, "description": "Overvoltage e0_keV / e_th_keV_bote." },
+        "F": {
+          "type": "array",
+          "items": { "type": "number" },
+          "description": "Shape factor F(s) on s_grid_A_inv, one value per grid point. F[0] = 1 exactly (normalization). *** F IS SIGNED AND CHANGES SIGN AT HIGH s. *** Consumers must not clip, abs, or assume monotonicity: 338+ sign flips occur even in the K shell. Entries at s > s_cert_A_inv are exact zeros (padding), not computed values."
+        },
+        "N0": { "type": "number", "exclusiveMinimum": 0, "description": "N(K=0), the normalization denominator. A value orders of magnitude out of line along E0 is the fingerprint of a corrupted row." },
+        "s_cert_A_inv": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Kinematic guarantee limit for THIS row: min(s_max, 0.98/lambda) rounded down to a grid point. Beyond it the table carries exact zeros. The bound is geometric (no Bloch pair with that difference vector exists on the Ewald sphere), not an accuracy limit."
+        },
+        "tail": { "$ref": "#/$defs/tail" },
+        "sigma_own_nm2": { "type": "number", "description": "Cross section from this code. Sanity diagnostic only - NOT the shipped sigma." },
+        "sigma_bote_nm2": { "type": "number", "exclusiveMinimum": 0, "description": "The SHIPPED cross section, from the Bote-Salvat parameterization." },
+        "diag": {
+          "type": "object",
+          "required": ["badL", "mres", "rtail"],
+          "properties": {
+            "badL": { "type": "integer", "description": "Partial waves that failed matching. Must be 0." },
+            "mres": { "type": "number", "description": "Worst matching residual." },
+            "rtail": { "type": "number" },
+            "ortho_c": { "type": "number", "description": "Bound-continuum overlap. Not zero under the relaxed core-hole prescription (different Hamiltonians); ~1e-14 only under exact frozen core." },
+            "retried": { "type": "integer" }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "tail": {
+      "type": "object",
+      "required": ["kind", "eps", "valid_to"],
+      "description": "Contract for s beyond the table. schema 2 declares a MEASURED UPPER BOUND, never an extrapolated value.",
+      "properties": {
+        "kind": { "const": 2, "description": "2 = measured bound. kind 0/1 belong to schema 1 and must be rejected." },
+        "eps": {
+          "type": "number",
+          "minimum": 1e-6,
+          "description": "Upper bound on |F| beyond s_cert: 2.0 * sup|F| measured on [s_cert-2, s_cert], with an absolute floor of 1e-6. *** DO NOT INTERPOLATE eps ACROSS E0 - an interpolated bound is not a bound. Take the max of the two bracketing rows. *** The 1e-6 floor coincides with one quantization code of the packed .bin, and with the s>8 quadrature error 3.2e-7 to within a factor of 3: there is no information below it."
+        },
+        "valid_to": { "type": "number", "description": "Equals s_cert_A_inv. Kept for readers that only parse the tail object." },
+        "source": { "type": "string", "description": "How eps was measured, in words." }
+      },
+      "additionalProperties": true
+    }
+  }
+}

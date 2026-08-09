@@ -60,8 +60,21 @@ Kirkland) は全てこれ相当の DHF 計算への**フィット**なので、�
 
 | データ | 中身 | DOI |
 |---|---|---|
-| Zhang et al., Dirac GOS | **Dirac ベースの GOS 表**。`gos` 出口の直接比較先 | **10.5281/zenodo.7729585** |
 | Segger, Kothleitner & Schattschneider, GOS | 広域 GOS 表。⚠ **LDA ベース** (Dirac ではない)。Gatan DM / pyEELSMODEL が使用 | **10.5281/zenodo.7645765** |
+
+⚠ **Zhang らの Dirac GOS は既に手元にある** (この表から 260812Cl に移した)。
+`data/Dirac_GOS_database.zip` (108 元素) と、展開済みの `data/database/{Fe,Au,H}.hdf5`。
+DOI 10.5281/zenodo.7729585、CC-BY。**格子の実測**
+(`docs/literature_findings_2026-08-12.md` §2):
+
+- HDF5 属性 `file_format = "GOS5"`、`<元素>/<辺>/{data (128×256), free_energy (128), q (256)}`
+- **q = 0.05 → 50 Å⁻¹ の等比 256 点** (比 1.0275)、**ΔE = 0.01 → 4000 eV の等比 128 点** (比 1.107)
+- **q_max = 50 Å⁻¹ は我々の s で 3.98 Å⁻¹ 相当** ⇒ **その外に物差しは無い**。
+  ⚠ **単位は HDF5 に書かれていない。**Bethe ridge 位置で物理から決めた
+- ⚠⚠ **論文 §5 の「サンプリングは辺ごとに適応させる (q_max = 2q_r)」は、公開データでは
+  実施されていない。**H / C / Si / Fe / Au / Ac / U を実際に開いて確認したが、
+  **全元素・全辺で格子は 1 ビットも変わらない**。効いているのは「対数格子である」ことだけ。
+  ([[transcribed-formula-check]] — 論文本文と公開データは食い違うことがある)
 
 ---
 

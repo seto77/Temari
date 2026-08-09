@@ -73,3 +73,37 @@ references:
     notes: >-
       The relativistic distorted-wave calculations that the bundled
       parameterization was fitted to.
+  - type: article
+    title: >-
+      Relativistic EELS scattering cross-sections for microanalysis based on
+      Dirac solutions
+    authors:
+      - family-names: Zhang
+        given-names: Zezhong
+      - family-names: Lobato
+        given-names: Ivan
+      - family-names: Brown
+        given-names: Hamish
+      - family-names: Lamoen
+        given-names: Dirk
+      - family-names: Jannis
+        given-names: Daen
+      - family-names: Verbeeck
+        given-names: Johan
+      - family-names: Van Aert
+        given-names: Sandra
+      - family-names: Nellist
+        given-names: Peter D.
+    year: 2024
+    doi: "10.48550/arXiv.2405.10151"
+    notes: >-
+      No code, parameters or tabulated values from this work are bundled here.
+      It is cited because (a) the relativistic-electrodynamics interaction
+      kernel, the small-component radial matrix element and the kappa-resolved
+      angular factor are implemented from the equations as presented in this
+      paper (equations 38-41; the underlying physics is standard relativistic
+      scattering theory, and equation 38 as printed is missing a q^2 in the
+      transverse denominator, corrected here and cross-checked against the
+      paper's own equation 42), and (b) the authors' open Dirac GOS database
+      (Zenodo 10.5281/zenodo.7729585, CC-BY) is used as an external comparison
+      target during verification. The database itself is not redistributed.

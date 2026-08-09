@@ -49,9 +49,13 @@ each expose one exit and hide the engine:
 
 - Ionization form factors for STEM-EDX / EELS mapping are locked inside
   microscopy simulators
-- The standard EELS generalized oscillator strength (GOS) tables date from the
-  1980s (Egerton's SIGMAK/SIGMAL, Leapman's Hartree–Slater tables). **A modern,
-  open, relativistic GOS table effectively does not exist**
+- The GOS tables in widest use still date from the 1980s (Egerton's
+  SIGMAK/SIGMAL, Leapman's Hartree–Slater tables) and are non-relativistic.
+  A modern, open, relativistic GOS database *does* now exist — Zhang *et al.*
+  (2024), CC-BY — but it tabulates the **diagonal** GOS df/dE(q) only. The
+  **off-diagonal** (mixed dynamic form factor) quantity that EDX mapping and
+  ALCHEMI need, as a function of the difference vector between two Bloch waves,
+  is not published by anyone
 - Elastic scattering phase shifts live in separate Fortran packages
 - Atomic scattering factors are distributed as fitted parameterizations rather
   than as something you can recompute for an arbitrary ion
@@ -60,13 +64,13 @@ Temari puts the engine in the open and adds exits to it.
 
 ## What it computes
 
-One engine, five exits — the same self-consistent atom, the same relativistic
+One engine, six exits — the same self-consistent atom, the same relativistic
 bound orbitals and the same distorted continuum waves, differing only in the
 operator and in what is reported:
 
-- **Inner-shell ionization form factors** F(s, E₀) for K, L1, L2, L3 —
+- **Inner-shell ionization form factors** F(s, E₀) for K, L1–L3, M1–M5 —
   relativistic j-resolved bound orbitals, relaxed core-hole continuum,
-  scalar-relativistic emitted electron — plus **ionization cross sections**
+  κ-resolved two-component Dirac emitted electron — plus **ionization cross sections**
   σ(E₀) via Bote–Salvat analytic coefficients. In production, shipping tables
   for [ReciPro](https://github.com/seto77/ReciPro)
 - **EELS core-loss edges** dσ/dΔE, and the inner-shell contribution to the
@@ -75,6 +79,8 @@ operator and in what is reported:
   carries no beam energy at all, so one run serves every E₀ (`gos`)
 - **Elastic scattering phase shifts** δ_l in the neutral atom's static field
   (`phase`)
+- **Mott elastic scattering** dσ/dΩ, σ_el, σ_tr and the Sherman function from
+  κ-resolved Dirac phase shifts (`mott`)
 - **Atomic scattering factors** f_x(s) for X-rays and f_e(s) for electrons,
   computed from the charge density rather than read from a fitted table — which
   also means they stay correct past s ≈ 3 Å⁻¹, where Gaussian parameterizations
@@ -82,19 +88,18 @@ operator and in what is reported:
 
 Planned, in rough order (see the roadmap in 計画書.md):
 
-- Mott differential cross sections from the phase shifts (needs spin)
 - Double-differential d²σ/dΩdΔE, partial cross sections σ(β, Δ) for EELS
   quantification
 - Subshell photoionization cross sections σ_nl(ω) and asymmetry parameters β_nl
-- M-shell channels, ΔSCF binding energies, Compton scattering functions
+- ΔSCF binding energies and Compton scattering functions
 
 ## Design commitments
 
 1. **Zero dependencies.** Julia standard library only. The sole bundled data
    file is the Bote–Salvat cross-section coefficient set (public domain).
-2. **Standalone.** No `module`, no package environment: the layer files carry a
-   flat namespace and concatenate in include order, so it stays possible to
-   hand the whole engine to someone as a single file.
+2. **Standalone.** No package module and no third-party dependency: the layer
+   files carry a flat namespace and concatenate in include order, while
+   `Project.toml` declares only Julia standard libraries.
 3. **MIT licensed.** A reference implementation should be readable and usable.
 4. **Fast**, but reproducibility outranks speed: optimizations that change
    floating-point summation order are adopted only when a full table

@@ -48,7 +48,12 @@ ReciPro 側の `check_tables.py` (v3 の QC に使ったもの) を Julia へ移
   julia +1.11 -t auto tools/check_tables.jl [prod_dir] [--eb]
 =====================================================================#
 
-include(joinpath(@__DIR__, "..", "src", "ionization.jl"))
+# 260809Cl: `ionization.jl` の直接 include をやめ、`gen_production.jl` 経由にした。
+# C15 (チャネル集合の網羅) の期待集合を**生成側の正本 `all_channels` から引く**ため。
+# ここで別のリストをベタ書きすると生成側と QC 側で二重定義になり、必ずずれる。
+# ⚠ gen_production.jl は先頭で ionization.jl を include し、末尾の実行は
+#   `abspath(PROGRAM_FILE) == @__FILE__` で守られているので、二重 include にならない
+include(joinpath(@__DIR__, "..", "src", "gen_production.jl"))
 
 const GATE_C6 = 5e-3
 
@@ -272,6 +277,37 @@ function main(args)
     ok10 && println("C10: model_id = $(only(meta["model_id"]))  " *
                     "dataset_version = $(only(meta["dataset_version"]))  " *
                     "s グリッド $(length(sgrid)) 点 → 全ファイルで一致")
+    # ---- C15: チャネル集合の網羅と schema_version (260809Cl 追加) ----
+    # ⚠ **これが無いと「存在するファイル同士の整合」しか見ていなかった。**
+    #   1 チャネル丸ごと欠けた一式でも C1-C14 は全部通る (欠けたものは検査されない)。
+    #   期待集合は生成側の `all_channels(TAGS_V4)` から引く (二重定義を作らない)。
+    ok15 = true
+    want = Set(all_channels(Tuple(TAGS_V4)))
+    have = Set(chans)
+    missing_ch = sort(collect(setdiff(want, have)))
+    extra_ch = sort(collect(setdiff(have, want)))
+    if !isempty(missing_ch)
+        ok15 = false
+        println("[NG] C15: 期待チャネルが $(length(missing_ch)) 本欠けている: ",
+                join(("Z$(z)-$t" for (z, t) in first(missing_ch, 12)), " "),
+                length(missing_ch) > 12 ? " …" : "")
+    end
+    if !isempty(extra_ch)
+        ok15 = false
+        println("[NG] C15: 想定外のチャネルが $(length(extra_ch)) 本ある: ",
+                join(("Z$(z)-$t" for (z, t) in first(extra_ch, 12)), " "))
+    end
+    if length(have) != length(chans)
+        ok15 = false
+        println("[NG] C15: 同じ (Z, 殻) のファイルが重複している")
+    end
+    sv = only(meta["schema_version"])
+    if sv != SCHEMA_VERSION
+        ok15 = false
+        println("[NG] C15: schema_version = $sv (期待 $SCHEMA_VERSION)")
+    end
+    ok15 && println("C15: チャネル集合 $(length(have))/$(length(want)) 本そろっている  " *
+                    "schema_version = $sv")
     if !isempty(flips)
         println("符号反転あり (L/M と s>4 では物理。記録のみ):")
         for (p, n) in first(flips, 20)
@@ -322,7 +358,7 @@ function main(args)
                 "$(round(worst_sp, sigdigits=3))")
         (bad9 + bad9b) > 0 && (n_bad += bad9 + bad9b)
     end
-    return n_bad == 0 && ok10 ? 0 : 1
+    return n_bad == 0 && ok10 && ok15 ? 0 : 1
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

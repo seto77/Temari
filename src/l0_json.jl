@@ -43,10 +43,27 @@ function _json_value(b::Vector{UInt8}, i::Int)
         i += 1
         while b[i] != UInt8('"')               # 0x22 は UTF-8 継続バイトと衝突しない
             if b[i] == UInt8('\\')
+                # 260809Cl: \n と \t しか解いておらず、\r \b \f と \uXXXX が
+                # **黙って文字そのもの**になっていた ("A" が "u0041" になる)。
+                # writer 側 (`json_escape`) と往復が閉じるように揃えた
                 i += 1
                 ch = b[i]
-                write(buf, ch == UInt8('n') ? 0x0a :
-                           ch == UInt8('t') ? 0x09 : ch)
+                if ch == UInt8('n');     write(buf, 0x0a)
+                elseif ch == UInt8('t'); write(buf, 0x09)
+                elseif ch == UInt8('r'); write(buf, 0x0d)
+                elseif ch == UInt8('b'); write(buf, 0x08)
+                elseif ch == UInt8('f'); write(buf, 0x0c)
+                elseif ch == UInt8('u')
+                    cp = parse(UInt16, String(b[i+1:i+4]); base=16)
+                    # ⚠ サロゲート対は扱わない (この codec が書く範囲では
+                    #    制御文字しか \u で出さないため)。来たらエラーで止める
+                    0xD800 <= cp <= 0xDFFF &&
+                        error("JSON: サロゲート対は未対応 (byte $i)")
+                    print(buf, Char(cp))
+                    i += 4
+                else                     # \" \\ \/ はその文字そのもの
+                    write(buf, ch)
+                end
             else
                 write(buf, b[i])
             end
@@ -74,13 +91,61 @@ end
 parse_json_file(path::String) = _json_value(read(path), 1)[1]
 
 # ---- 最小 JSON writer (--json 保存用) ----
+
+"""JSON 文字列のエスケープ (260809Cl 追加)。
+
+⚠ **それまで writer は一切エスケープしていなかった** — `"` を含む文字列を書くと
+**自分の `parse_json_file` すら読み戻せない JSON** が出る (`tools/make_manifest.jl`
+を書いたときに実際に踏んだ)。Windows のパスを値に入れれば `\\U` で同じく壊れる。
+出荷 JSON の現行フィールドはたまたま無傷だったが、**公開する codec としては欠陥**。
+
+RFC 8259 の必須分だけを扱う: `"` `\\` と制御文字 (U+0000..U+001F)。
+非 ASCII はそのまま通す (UTF-8 のまま出すのが JSON として正しい)。
+
+⚠ **出荷テーブルのバイトは変わらない。**エスケープが要る文字を含む文字列は
+現行の一式に 1 つも無いことを実測済 (`tools/json_escape_audit.jl`)。"""
+function json_escape(s::AbstractString)
+    # 速い道: エスケープが要らなければ元の文字列をそのまま返す (割り当てゼロ)
+    needs = false
+    for c in s
+        if c == '"' || c == '\\' || c < ' '
+            needs = true
+            break
+        end
+    end
+    needs || return s
+    out = IOBuffer()
+    for c in s
+        if c == '"'
+            print(out, "\\\"")
+        elseif c == '\\'
+            print(out, "\\\\")
+        elseif c == '\n'
+            print(out, "\\n")
+        elseif c == '\r'
+            print(out, "\\r")
+        elseif c == '\t'
+            print(out, "\\t")
+        elseif c == '\b'
+            print(out, "\\b")
+        elseif c == '\f'
+            print(out, "\\f")
+        elseif c < ' '
+            print(out, "\\u", lpad(string(UInt16(c); base=16), 4, '0'))
+        else
+            print(out, c)
+        end
+    end
+    return String(take!(out))
+end
+
 function write_json(io::IO, v; indent=0)
     pad = "  "^indent
     if v isa Dict
         println(io, "{")
         ks = sort(collect(keys(v)))
         for (i, k) in enumerate(ks)
-            print(io, pad, "  \"", k, "\": ")
+            print(io, pad, "  \"", json_escape(string(k)), "\": ")
             write_json(io, v[k]; indent=indent + 1)
             println(io, i < length(ks) ? "," : "")
         end
@@ -103,7 +168,7 @@ function write_json(io::IO, v; indent=0)
         end
         print(io, "]")
     elseif v isa AbstractString
-        print(io, "\"", v, "\"")
+        print(io, "\"", json_escape(v), "\"")
     elseif v isa Bool || v isa Integer
         print(io, v)
     elseif v === nothing
