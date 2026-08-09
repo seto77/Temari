@@ -55,6 +55,9 @@ ReciPro 側の `check_tables.py` (v3 の QC に使ったもの) を Julia へ移
   C13 ε が数値床 1e-6 を下回らない (260813Cl に根拠を再測定 — 床が実際に効く行で
       s>8 の求積誤差は 1.7e-08 = 床の 1/59。`gen_production.jl` の `EPS_FLOOR` 参照)
   C14 s > s_cert の埋め草が厳密に 0 (低 E0 行は運動学的に 16 Å⁻¹ へ届かない)
+  C16 s_cert が運動学的に成立する (≤ 0.98/λ)。⚠ **s_kin はデータに入れない** —
+      E0 だけの関数なので消費側が計算する (真実の出所を 2 つにしない)。
+      3 領域の契約は `tools/temari_contract.py` の罠 C7
 
   C4 (廃止) E0 方向の 2 階差分 — 不等間隔グリッド上の真の曲率を誤検知する
   C5 (無効) Z 方向平滑性 — 自動判定できる閾値が見つからなかった
@@ -277,6 +280,21 @@ function check_file(path::String)
         push!(probs, "C6: leave-one-out 最悪 |dF|=$(worst) > $GATE_C6")
     # C6b: 外側 2 ノード込みの LOO。**記録のみ** (理由は c6_edge_worst の docstring)
     c6b = c6_edge_worst(s, F, u, s_cert)
+    # ---- C16 (260813Cl 追加。指示書 §2 P4): s_cert が運動学的に成立するか ----
+    # ⚠⚠ **s_kin = 1/λ(E0) はデータに入っていない。**E0 だけの関数なので消費側が
+    #   計算する — JSON に持たせると真実の出所が 2 つになり、食い違ったときに
+    #   気づけない (だから schema は変えない。schema_version は 2 のまま)。
+    # ここで検査するのは「宣言した保証域が運動学的天井を越えていないか」
+    # = 生成側の規則 `s_cert = min(16, 0.98·s_kin)` が出荷データで実際に成立しているか。
+    # Ewald 球上のビーム対は |G| ≤ 2/λ なので s = |G|/2 ≤ 1/λ。**s_cert がこれを越えたら、
+    # 存在しない配置に値を保証したことになる。**
+    for (i, r) in enumerate(rows)
+        sc_i = Float64(r["s_cert_A_inv"])
+        lim = S_CERT_MARGIN * s_kin_A_inv(Float64(r["e0_keV"]))
+        sc_i <= min(S_GRID[end], lim) + 1e-9 ||
+            push!(probs, "C16: s_cert=$sc_i が運動学的上限 0.98/λ=$(round(lim, digits=4)) を越える " *
+                         "@E0=$(r["e0_keV"])")
+    end
     # ---- C7 ----
     for r in rows
         ratio = Float64(r["sigma_own_nm2"]) /

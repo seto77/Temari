@@ -21,6 +21,20 @@
 # ⚠ **完走 ≠ 健全。**v3 では GC クラッシュ由来のメモリ破損が
 #    チェックポイント経由で 1 行だけ生き残った前例がある。QC を必ず通すこと。
 set -u
+
+# 260813Cl 追加: レーンの julia.exe が消費した CPU 秒。取れなければ**空文字**を返す
+# (呼び出し側は空なら何もしない = 従来の 15 分規則へ落ちる)。
+# ⚠ juliaup のランチャは子 julia.exe を起こすので、**親 PID で辿る**。
+#   コマンドラインには引数が出ない (実測) のでレーン名では特定できない。
+cpu_of_lane() {
+  local msys_pid=$1 winpid
+  winpid=$(ps -W 2>/dev/null | awk -v p="$msys_pid" '$1==p {print $4}' | head -1)
+  [ -z "$winpid" ] && return 0
+  powershell -NoProfile -Command     "\$c = Get-CimInstance Win32_Process -Filter \"Name='julia.exe' AND ParentProcessId=$winpid\";
+     if (\$c) { (Get-Process -Id \$c.ProcessId -ErrorAction SilentlyContinue).CPU }" 2>/dev/null |
+    tr -d '' | head -1
+}
+
 lane=${1:?レーン番号 (0 始まり)}
 nlane=${2:-8}
 nthr=${3:-4}
@@ -37,11 +51,37 @@ for attempt in $(seq 1 60); do
   julia $chan -t "$nthr" --gcthreads=1 src/gen_production.jl \
         --lane "$lane/$nlane" $opts >> "$log" 2>&1 &
   jpid=$!
+  prev_cpu=""; zero_cpu=0
   while kill -0 $jpid 2>/dev/null; do
     sleep 60
     now=$(date +%s)
     mt=$(stat -c %Y "$log" 2>/dev/null || echo "$now")
-    if [ $((now - mt)) -gt 900 ]; then   # 15 分停滞 = wedged とみなす
+    stall=$((now - mt))
+    # ---- 高速検知 (260813Cl 追加。指示書 §4 O2) ------------------------------
+    # **wedged プロセスは CPU を消費しない。**ログ停滞だけを待つと 15 分固定で失う
+    # (v5 では 6 件 × 15 分 = 総時間の 24 %)。CPU 時間が伸びていないことを併せて
+    # 見れば 3 分で判定できる。
+    # ⚠⚠ **フェイルセーフ**: CPU が取れなければ (空文字) 何もしない = 従来の 15 分規則に
+    #   落ちる。**健全なレーンを誤 kill するくらいなら 15 分待つほうが安い。**
+    # ⚠ juliaup のランチャは引数をコマンドラインに出さないので、レーンの特定は
+    #   **親 PID の連鎖** (MSYS pid → WINPID → 子 julia.exe) で行う。
+    cpu=$(cpu_of_lane $jpid)
+    if [ -n "$cpu" ] && [ -n "$prev_cpu" ]; then
+      if awk "BEGIN{exit !($cpu - $prev_cpu < 0.5)}"; then
+        zero_cpu=$((zero_cpu + 1))
+      else
+        zero_cpu=0
+      fi
+    fi
+    [ -n "$cpu" ] && prev_cpu=$cpu
+    # ログ停滞 3 分以上 かつ CPU が 2 回連続で伸びていない = wedged
+    if [ $stall -gt 180 ] && [ $zero_cpu -ge 2 ]; then
+      echo "=== watchdog: wedged (log stalled ${stall}s, CPU frozen at ${cpu}s), killing pid $jpid $(date '+%F %T') ===" >> "$log"
+      kill -9 $jpid 2>/dev/null
+      sleep 10
+      break
+    fi
+    if [ $stall -gt 900 ]; then   # 15 分停滞 = wedged とみなす (従来の backstop)
       echo "=== watchdog: log stalled >15min, killing pid $jpid $(date '+%F %T') ===" >> "$log"
       kill -9 $jpid 2>/dev/null
       sleep 10

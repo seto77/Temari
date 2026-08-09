@@ -12,7 +12,7 @@
 
     python tools/temari_contract.py src/prod_v5_jl
 
-罠の一覧 (それぞれ C1..C6 として検査する):
+罠の一覧 (それぞれ C1..C7 として検査する):
 
   C1  **F は符号付き**。clip(0) / abs / 単調性の仮定はデータを壊す
   C2  **運動量の規約は q = 4*pi*s [A^-1]** (K = 4*pi*s*a0 [a.u.])。
@@ -27,6 +27,11 @@
       同じ JSON から ReciPro と違う F が出る — 出荷 525ch の全 E0 中点 x
       全 s ノード (4,580,991 点) で最悪 **2.8942e-03**、最悪相対 **175 %**
       (**符号が逆になる点がある**)
+  C7  **s > s_cert は 2 領域に分かれる** (260813Cl 追加)。
+      `s_cert < s <= s_kin` = 物理的には可能だが**未収録** (0 +- eps) /
+      `s > s_kin` = **運動学的に不可能** (Ewald 球上にそのビーム対が無い)。
+      ⚠⚠ **s_kin = 1/lambda はデータに入っていない** — E0 だけの関数なので
+      消費側が計算する。JSON に持たせると真実の出所が 2 つになる
 """
 
 import bisect
@@ -165,16 +170,51 @@ def grid_at(ch, e0_keV, naive=False, keep_padding=False):
     return out, s_cert, eps
 
 
-def f_at(ch, e0_keV, s_A_inv):
-    """F(s, E0) の 1 点評価。s > s_cert では (0.0, eps) を返す。
+def electron_wavelength_A(e0_keV):
+    """加速電圧 -> 電子波長 [A] (相対論込み)。`src/gen_production.jl` と同じ式。"""
+    v = e0_keV * 1e3
+    return 12.2639 / math.sqrt(v * (1.0 + 0.97845e-6 * v))
 
-    返り値 (F, bound)。bound は「この値に付く上界」で、s <= s_cert なら 0。"""
+
+def s_kin_A_inv(e0_keV):
+    """s の**運動学的天井** = 1/lambda [A^-1] (260813Cl 追加。指示書 §2 P4)。
+
+    ⚠⚠ **これはデータに入っていない。E0 だけの関数なので消費側が計算する。**
+    JSON に持たせると真実の出所が 2 つになり、食い違ったときに気づけない。
+
+    なぜ 1/lambda が上限か: Ewald 球上のビームは |k0 + g| = |k0| = k = 1/lambda を
+    満たすので、2 本の差ベクトルは球の直径以下 |G| <= 2k。s = |G|/2 なので s <= k。
+    ⇒ **s > s_kin は「値が無い」のではなく「そのビーム対が存在しない」**。"""
+    return 1.0 / electron_wavelength_A(e0_keV)
+
+
+# 3 領域の区別 (260813Cl 追加)
+REGION_TABULATED = "tabulated"    # s <= s_cert          … 表の値。bound = 0
+REGION_UNRECORDED = "unrecorded"  # s_cert < s <= s_kin  … 物理的には可能だが未収録。0 +- eps
+REGION_IMPOSSIBLE = "impossible"  # s > s_kin            … 運動学的に不可能。要求が成立しない
+
+
+def f_at(ch, e0_keV, s_A_inv):
+    """F(s, E0) の 1 点評価。返り値 (F, bound, region)。
+
+    ⚠⚠ **s > s_cert を一括りにしてはいけない** (260813Cl。指示書 §2 P4)。2 つある:
+
+      `s_cert < s <= s_kin`  物理的には可能だが**未収録**。0 に上界 eps が付く
+      `s > s_kin`            **運動学的に不可能** — Ewald 球上にそのビーム対が無い。
+                             「0 +- eps」ではなく **その要求が成立しない**
+
+    後者へ eps を付けて返すのは「あり得ない配置に上界を保証した」ことになり、意味が違う。
+    ⚠ **例外にはしない** — 消費側は N^2 のループで呼ぶので、投げると使い物にならない。
+    区別は `region` で返し、扱いは呼び出し側が決める。"""
     F, s_cert, eps = grid_at(ch, e0_keV)
+    if s_A_inv > s_kin_A_inv(e0_keV) + 1e-12:
+        return 0.0, float("nan"), REGION_IMPOSSIBLE   # ⚠ 上界は「無い」(NaN)。0 ではない
     if s_A_inv > s_cert + 1e-12:
-        return 0.0, eps
+        return 0.0, eps, REGION_UNRECORDED
     s = ch["s_grid_A_inv"]
     n = sum(1 for x in s if x <= s_cert + 1e-12)   # 台を s_cert で切る
-    return _pchip_eval(s[:n], F[:n], _pchip_slopes(s[:n], F[:n]), s_A_inv), 0.0
+    return (_pchip_eval(s[:n], F[:n], _pchip_slopes(s[:n], F[:n]), s_A_inv),
+            0.0, REGION_TABULATED)
 
 
 def mu_hg(ch, e0_keV, g_vectors):
@@ -352,12 +392,42 @@ def contract(pdir):
               f"(出荷 {worst[3]:+.4e} / 素朴 {worst[4]:+.4e})")
         print("      ⇒ 生の E0 で PCHIP すると ReciPro と違う F になる")
 
+    # ---- C7: s > s_cert は 2 領域に分かれる ----
+    # 260813Cl 追加 (指示書 §2 P4)。⚠ **未収録と運動学的に不可能を同じ「0 ± ε」に
+    # まとめてはいけない**。後者へ ε を付けると「あり得ない配置に上界を保証した」ことになる。
+    # ⚠⚠ **s_kin はデータに入っていない** — E0 だけの関数なので消費側が計算する。
+    #   JSON に持たせると真実の出所が 2 つになり、食い違ったときに気づけない。
+    print("C7: s > s_cert は「未収録」と「運動学的に不可能」の 2 領域")
+    ch = load_channel(os.path.join(pdir, "F_K_Z26.json"))
+    rows = sorted(ch["rows"], key=lambda r: r["e0_keV"])
+    lo = rows[0]
+    skin = s_kin_A_inv(lo["e0_keV"])
+    sc = lo["s_cert_A_inv"]
+    a = f_at(ch, lo["e0_keV"], 0.5 * sc)
+    b1 = f_at(ch, lo["e0_keV"], 0.5 * (sc + skin))
+    c1 = f_at(ch, lo["e0_keV"], skin * 1.01)
+    ok7 = (a[2] == REGION_TABULATED and b1[2] == REGION_UNRECORDED
+           and c1[2] == REGION_IMPOSSIBLE and b1[1] > 0 and math.isnan(c1[1]))
+    if not ok7:
+        bad += _fail(f"3 領域の区別がつかない: {a[2]} / {b1[2]} / {c1[2]}")
+    else:
+        print(f"   ✅ Fe K @{lo['e0_keV']:g}kV: s_cert={sc:g}, s_kin={skin:.3f} "
+              f"(= 1/lambda、データには無い)")
+        print(f"      s={0.5 * sc:.2f} -> {a[2]} / s={0.5 * (sc + skin):.2f} -> {b1[2]} (bound {b1[1]:.2e}) "
+              f"/ s={skin * 1.01:.2f} -> {c1[2]} (bound NaN)")
+        print("      ⇒ 「不可能」側へ eps を付けて返すと、あり得ない配置に上界を保証したことになる")
+    # ⚠ **どこまでが実際に要求されうるか**も測っておく (ReciPro `AlchemiCheck basis` の実測)。
+    #   要求 s の実測最大 10.52 A^-1 (beta-AlCo, 250 kV, N=1600) に対し
+    #   s_kin の最小は 30 kV の 14.33 A^-1 なので、測った系では届かない。
+    #   ⚠ ただし要求 s は a^-1 で伸びるので、a ~ 2 A の系では超えうる (未実測)
+    print(f"      参考: s_kin の最小 = {s_kin_A_inv(30.0):.2f} (30 kV) / 最大 = {s_kin_A_inv(400.0):.2f} (400 kV)")
+
     # ---- golden vector ----
     print("golden: E0 補間の基準値 (移植先はこれを再現すること)")
     ch = load_channel(os.path.join(pdir, "F_K_Z26.json"))
     for e0, sq in ((200.0, 0.0), (200.0, 1.25), (137.0, 2.5), (137.0, 8.0)):
-        v, b = f_at(ch, e0, sq)
-        print(f"   Fe K  E0={e0:6.1f} kV  s={sq:5.2f}  F={v:+.10e}  bound={b:.1e}")
+        v, b, reg = f_at(ch, e0, sq)
+        print(f"   Fe K  E0={e0:6.1f} kV  s={sq:5.2f}  F={v:+.10e}  bound={b:.1e}  {reg}")
     g = [(0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (0.0, 2.0, 0.0)]
     m = mu_hg(ch, 200.0, g)
     print(f"   mu_hg 3x3 の対角 = {[round(m[i][i], 12) for i in range(3)]}"
