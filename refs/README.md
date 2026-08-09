@@ -37,6 +37,12 @@ Kirkland) は全てこれ相当の DHF 計算への**フィット**なので、�
 | `Thorkildsen_2023_ActaA79_318_new-benchmarks-form-factors.pdf` | G. Thorkildsen, *New benchmarks in the modelling of X-ray atomic form factors*, Acta Cryst. A79, 318–330 (2023) | 10.1107/S2053273323003996 (open access) |
 | `Llovet_2014_JPCRD43_013102_inner-shell-ionization-cross-sections.pdf` | X. Llovet, C. J. Powell, F. Salvat, A. Jablonski, *Cross sections for inner-shell ionization by electron impact*, J. Phys. Chem. Ref. Data 43, 013102 (2014) / NIST NSRDS 164 | 10.1063/1.4832851 / 10.6028/NIST.NSRDS.164 (米国政府著作物) |
 | `Zhang_2024_arXiv2405.10151_relativistic-EELS-cross-sections-Dirac.pdf` | *Relativistic EELS scattering cross-sections for microanalysis based on Dirac solutions* | arXiv:2405.10151 |
+
+⚠⚠ **小成分の割合 ζ は HDF5 に入っていない** — `metadata/edges_info` が持つのは
+閾値 (`ionization_energy` / `onset_energy`)・占有比 (`occupancy_ratio`)・`relevance` だけで、
+**ζ の唯一の出所は論文本文 §6.2** (「Si: 0.03%, Ag 0.6%, Au 2%」、L2/L3 の議論の中)。
+⚠ 元素あたり 1 個しか書かれていないので **2p1/2 か 2p3/2 かは特定できない**。
+照合は `tools/small_component_check.jl` (両方を出して丸め区間に入るかを見る)。
 | `Engel_Dreizler_relativistic-DFT-review.pdf` | E. Engel & R. M. Dreizler, 相対論的 DFT の総説 (ROPM の解説を含む) | 著者サイト |
 | `Krrieger_1992_PhysRevA.45.101.pdf` | J. B. Krieger, Y. Li & G. J. Iafrate, Phys. Rev. A **45**, 101–126 (1992)。**KLI の原論文**。TABLE III = ⟨r²⟩ [a.u.]、TABLE IV = −ε_HOMO [**Ry**]、どちらも V_xσ (= KLI) 列が我々と比べる相手。**selftest T20 の出典** | 10.1103/PhysRevA.45.101 |
 | `Engel_1995_PhysRevA.52.2750.pdf` | E. Engel ら, Phys. Rev. A **52**, 2750–2764 (1995)。相対論 OPM (ROPM) の exchange-only 基準値。**Dirac+KLI の比較先 (未実施)** | 10.1103/PhysRevA.52.2750 |

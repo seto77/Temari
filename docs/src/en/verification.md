@@ -171,6 +171,7 @@ A separate axis: not "is the number right" but "did this change move any bit".
 | `julia tools/c2_negative_test.jl [prod_dir]` | The negative test for the two checks above: it injects defects into copies of the shipped files and asserts that the widened C2 window and the all-column C6 fire where the old ones passed, and that neither fires on a physically normal high-s sign reversal |
 | `julia -t auto tools/e0_interp_probe.jl <Z> <shell>` | The E0 interpolation error measured **directly**: it recomputes rows *inside* the shipped E0 intervals and compares them against the shipping interpolation rule. It first proves it can reproduce a shipped row bit-for-bit, so any remaining difference is interpolation and not code drift |
 | `python tools/temari_contract.py <prod_dir>` | The executable contract: the six traps a consumer falls into (signed F, q = 4πs, the filler beyond s_cert, per-channel E0 axes, the epsilon bound, and the E0 interpolation coordinate), plus a golden vector a port must reproduce |
+| `julia -t auto tools/small_component_check.jl [--scan]` | The small-component fraction against the only external figures that exist for it. The reference carries one significant digit, so the criterion is whether our value falls inside the interval that rounds to it — not a ratio band, which would admit a factor of five |
 | `julia -t auto tools/e5_dump.jl <dir>` | The four `refcheck` channels as raw `Float64` bytes, compared by SHA-256 |
 
 The five snapshot channels are chosen to span the space that matters: a light
