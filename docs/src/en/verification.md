@@ -192,14 +192,26 @@ exactly a `===` comparison on `Float64`, including the sign of zero.
     where the curvature in `ln(u − 1)` is largest.
 
 Measured directly, by recomputing points *inside* the intervals with
-`e0_interp_probe.jl`, Sn K just above threshold comes to **2.6 × 10⁻³** where C6
-reports 8.4 × 10⁻⁴ — C6 low by 3.1×. For Rn L2 the same comparison has C6
-conservative by 4.0×. C6 is therefore neither an upper nor a lower bound; read it
-as a corruption detector. Widening it does not fix this: the interior of an end
-interval is not a node, so leave-one-out cannot reach it at all, and admitting
-`k = 2` collapses the gate margin from 4.2× to 1.02× on a proxy that already
-overestimates the true error by about a factor of two. `check_tables` reports
-that widened figure as C6b for visibility, and does not gate on it.
+`e0_interp_probe.jl sweep` over a stratified sample of 50 channels and 450 points,
+the worst is **3.0 × 10⁻³** — Po L1, first interval, just above threshold. In the
+risky stratum (every one of the 25 channels whose lowest overvoltage is under 2)
+**C6 falls below the direct measurement in 20 of 25**; in the safe strata it bounds
+it in all 17. So C6 is neither an upper nor a lower bound; read it as a corruption
+detector.
+
+Widening it does not fix this. The interior of an end interval is not a node, so
+leave-one-out cannot reach it at all, and the widened figure is not a bound either:
+C6b comes in *below* the direct measurement in 4 of the 50 channels, and the ratio
+between them ranges from 0.33 to 15.8 — a factor of 48, so it is not a calibrated
+proxy in either direction. Admitting `k = 2` would also collapse the gate margin
+from 4.2× to 1.02×. `check_tables` reports C6b for visibility, and does not gate
+on it.
+
+The exposure is concentrated on the threshold side rather than spread over both
+ends: the worst point fell in the first interval for 40 of 50 channels and in the
+last for only 2. The one clean result from the same sweep is the epsilon bound,
+which holds at non-node E0 — where C12 never looks — with `max|F|/eps` at most
+0.496 across all 50.
 
 ### Separating an intended change from an accident
 
