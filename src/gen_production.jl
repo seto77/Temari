@@ -429,7 +429,16 @@ const TAIL_KIND_BOUND = 2
 # 減衰包絡を 6 点に当てる案は論外 (63.7 %、最悪 6e8 倍)。
 const EPS_WINDOW_A_INV = 2.0
 const EPS_SAFETY = 2.0        # 上界破れ 4.8 %・最悪 1.55 倍を吸収する係数
-const EPS_FLOOR = 1e-6        # 数値床。s>8 の求積誤差の実測最悪 3.22e-07 の約 3 倍
+# 数値床。⚠ **260813Cl に根拠を測り直した。**旧記述は「s>8 の求積誤差の実測最悪
+# 3.22e-07 の約 3 倍」だったが、それは**床が効かない行**で測った値だった。
+# 床が効く (= 2·sup|F| < 1e-6) のは出荷 14,796 行のうち 1,756 行 (11.9 %) で、
+# **すべて高過電圧の行** (最小 u = 42.5)。床が最も強く効く行 = As M5 @120 kV
+# (規則値 3.9e-09 = 床の 1/258) を `audit` で測ると **s>8 の求積誤差は 1.7e-08**
+# = 床の 1/59。⇒ **床には 59 倍の余裕がある。**
+# ⚠ 閾値近傍では s>8 の求積誤差が 1.6e-06 (Rn L1 @30 kV) と床を超えるが、
+#   その行の ε は 0.231 なので床は効かない。**床が効く領域と誤差が大きい領域は
+#   重ならない** — この 2 つを一つの数字で語らないこと
+const EPS_FLOOR = 1e-6
 
 """s > s_cert に対して宣言する上界 ε。
 
@@ -754,9 +763,29 @@ F の変化 (= HIGH に残る打ち切り誤差) を実測する。
 260808Cl: **生成に使う処方そのもので測る** (既定 v4)。旧版は `rel_continuum` だけを
 渡していたので、v4 で生成しながら v3 の求積誤差を報告する状態だった。
 M 殻を 1 本足したのは、始状態 l=2 (3d) が λ の本数を増やす = 打ち切り誤差の
-出方が K/L と違うため。"""
+出方が K/L と違うため。
+
+260813Cl: **閾値直上と「ε の床が効く行」を足した** (指示書 §2 P1)。
+それまでの 3 ケースは u ≈ 28 / 25 / 90 の高過電圧だけで、**v5 で最も極端な
+u = 1.03 の領域の求積誤差は一度も測っていなかった** (Sn K @30 kV は
+F(8) = +0.467・F(14) = −0.319・ε = 0.639 と、高過電圧の行とは桁の違う裾を持つ)。
+u < 1.05 に届くのは K だけなので (実測: L1 の最小 u は 1.66、M5 は 10.4)、
+非 K の最低 u として Rn L1 @30 kV も足す。
+
+6 本目の As M5 @120 kV (u = 2382) は **`EPS_FLOOR` の検証専用**。ε の床は
+`2·sup|F| on [s_cert−2,s_cert] < 1e-6` の行でしか効かず、出荷 14,796 行のうち
+**1,756 行 (11.9 %) が床に張り付いている**が、監査はそこを一度も測っていなかった。
+この行は sup|F| = 1.94e-09 = 規則値の 258 分の 1 で、**床が最も強く効く行**。
+⚠ 床に触れる行の最小 u は 42.5 = **床が効くのは高過電圧の行だけ**なので、
+閾値近傍で求積誤差が大きい (下記 1.6e-06) こととは領域が重ならない。
+
+⚠ **s ノードは行の `s_cert` で切る。**固定 `0:0.25:16` を渡すと 30 kV では
+s_kin = 14.33 を越えた時点で `sym kinematics requires K < 2*k_i` で落ちる。
+高過電圧 3 ケースは s_cert = 16.0 なので**ノード集合は従来と同一** = 既存の結果は動かない。"""
 function audit(; presc=PRESC_V4)
-    cases = [(26, "K", 200.0), (79, "L3", 300.0), (79, "M5", 200.0)]
+    # 高過電圧 3 ケース (従来) + 閾値直上 2 ケース + 床が効く 1 ケース (260813Cl 追加)
+    cases = [(26, "K", 200.0), (79, "L3", 300.0), (79, "M5", 200.0),
+             (50, "K", 30.0), (86, "L1", 30.0), (33, "M5", 120.0)]
     bumps = [
         ("eps nodes n1/n2/n3 ×1.4", (; HIGH_SETTINGS..., n1=28, n2=80, n3=28)),
         ("l_cap 128→160",           (; HIGH_SETTINGS..., l_cap=160)),
@@ -767,31 +796,57 @@ function audit(; presc=PRESC_V4)
         ("sig_thresh 1e-13→1e-15",  (; HIGH_SETTINGS..., sig_thresh=1e-15)),
     ]
     # 260810Cl: 延長域込みへ。s ≤ 4 だけを見ていたので、**新しく出荷する 4–16 Å⁻¹ の
-    # 求積誤差を一度も測っていなかった**。3 ケースとも 400 kV 未満なので 16 は
-    # 運動学的に届く (s_kin = 27.0 @100kV / 39.9 @200kV / 50.8 @300kV)
-    s = collect(0.0:0.25:16.0)
+    # 求積誤差を一度も測っていなかった**。
+    # 260813Cl: 固定グリッドをやめ、行の保証域 `s_cert` で切る (下記 `audit_s_nodes`)。
     println("audit 処方: ", presc_model_id(presc))
     for (z, tag, e0) in cases
+        s = audit_s_nodes(e0)
+        _, eth = e0_grid(z, tag)
         base = compute_channel(z, tag, e0; settings=HIGH_SETTINGS, s_nodes=s,
                                verbose=false, presc...)
-        @printf("\n== audit Z=%d %s @%g kV (HIGH 基準 t=%.0fs) ==\n",
-                z, tag, e0, base["elapsed_s"])
+        @printf("\n== audit Z=%d %s @%g kV (u=%.3f, s≤%.2f の %d ノード, HIGH 基準 t=%.0fs) ==\n",
+                z, tag, e0, e0 / eth, s[end], length(s), base["elapsed_s"])
+        # 260813Cl: **s>8 の内訳を分けて出す。**ε の数値床 `EPS_FLOOR` の根拠は
+        # 「s>8 の求積誤差の実測最悪」なので、全 s の max では床を較正できない
+        # (全 s の max は |F| が桁違いに大きい低 s に支配される)
+        i8 = searchsortedfirst(s, 8.0 - 1e-12)
+        dF_of(o) = (d = abs.(o["F"] .- base["F"]);
+                    (maximum(d), i8 <= length(s) ? maximum(@view d[i8:end]) : 0.0))
         o_prod = compute_channel(z, tag, e0; settings=PROD_SETTINGS, s_nodes=s,
                                  verbose=false, presc...)
-        @printf("  %-26s max|ΔF| = %.2e  (t=%.0fs) ← v2 求積に残っていた誤差\n",
-                "(参考) PROD→HIGH の差", maximum(abs.(o_prod["F"] .- base["F"])),
-                o_prod["elapsed_s"])
-        worst = 0.0
+        (d_all, d_hi) = dF_of(o_prod)
+        @printf("  %-26s max|ΔF| = %.2e (s>8: %.2e)  (t=%.0fs) ← v2 求積に残っていた誤差\n",
+                "(参考) PROD→HIGH の差", d_all, d_hi, o_prod["elapsed_s"])
+        worst = worst_hi = 0.0
         for (name, st) in bumps
             o = compute_channel(z, tag, e0; settings=st, s_nodes=s,
                                 verbose=false, presc...)
-            dF = maximum(abs.(o["F"] .- base["F"]))
+            (dF, dF_hi) = dF_of(o)
             worst = max(worst, dF)
-            @printf("  %-26s max|ΔF| = %.2e  (t=%.0fs)\n", name, dF, o["elapsed_s"])
+            worst_hi = max(worst_hi, dF_hi)
+            @printf("  %-26s max|ΔF| = %.2e (s>8: %.2e)  (t=%.0fs)\n",
+                    name, dF, dF_hi, o["elapsed_s"])
         end
-        @printf("  → HIGH の打ち切り誤差 ≲ %.1e\n", worst)
+        # 裾の大きさ自体も出す: 閾値直上の行は |F| が s≤s_cert で 0.3 級まで残るので、
+        # 同じ max|ΔF| でも相対的な意味が高過電圧の行と全く違う
+        @printf("  → HIGH の打ち切り誤差 ≲ %.1e  (s>8 だけなら ≲ %.1e ← EPS_FLOOR の根拠)\n",
+                worst, worst_hi)
+        @printf("     参考 F(s_cert)=%+.3e, max|F| on [s_cert−2,s_cert]=%.3e (= ε/2)\n",
+                base["F"][end],
+                maximum(abs, @view base["F"][searchsortedfirst(s, s[end] - 2.0 - 1e-12):end]))
         flush(stdout)
     end
+end
+
+"""audit が使う s ノード = 0:0.25:16 のうち**この E0 の保証域に入るものだけ**。
+
+⚠ 固定 `0:0.25:16` を渡してはいけない — s_kin = 1/λ は 30 kV で 14.33 Å⁻¹ しか
+なく、`l4_angular.jl` が `K < 2·k_i` を破って error で止まる。
+`s_cert_of` は本番と同じ規則なので、**測る領域が出荷する領域と一致する**。
+s_cert = 16.0 の行では `collect(0.0:0.25:16.0)` と同一のノード集合になる。"""
+function audit_s_nodes(e0_keV)
+    s_cert, _ = s_cert_of(e0_keV)
+    return [x for x in 0.0:0.25:16.0 if x <= s_cert + 1e-12]
 end
 
 """260804Cl 追加: 本番レーンの優先度を起動時に自己設定 (BELOW_NORMAL)。

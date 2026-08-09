@@ -26,9 +26,9 @@ come first.
 | **Double-differential d²σ/dΩdΔE** | small | The K = 0 branch of the angular integral already evaluates $S/Q^4$ on a θ grid — and that grid is built by a transform that flattens the forward $1/Q^4$ peak, so nodes automatically cluster where EELS collection angles are. |
 | **Partial cross sections σ(β, Δ)** | medium | The EELS quantification k-factor itself. Broadest reach of anything on this list. The real work is designing ε nodes for the energy window. |
 | **X-ray scattering factors $f_x(s)$, Mott–Bethe, $f_e(s)$** | **done** | The `fx` subcommand — straight from the SCF charge density. Verified against the closed form for hydrogen 1s to 8×10⁻¹⁴. Against published parameterizations it agrees to 1–3 % for light and medium Z, drifting to ~7 % for Au at high $s$ where the non-relativistic density costs the most. Beyond $s \approx 3$ Å⁻¹ the Gaussian fits die exponentially while $f_e$ genuinely falls as $s^{-2}$, so there Temari is the correct one. |
-| **Mott elastic dσ/dΩ, σ_el, σ_tr** | medium | From $\delta_l$, which the `phase` subcommand now produces against the neutral asymptotic condition. What is still missing is spin: these are scalar, spin-averaged phase shifts, so the spin-flip amplitude $g(\theta)$ needs κ-resolved Dirac continuum states. Low partial waves also have to be unwrapped out of their principal value first (Levinson). |
+| **Mott elastic dσ/dΩ, σ_el, σ_tr** | **done** | The `mott` subcommand. Spin is in: the κ-resolved Dirac continuum gives $\delta_\kappa$, hence both the direct amplitude $f(\theta)$ and the spin-flip amplitude $g(\theta)$, the Sherman function $S(\theta)$, and $\sigma_\text{el}$, $\sigma_\text{tr}$. Against NIST SRD 64 the ratio sits at 0.90–0.94 above 1 keV. ⚠ The scattering potential must stay purely electrostatic — adding the target's own Xα exchange is not a field the incoming electron feels, and it inflates $\sigma_\text{el}$ to 1.6–4.9× NIST. |
 | **Photoionization σ_nl(ω) and asymmetry β_nl** | medium | Swap the fast-electron operator for the photon dipole operator. The energy normalization is already the one photoionization requires. |
-| **M shell (M1–M5)** | small | The bundled coefficient set already covers 9 subshells for Z ≳ 50. Five rows in the channel table, plus a $[3j]^2$ table for $l_\text{init} = 2$. |
+| **M shell (M1–M5)** | **done** | All five subshells ship in dataset v5 (525 channels against v3's 246). It cost five rows in the channel table plus a $[3j]^2$ table extended to $l_\text{init} = 2$. |
 | **ΔSCF binding and relaxation energies** | medium | Both the neutral and the relaxed-ion SCF are already solved and cached. |
 | **Compton scattering function S(q)** | medium | Bound–bound multipole matrix elements are the same integral as the radial table. |
 | **TDS absorptive form factor** | medium | Same shape of problem: an integrand with two forward peaks. |
@@ -39,7 +39,6 @@ come first.
   aperture breaks the separable Gauss–Legendre quadrature, because θ is measured
   from $\hat{k}_+$
 - Anomalous dispersion $f'$, $f''$ (Cromer–Liberman class)
-- Full Dirac continuum states: κ-resolved phase shifts, spin polarization
 - Central-atom phase and backscattering amplitude for EXAFS
 - Bound–bound transitions (white lines)
 

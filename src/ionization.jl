@@ -101,7 +101,7 @@ const USAGE = """
   julia -t auto ionization.jl mott  Z epsEV [--lmax N|--lcap N] [--fm|--xapot] [--json path]
                                    # Mott 弾性断面積 dσ/dΩ・σ_el・σ_tr・Sherman (P4)
   julia -t auto ionization.jl gos  Z channel [--quick|--high] [--rel]
-                                   [--epsmax Ha] [--qmax a0inv] [--json path]  # GOS 出口
+                                   [--epsmax Ha] [--qmax a0inv] [--nqout n] [--json path]  # GOS 出口
                                    # E0 を取らない (GOS は E0 非依存)
   julia -t auto ionization.jl fx   Z [--s ...] [--nonrel] [--xalpha] [--json path]
                                    # 既定は Dirac+KLI。--xalpha は旧処方の比較用
@@ -231,6 +231,11 @@ function main_gos(args)
     dscf = !("--nodscf" in args)
     eps_max = nothing
     q_max = nothing
+    # 260813Cl 追加: **出力の q 点数を CLI から変えられるようにした。**
+    # ⚠ `--high` は求積つまみを上げるが `n_q_out` は動かさない = 出力側の q 標本化
+    # 誤差には**感度がゼロ**。外部 DB (q 256 点) との比較で「我々の q 格子が
+    # 尾根を解像しているか」を測るには、これを振るしかない (指示書 §2 P3)。
+    n_q_out = 48
     json_path = nothing
     i = 3
     while i <= length(args)
@@ -238,11 +243,14 @@ function main_gos(args)
             eps_max = parse(Float64, args[i+1]); i += 1
         elseif args[i] == "--qmax"
             q_max = parse(Float64, args[i+1]); i += 1
+        elseif args[i] == "--nqout"
+            n_q_out = parse(Int, args[i+1]); i += 1
         elseif args[i] == "--json"
             json_path = args[i+1]; i += 1
         end
         i += 1
     end
+    n_q_out >= 2 || error("--nqout は 2 以上")
     settings = quick ? QUICK_SETTINGS : (high ? HIGH_SETTINGS : PROD_SETTINGS)
     xc = parse_exchange(args)
     fs = parse_final_state(args)
@@ -251,7 +259,7 @@ function main_gos(args)
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
             "   スレッド: ", Threads.nthreads(), "   (E0 非依存)")
     o = compute_gos(z, tag; settings=settings, eps_max_Ha=eps_max, q_max=q_max,
-                    rel_continuum=rel, dirac_scf=dscf, exchange=xc,
+                    n_q_out=n_q_out, rel_continuum=rel, dirac_scf=dscf, exchange=xc,
                     final_state=fs, dirac_continuum=kd)
     q = o["q_a0inv"]; fs = o["f_sum"]; occ = o["occupancy"]
     @printf("\n完了 (%.0f s)  ΔE ノード %d 点 × Q %d 点   ε 上端 = %.1f eV\n",

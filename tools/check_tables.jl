@@ -19,8 +19,11 @@ ReciPro 側の `check_tables.py` (v3 の QC に使ったもの) を Julia へ移
 
 検査項目 (C1-C8 は Python 版と同じ意味):
   C1  F(0)=1 が厳密、F が有限、s グリッドが全ファイルで一致
-  C2  K 殻: **s≤4 の窓で** F>0 かつ単調減少 (s>4 と L/M 殻は符号反転が
-      物理的に起きるので回数だけ報告する)
+  C2  K 殻: **s≤8 の窓で** F>0 かつ狭義単調減少 (260813Cl に s≤4 から拡げた。
+      窓の実測根拠と「10 にしない理由」は `C2_S_MAX` の定義コメント)。
+      **窓の外と L/M 殻は符号反転が物理的に起きるので回数を記録するだけ** —
+      符号反転の回数はゲートにしない (v5 の実測最大 2 回を仕様に固定すると、
+      正常な 3 本目の交差を持つ次世代を「破損」と判定する)
   C3  tail 契約 (schema 2): 全行に kind があり、kind=2 / s_cert がグリッド点 /
       s_cert_A_inv と valid_to が一致
       ⚠ 旧 (schema 1) は「有効なら a,b>0 かつ F(s_max)=a·e^{−b·s_max}」だった。
@@ -30,6 +33,9 @@ ReciPro 側の `check_tables.py` (v3 の QC に使ったもの) を Julia へ移
       (leave-one-out)。ゲートは絶対 5e-3。**補間器は出荷と同じ `Pchip`**
       260810Cl: ノードを s≤16 まで広げ、**s_cert < s_j の行を基底から外す**
       (出荷 C# の `GridAt` の基底 subsetting と同じ規則)
+      260813Cl: **抜き取り 10 列 → 全 321 列。**抜き取りの隙間に落ちた単点破損は
+      C6 からも見えなかった (C2 の負のテストで実演)。全列でも最悪 1.183e-03・
+      所要 +1 秒
   C7  σ_own/σ_Bote が 0.7..1.4 (u≥2 のみ。閾値近傍は形状 F だけが問われる)
   C8  生成時のゲート失敗 (failures 配列) がゼロ
   C9  軌道の割り当て: C9a 絶対値 / C9b スピン軌道分裂 (--eb)
@@ -38,7 +44,8 @@ ReciPro 側の `check_tables.py` (v3 の QC に使ったもの) を Julia へ移
   C12 ε が規則値 (= 2.0 × sup|F| on [s_cert−2, s_cert]、床 1e-6) を下回らない
       ⚠ 窓を 2 Å⁻¹ にしたのは実測。0.25 (6 点) では 1 Å⁻¹ 外挿の上界に
         なるのが 77.4 % しかなく、最悪 17.2 倍の過小になる
-  C13 ε が数値床 1e-6 を下回らない (s>8 の求積誤差の実測最悪 3.22e-07 の約 3 倍)
+  C13 ε が数値床 1e-6 を下回らない (260813Cl に根拠を再測定 — 床が実際に効く行で
+      s>8 の求積誤差は 1.7e-08 = 床の 1/59。`gen_production.jl` の `EPS_FLOOR` 参照)
   C14 s > s_cert の埋め草が厳密に 0 (低 E0 行は運動学的に 16 Å⁻¹ へ届かない)
 
   C4 (廃止) E0 方向の 2 階差分 — 不等間隔グリッド上の真の曲率を誤検知する
@@ -56,6 +63,96 @@ ReciPro 側の `check_tables.py` (v3 の QC に使ったもの) を Julia へ移
 include(joinpath(@__DIR__, "..", "src", "gen_production.jl"))
 
 const GATE_C6 = 5e-3
+
+# ---- C2 の検査窓 (260813Cl 再設計。指示書 §2 P2) ----------------------------------
+#
+# 旧実装は `argmin(abs.(s .- 4.0))` = s≤4 固定で、**s グリッドが 81 点 (s_max=4) だった
+# 時代の名残**。s を 16 まで伸ばした v5 では**収録範囲の 1/4 しか見ていなかった**。
+#
+# ⚠ **単純に 16 まで広げてはいけない。**K でも高 s では物理的に正常な符号反転と
+# 極値が起きる。全 45 K チャネル・1409 行を保証域 (s≤s_cert) 内で実測した:
+#
+#   「F>0 が破れる最初の s」の最小      = 10.35  (Z=33 @30 kV)
+#   「単調減少が破れる最初の s」の最小  = 10.25  (Z=24 @30 kV)
+#   窓 s≤10 なら違反 0 行 / s≤12 で 65 行・22 行 / s≤16 で 239 行・238 行
+#   最初の極値の位置は **E0 に対して単調増加** (45/45 チャネル)。最悪は常に E0 下限
+#
+# 窓を 10.0 にしても現データの違反は 0 だが、**余裕が格子 5 点 (0.25 Å⁻¹) しかない**。
+# これは物理則ではなく v5 の観測値なので、原子模型・交換・格子を少し変えた次世代で
+# 正常な極値がわずかに内側へ寄っただけで**誤検知に化ける** (生成 6.8 時間を疑うことになる)。
+# 8.0 を採るのは「v4 までの全収録域」という**外部の意味を持つ境界**だから。
+#
+# ⚠ s>8 が無検査になるわけではない — **C6 (隣接 E0 の leave-one-out) が
+# s = 10.95 / 14.0 / 16.0 の列を見ている**。C2 は「K の形状に関する物理的不変条件」、
+# C6 は「隣接 E0 との整合による破損検知」で、役割が違う。
+const C2_S_MAX = 8.0
+const C2_MIN_NODES = 20        # 窓に最低これだけノードが無ければ「合格」ではなく「適用不能」
+
+"""C2: K 殻は s ≤ min(`s_max`, s_cert) で F > 0 かつ狭義単調減少。
+
+**窓を引数にしてあるのは負のテスト (`tools/c2_negative_test.jl`) のため** —
+旧窓 (s≤4) を同じコードで再現して「旧窓では見逃す欠陥」を実演できるようにする。
+`rows` から `s_cert_A_inv` を直接引くのは、C2 が C3 (tail 契約) より前に走るため。"""
+function c2_problems(s, F, rows, e0; s_max=C2_S_MAX)
+    probs = String[]
+    for (i, r) in enumerate(rows)
+        sc = haskey(r, "s_cert_A_inv") ? Float64(r["s_cert_A_inv"]) : s[end]
+        n2 = searchsortedlast(s, min(s_max, sc) + 1e-9)
+        if n2 < C2_MIN_NODES
+            push!(probs, "C2: 検査窓のノードが $n2 点しかない " *
+                         "(s≤$s_max, s_cert=$sc) @E0=$(e0[i])")
+            break
+        end
+        fw = @view F[i][1:n2]
+        j = findfirst(<=(0.0), fw)
+        if j !== nothing
+            push!(probs, "C2: K で F≤0 (最初は s=$(s[j]), 窓 s≤$s_max) @E0=$(e0[i])")
+            break
+        end
+        j = findfirst(>=(0.0), diff(fw))
+        if j !== nothing
+            push!(probs, "C2: K が非単調 (最初は s=$(s[j+1]), 窓 s≤$s_max) @E0=$(e0[i])")
+            break
+        end
+    end
+    return probs
+end
+
+# 旧 C6 の抜き取り列 (321 列中 10 列)。**負のテストで「隙間を素通りする」ことを
+# 実演するためだけに残してある** — 本番の C6 は全列を見る
+const C6_COLS_LEGACY = [5, 20, 40, 60, 80, 120, 161, 220, 281, 321]
+
+"""C6: E0 ノードを 1 つ抜いて PCHIP(ln(u−1)) を組み直し、抜いた点での誤差の最悪値。
+
+**列を引数にしてあるのは負のテスト (`tools/c2_negative_test.jl`) のため** —
+旧実装の抜き取り 10 列 (`C6_COLS_LEGACY`) を同じコードで再現し、
+「抜き取りでは見逃す単点破損」を実演できるようにする。
+
+⚠ `s_cert < s[j]` の行を基底から外すのは、出荷 C# の `GridAt` の基底 subsetting と
+同じ規則。低 E0 行の s>s_cert は 0 の埋め草なので、混ぜると LOO が埋め草を
+「補間誤差」として報告する。"""
+function c6_worst(s, F, u, s_cert; cols=eachindex(s))
+    length(u) >= 5 || return 0.0
+    worst = 0.0
+    x = log.(u .- 1.0 .+ 1e-12)
+    for j in cols
+        j <= length(s) || continue
+        keep = [i for i in eachindex(u) if s_cert[i] >= s[j] - 1e-9]
+        length(keep) >= 5 || continue
+        xk = x[keep]
+        col = [F[i][j] for i in keep]
+        pos = all(>(0.0), col)
+        yy = pos ? log.(col) : col
+        for k in 3:length(keep)-2
+            xs = vcat(xk[1:k-1], xk[k+1:end])
+            ys = vcat(yy[1:k-1], yy[k+1:end])
+            v = Pchip(xs, ys)(xk[k])
+            pred = pos ? exp(v) : v
+            worst = max(worst, abs(pred - col[k]))
+        end
+    end
+    return worst
+end
 
 "1 ファイルの C1-C8 を検査して (問題のリスト, 符号反転回数, C6 最悪値) を返す"
 function check_file(path::String)
@@ -76,24 +173,14 @@ function check_file(path::String)
         length(f) == length(s) ||
             push!(probs, "C1: F の長さ $(length(f)) ≠ s グリッド $(length(s))")
     end
-    # ---- C2 (K 殻のみ、s≤4 の窓) ----
-    i_s4 = argmin(abs.(s .- 4.0))
+    # ---- C2 (K 殻のみ。窓の根拠は C2_S_MAX の定義コメント) ----
     nflip = 0
-    for (i, f) in enumerate(F)
+    for f in F
+        # 保証域外の埋め草はちょうど 0 なので、0 を除いてから符号の変化を数える
         nz = filter(!=(0.0), f)
-        flips = count(!=(0), diff(sign.(nz)))
-        nflip = max(nflip, flips)
-        if tag == "K"
-            fw = @view f[1:i_s4]
-            if any(<=(0.0), fw)
-                push!(probs, "C2: K で F≤0 (s≤4) @E0=$(e0[i])")
-                break
-            elseif any(>=(0.0), diff(fw))
-                push!(probs, "C2: K が非単調 (s≤4) @E0=$(e0[i])")
-                break
-            end
-        end
+        nflip = max(nflip, count(!=(0), diff(sign.(nz))))
     end
+    tag == "K" && append!(probs, c2_problems(s, F, rows, e0))
     # ---- C3 / C12 / C13 / C14 (260810Cl: schema 2 の tail 契約) ----
     # 旧 C3 は指数 tail の a,b>0 と F(s_max) 整合を見ていた。schema 2 では
     # tail は **実測上界 ε** なので、検査するのは「規則どおりに作られているか」
@@ -127,7 +214,9 @@ function check_file(path::String)
         want = max(2.0 * sup, 1e-6)
         eps < want * (1 - 1e-9) &&
             push!(probs, "C12: ε=$eps が規則値 $want を下回る @E0=$(e0[i])")
-        # C13: 数値床。s>8 の求積誤差の実測最悪 3.22e-07 の約 3 倍を下限とする
+        # C13: 数値床。⚠ 260813Cl に根拠を測り直した (`EPS_FLOOR` の定義コメント)。
+        # 床が実際に効く行 (u ≥ 42.5、全体の 11.9 %) で測った s>8 の求積誤差は
+        # 1.7e-08 = **床の 1/59**。旧記述の「3.22e-07 の約 3 倍」は床が効かない行の値
         (isfinite(eps) && eps >= 1e-6) ||
             push!(probs, "C13: ε=$eps が数値床 1e-6 を下回る @E0=$(e0[i])")
     end
@@ -136,26 +225,13 @@ function check_file(path::String)
     # **s_cert < s_j の行を基底から外す** — 低 E0 行は s>s_cert が 0 の埋め草なので、
     # そのまま混ぜると LOO が埋め草を「補間誤差」として報告する。
     # 除外は出荷 C# の `GridAt` の基底 subsetting と同じ規則にすること
-    worst = 0.0
-    if length(e0) >= 5
-        x = log.(u .- 1.0 .+ 1e-12)
-        for j in (5, 20, 40, 60, 80, 120, 161, 220, 281, 321)
-            j <= length(s) || continue
-            keep = [i for i in eachindex(e0) if s_cert[i] >= s[j] - 1e-9]
-            length(keep) >= 5 || continue
-            xk = x[keep]
-            col = [F[i][j] for i in keep]
-            pos = all(>(0.0), col)
-            yy = pos ? log.(col) : col
-            for k in 3:length(keep)-2
-                xs = vcat(xk[1:k-1], xk[k+1:end])
-                ys = vcat(yy[1:k-1], yy[k+1:end])
-                v = Pchip(xs, ys)(xk[k])
-                pred = pos ? exp(v) : v
-                worst = max(worst, abs(pred - col[k]))
-            end
-        end
-    end
+    # 260813Cl: **抜き取り 10 列から全列へ。**旧実装は j = 5,20,40,60,80,120,161,
+    # 220,281,321 の 10 列 (321 列中 3 %) しか見ておらず、**抜き取りの隙間に落ちた
+    # 単点破損は C6 からも見えない**。C2 の負のテストで実演済 — s=6.0 (j=121) に
+    # 符号反転を注入すると、隣の j=120 を見ている C6 は素通りして C2 だけが捕まえた。
+    # 全列にしても実測は 最悪 1.160e-03 → 1.183e-03 (+2 %、ゲート 5e-3 に 4.2 倍の余裕)、
+    # 所要 35.8 → 36.7 s (JSON パースが支配的なので実質無料)。
+    worst = c6_worst(s, F, u, s_cert)
     worst > GATE_C6 &&
         push!(probs, "C6: leave-one-out 最悪 |dF|=$(worst) > $GATE_C6")
     # ---- C7 ----
@@ -309,7 +385,10 @@ function main(args)
     ok15 && println("C15: チャネル集合 $(length(have))/$(length(want)) 本そろっている  " *
                     "schema_version = $sv")
     if !isempty(flips)
-        println("符号反転あり (L/M と s>4 では物理。記録のみ):")
+        # 260813Cl: 文言を C2 の窓に合わせた (旧「s>4」は C2 の窓が 4 だった頃の記述)。
+        # ⚠ **回数はゲートにしない** — v5 の K 実測は 0 回 1254 行 / 1 回 150 行 /
+        #   2 回 5 行 だが、「≤2」は物理則ではなく現データの偶然
+        println("符号反転あり (L/M と C2 の窓 s>$(C2_S_MAX) では物理。記録のみ):")
         for (p, n) in first(flips, 20)
             println("  $p: $n 回")
         end
