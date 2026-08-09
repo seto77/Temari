@@ -37,7 +37,9 @@ v3 (Julia 初代、2026-08-05 出荷) が v2 から変えたもの:
   julia -t 8 --gcthreads=1 gen_production.jl --quick        # 動作確認
 
 resume: 出力 JSON が既に存在するチャネルは飛ばす (チャネル単位の原子性。
-中断で欠けた分は再実行すれば埋まる)。ゲート違反は ppw=35 で 1 回だけ再試行
+中断で欠けた分は再実行すれば埋まる)。行チェックポイントは値の checksum と、
+コード・求積・物理処方の生成コンテキストを検証し、旧/不一致行は再計算する。
+ゲート違反は ppw=35 で 1 回だけ再試行
 し、それでも破れば failures に記録して続行する (Python 版と同じ方針)。
 =====================================================================#
 
@@ -125,6 +127,121 @@ function is_sane_row(o)
     all(isfinite, o["F"]) || return false
     ratio = o["sigma_own_nm2"] / max(o["sigma_bote_nm2"], 1e-300)
     return isfinite(ratio) && 1e-3 < ratio < 1e3
+end
+
+"チェックポイントの SHA-256 用に、JSON 往復後も同じ表現へ正規化する。"
+function checkpoint_normalize(v)
+    if v isa Bool || v === nothing || v isa AbstractString
+        return v
+    elseif v isa Symbol
+        return String(v)
+    elseif v isa Real
+        return Float64(v)                     # JSON parser は全数値を Float64 に戻す
+    elseif v isa NamedTuple
+        return Dict{String,Any}(String(k) => checkpoint_normalize(x) for (k, x) in pairs(v))
+    elseif v isa Dict
+        return Dict{String,Any}(String(k) => checkpoint_normalize(x) for (k, x) in v)
+    elseif v isa AbstractVector
+        return Any[checkpoint_normalize(x) for x in v]
+    end
+    error("checkpoint に保存できない型 $(typeof(v))")
+end
+
+function checkpoint_sha256(row)
+    io = IOBuffer()
+    write_json(io, checkpoint_normalize(row))
+    return bytes2hex(sha256(take!(io)))
+end
+
+# 行の値だけでなく、それを作ったコード・求積・物理処方も再開契約に含める。
+# git commit だけでは dirty tree を識別できないため、実際に読み込むソースをハッシュする。
+const PRODUCTION_SOURCE_FILES = (
+    "ionization.jl", "l0_numerics.jl", "l0_json.jl", "l1_atomic.jl",
+    "l2_continuum.jl", "l3_radial.jl", "l4_angular.jl", "l5_channel.jl",
+    "l5_exit_edx.jl", "gen_production.jl")
+
+function production_source_fingerprint()
+    io = IOBuffer()
+    for name in PRODUCTION_SOURCE_FILES
+        write(io, name)
+        write(io, UInt8(0))
+        write(io, read(joinpath(@__DIR__, name)))
+        write(io, UInt8(0))
+    end
+    return bytes2hex(sha256(take!(io)))[1:16]
+end
+
+const PRODUCTION_SOURCE_FINGERPRINT = production_source_fingerprint()
+
+function production_context_sha256(settings, presc)
+    return checkpoint_sha256(Dict{String,Any}(
+        "source_fingerprint" => PRODUCTION_SOURCE_FINGERPRINT,
+        "settings" => settings,
+        "prescription" => presc,
+        "s_grid_A_inv" => S_GRID,
+        "gate_mres" => GATE_MRES,
+        "gate_rtail" => GATE_RTAIL))
+end
+
+"再開に使う行の構造・有限性・保証域外の埋め草まで検査する。"
+function is_sane_partial_row(row)
+    try
+        row isa Dict && is_sane_row(row) || return false
+        e0 = row["e0_keV"]
+        u = row["u"]
+        isfinite(e0) && e0 > 0.0 && isfinite(u) && u > 1.0 || return false
+        F = row["F"]
+        length(F) == length(S_GRID) || return false
+        F[1] == 1.0 || return false
+
+        s_cert = row["s_cert_A_inv"]
+        isfinite(s_cert) || return false
+        n_cert = searchsortedlast(S_GRID, s_cert + 1e-12)
+        n_cert >= 1 && S_GRID[n_cert] == s_cert || return false
+        all(iszero, @view F[n_cert+1:end]) || return false
+
+        d = row["diag"]
+        d isa Dict || return false
+        all(k -> haskey(d, k), ("mres", "badL", "rtail", "ortho_c", "retried")) ||
+            return false
+        all(isfinite, (d["mres"], d["badL"], d["rtail"], d["ortho_c"], d["retried"])) ||
+            return false
+        d["mres"] >= 0 && d["rtail"] >= 0 && d["ortho_c"] >= 0 || return false
+        d["badL"] >= 0 && isinteger(d["badL"]) || return false
+        d["retried"] >= 0 && isinteger(d["retried"]) || return false
+
+        tail = row["tail"]
+        tail isa Dict || return false
+        all(k -> haskey(tail, k), ("kind", "source", "eps", "valid_to")) || return false
+        isfinite(tail["eps"]) && tail["eps"] > 0.0 || return false
+        tail["valid_to"] == s_cert || return false
+        return true
+    catch
+        return false
+    end
+end
+
+"行を生成コンテキスト付きの検査可能なチェックポイント包へ変換する。"
+checkpoint_record(row, context_sha256) = Dict{String,Any}(
+    "checkpoint_schema" => 2,
+    "context_sha256" => context_sha256,
+    "row_sha256" => checkpoint_sha256(row),
+    "row" => row)
+
+"レコードの内容と生成コンテキストを検査して行を返す。"
+function checkpoint_row(record, expected_context_sha256=nothing)
+    if record isa Dict && haskey(record, "row")
+        record["checkpoint_schema"] == 2.0 || error("obsolete checkpoint schema")
+        expected_context_sha256 === nothing ||
+            record["context_sha256"] == expected_context_sha256 ||
+            error("checkpoint generation context mismatch")
+        row = record["row"]
+        checkpoint_sha256(row) == record["row_sha256"] ||
+            error("checkpoint checksum mismatch")
+        is_sane_partial_row(row) || error("invalid checkpoint row")
+        return row
+    end
+    error("legacy checkpoint without provenance")
 end
 
 """v3 (SRC) の検証注記。**再生成でしか使われない** — 出荷済み v3 テーブルは
@@ -344,40 +461,44 @@ partial_path(outdir, tag, z) = joinpath(outdir, "F_$(tag)_Z$(z).partial.jsonl")
 "区切り行 (write_json は整形出力なので 1 行 1 レコードにはできない。この行で区切る)"
 const PARTIAL_SEP = "#--row--"
 
-function load_partial(outdir, tag, z)
+function load_partial(outdir, tag, z, context_sha256)
     p = partial_path(outdir, tag, z)
     done = Dict{Float64,Dict{String,Any}}()
     isfile(p) || return done
     buf = IOBuffer()
+    rejected = 0
     for line in eachline(p)
         if strip(line) == PARTIAL_SEP
             try
-                d = _json_value(take!(buf), 1)[1]
-                if d isa Dict && haskey(d, "e0_keV")
-                    # JSON の数値は全て Float64 で戻るので、整数フィールドを復元する
-                    # (これをしないと再開したチャネルだけ "badL": 0.0 と書かれてしまう)
-                    dg = d["diag"]
-                    for k in ("badL", "retried")
-                        haskey(dg, k) && (dg[k] = round(Int, dg[k]))
-                    end
-                    d["F"] = Float64[x for x in d["F"]]      # Any[] → Float64[]
-                    done[Float64(d["e0_keV"])] = d
+                record = _json_value(take!(buf), 1)[1]
+                d = checkpoint_row(record, context_sha256)
+                # JSON の数値は全て Float64 で戻るので、整数フィールドを復元する
+                # (これをしないと再開したチャネルだけ "badL": 0.0 と書かれてしまう)
+                dg = d["diag"]
+                for k in ("badL", "retried")
+                    dg[k] = round(Int, dg[k])
                 end
+                d["F"] = Float64[x for x in d["F"]]      # Any[] → Float64[]
+                done[Float64(d["e0_keV"])] = d
             catch
                 take!(buf)   # 壊れたレコードは捨てる (その E0 は計算し直す)
+                rejected += 1
             end
         else
             println(buf, line)
         end
     end
     # 区切りが来ていない末尾 = クラッシュで書きかけ。捨てる
+    position(buf) > 0 && (rejected += 1)
+    rejected > 0 && @printf("  [resume-qc] Z=%d %s: 壊れた/異常な %d 行を破棄して再計算\n",
+                            z, tag, rejected)
     return done
 end
 
 "1 レコードを追記して即 flush (次のクラッシュで確実に残す)"
-function append_partial(outdir, tag, z, row)
+function append_partial(outdir, tag, z, row, context_sha256)
     open(partial_path(outdir, tag, z), "a") do io
-        write_json(io, row)
+        write_json(io, checkpoint_record(row, context_sha256))
         println(io)
         println(io, PARTIAL_SEP)
         flush(io)
@@ -494,7 +615,8 @@ function run_channel(z::Int, tag::String, outdir::String;
     rows = Vector{Dict{String,Any}}()
     failures = Vector{Dict{String,Any}}()
     mkpath(outdir)
-    resumed = load_partial(outdir, tag, z)      # 260805Cl: 途中再開
+    context_sha256 = production_context_sha256(settings, presc)
+    resumed = load_partial(outdir, tag, z, context_sha256)  # 260805Cl: 途中再開
     if !isempty(resumed)
         @printf("  [resume] Z=%d %s: %d/%d 行を再利用\n",
                 z, tag, length(resumed), length(e0s))
@@ -569,7 +691,7 @@ function run_channel(z::Int, tag::String, outdir::String;
                 "rtail" => d["r_tail_max"], "ortho_c" => d["max_ortho_c"],
                 "retried" => retried))
         push!(rows, row)
-        append_partial(outdir, tag, z, row)    # 260805Cl: 行単位チェックポイント
+        append_partial(outdir, tag, z, row, context_sha256) # 260805Cl: 行単位チェックポイント
         # 260805Cl: 表示する F は末尾ノード (4.0 決め打ちをやめた)
         # 260810Cl: 末尾は行ごとに違う (低 E0 行は s_cert で切れて以降は埋め草) ので
         #           S_GRID[end]/F[end] ではなく s_cert/F[n_cert] を出す
@@ -597,6 +719,9 @@ function run_channel(z::Int, tag::String, outdir::String;
         "schema_version" => SCHEMA_VERSION,
         "generator" => "ionization.jl (Julia)",
         "generator_commit" => _git_head(),
+        "generator_source_fingerprint" => PRODUCTION_SOURCE_FINGERPRINT,
+        "generation_context_sha256" => context_sha256,
+        "cache_provenance" => cache_provenance(),
         "validated" => note, "validation_summary" => note,
         "settings" => Dict{String,Any}(String(k) => v for (k, v) in pairs(settings)),
         "rel_continuum" => presc.rel_continuum,

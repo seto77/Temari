@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 #=
 ionization.jl — STEM-EDX 用 内殻イオン化形状因子 F(s, E0) と断面積 σ(E0)
-                (ionization.py の Julia 移植版 + スカラー相対論拡張)
+                (ionization.py の Julia 移植版 + κ 分解 Dirac 拡張)
 
 ── 何を計算するか ──────────────────────────────────────────────
 高速電子 (E0 = 30–400 keV) による孤立原子の内殻イオン化を第一 Born の
@@ -14,29 +14,27 @@ Bote–Salvat 2008/2009 の解析式 (第 7 章、bote_salvat.json)。
 
 ── 処方 (パイプライン = 章構成) ─────────────────────────────────
   第 2 章  中性原子の SCF-HFS (Slater 交換 + Latter 補正) — 束縛側の場
-  第 4 章  その場で解いた動径 Dirac 方程式の大成分 = 始状態 u_nl
-           (K/L1/L2/L3 を κ で j 分解。∫G²dr=1 に再規格化)
+  第 4 章  その場で解いた動径 Dirac 方程式の始状態 (大・小成分)
+           (K/L1–L3/M1–M5 を κ で j 分解。∫(G²+F²)dr=1)
   第 5 章  終状態の場 = 内殻に空孔を空けて再 SCF した緩和イオン
            + KS(2/3) 静的交換 (歪曲波近似)
-  第 3 章  連続状態 (放出電子): 動径方程式を 3 セグメント Numerov で解き
-           Coulomb 関数への漸近マッチでエネルギー規格化 <ε|ε'>=δ(ε−ε')。
-           始状態と同じ l' は Gram–Schmidt 直交化
-  第 3.5 章 (Julia のみ、--rel) 連続状態のスカラー相対論化 = モデル v3
+  第 3 章  旧 v2 非相対論連続状態 (Numerov、--no-kdirac)
+  第 3.5 章 旧 v3 スカラー相対論連続状態 (--rel、再現専用・既知欠陥あり)
+  第 3.6 章 既定 v4: κ 分解 Dirac 連続状態 + 小成分行列要素
   第 6 章  MDFF: S = q_nl Σ_{l'λ} (2l'+1)(2λ+1)[3j]² R R' P_λ(cosΘ)、
            R_{l'λ}(Q) = ∫u_{εl'} j_λ(Qr) u_nl dr、対称 Ewald 対 (Q₊,Q₋)
            の 2 重角度積分 + ε 積分
-model_id: 既定 DHFS-KS23-Dirac-jsplit-fullrange-sym-v2 (Python 版と同一)
-          --rel で DHFS-KS23-DiracB-SRC-jsplit-fullrange-sym-v3
+model_id: 既定 DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4-DSCF
+          --rel で旧 v3、--no-kdirac で Python と同じ旧 v2
 
 ── 既知の限界 (要約) ──────────────────────────────────────────
 平均場 (多重項・サテライト・CI なし) / 第一 Born (u≲2 で信頼度低下) /
 direct–exchange 干渉項 −Re(DX*) なし / 孤立原子 (化学状態依存なし) /
-相対論は束縛側 Dirac 大成分 + (v3 では) 連続側スカラー相対論まで
-(スピン軌道・小成分行列要素・Breit/遅延は未導入) / M 殻は未検証。
+中心力 Dirac (Breit/遅延なし) / M 殻の外部検証は K/L より限定的。
 
 さらに詳しい理論的背景・選ばなかった選択肢・文献 [1]–[17] は
-**ionization.py の冒頭解説と各章コメント** にある (処方は同一)。
-各章コメントに対応する Python の章番号を記した。
+**ionization.py の冒頭解説と各章コメント** にある。Python 版は独立な v2
+基準実装で、v4 固有部分は Julia の各層コメントを正本とする。
 
     julia -t auto ionization.jl selftest             # 解析解に対する自己検証
     julia -t auto ionization.jl 26 K 200 --quick     # Fe K 殻 @200 kV (粗い求積)
@@ -98,14 +96,15 @@ const USAGE = """
   julia -t auto ionization.jl refcheck
   julia -t auto ionization.jl      Z channel E0keV [opts]   # F(s) 出口 (EDX)
   julia -t auto ionization.jl edge Z channel E0keV [opts]   # dσ/dΔE 出口 (EELS)
-  julia -t auto ionization.jl phase Z epsEV [--lmax N] [--json path]  # δ_l 出口 (弾性)
-  julia -t auto ionization.jl mott  Z epsEV [--lmax N] [--xapot] [--json path]
+  julia -t auto ionization.jl phase Z epsEV [--lmax N] [--fm|--xapot] [--json path]
+                                   # δ_l 出口。既定は純静電場、--xapot は旧処方の比較用
+  julia -t auto ionization.jl mott  Z epsEV [--lmax N|--lcap N] [--fm|--xapot] [--json path]
                                    # Mott 弾性断面積 dσ/dΩ・σ_el・σ_tr・Sherman (P4)
   julia -t auto ionization.jl gos  Z channel [--quick|--high] [--rel]
                                    [--epsmax Ha] [--qmax a0inv] [--json path]  # GOS 出口
                                    # E0 を取らない (GOS は E0 非依存)
-  julia -t auto ionization.jl fx   Z [--s ...] [--nonrel] [--json path]  # 原子散乱因子
-                                   # 既定は完全 Dirac SCF 密度。--nonrel で比較用の非相対論
+  julia -t auto ionization.jl fx   Z [--s ...] [--nonrel] [--xalpha] [--json path]
+                                   # 既定は Dirac+KLI。--xalpha は旧処方の比較用
 
 opts: [--quick|--high] [--rel|--no-kdirac] [--nodscf] [--kli] [--frozen]
       [--no-transverse] [--s s1 s2 ...] [--json path]
@@ -128,6 +127,13 @@ opts: [--quick|--high] [--rel|--no-kdirac] [--nodscf] [--kli] [--frozen]
 
 "`--kli` の有無を交換処方の Symbol へ (:xalpha | :kli)"
 parse_exchange(args) = "--kli" in args ? :kli : :xalpha
+
+"fx は外部照合精度が高い KLI を既定にし、旧 Xα は明示指定で再現する。"
+function parse_fx_exchange(args)
+    ("--kli" in args && "--xalpha" in args) &&
+        error("--kli と --xalpha は排他")
+    return "--xalpha" in args ? :xalpha : :kli
+end
 
 """連続状態の処方を引数から決めて `(rel_continuum, dirac_continuum)` を返す (260809Cl 追加)。
 
@@ -186,7 +192,7 @@ function main_fx(args)
     end
     println("初回はこの元素の SCF を解くため時間がかかります...")
     o = compute_fx(z; s_nodes=s_nodes, relativistic=!("--nonrel" in args),
-                   exchange=parse_exchange(args))
+                   exchange=parse_fx_exchange(args))
     s = o["s_A_inv"]; fx = o["f_x"]; fe = o["f_e_A"]
     @printf("\n%10s  %14s  %14s\n", "s [1/Å]", "f_x [e]", "f_e [Å]")
     for i in 1:max(1, length(s) ÷ 15):length(s)
@@ -196,7 +202,11 @@ function main_fx(args)
             @printf("%10.3f  %14.6f  %14.6f\n", s[i], fx[i], fe[i])
         end
     end
-    @printf("\nf_x(0) = %.10f (= Z、規格化補正後)\n", fx[1])
+    if s[1] == 0.0
+        @printf("\nf_x(0) = %.10f (= Z、規格化補正後)\n", fx[1])
+    else
+        @printf("\ns=0 は指定グリッドに含まれません (先頭は s=%.6g Å⁻¹)。\n", s[1])
+    end
     @printf("補正前の Simpson 積分 = %.10f (電子数 %.1f)。補正 %.3e = SCF の台形則規格化バイアス\n",
             o["n_electrons_raw"], o["n_electrons_scf"], o["norm_correction"])
     println("密度: ", o["density"])
@@ -278,11 +288,14 @@ function main_mott(args)
     z = parse(Int, args[1])
     eps_eV = parse(Float64, args[2])
     l_max = nothing
+    l_cap = 600
     json_path = nothing
     i = 3
     while i <= length(args)
         if args[i] == "--lmax"
             l_max = parse(Int, args[i+1]); i += 1
+        elseif args[i] == "--lcap"
+            l_cap = parse(Int, args[i+1]); i += 1
         elseif args[i] == "--json"
             json_path = args[i+1]; i += 1
         end
@@ -290,9 +303,12 @@ function main_mott(args)
     end
     # --fm: Furness–McCarthy 局所交換 (飛来電子の交換。エネルギー依存)
     # --xapot: 標的の Xα 交換 (⚠ 飛来電子の場としては誤り。比較用)
+    ("--fm" in args && "--xapot" in args) && error("--fm と --xapot は排他")
+    (l_max !== nothing && "--lcap" in args) && error("--lmax と --lcap は排他")
     sp = "--xapot" in args ? :xalpha : ("--fm" in args ? :fm : :static)
     println("初回はこの元素の SCF を解くため時間がかかります...")
-    o = compute_mott(z, eps_eV; l_max=l_max, exchange=parse_exchange(args),
+    o = compute_mott(z, eps_eV; l_max=l_max, l_cap=l_cap,
+                     exchange=parse_exchange(args),
                      scat_pot=sp)
     th = o["theta_deg"]; d = o["dcs_a0_2_sr"]; s = o["sherman"]
     @printf("\n%8s  %16s  %12s\n", "θ [deg]", "dσ/dΩ [a₀²/sr]", "S(θ)")
@@ -303,9 +319,9 @@ function main_mott(args)
             o["sigma_el_a0_2"], o["sigma_el_pw"], o["closure_rel"])
     @printf("σ_tr = %.6e a₀²   max|S| = %.4f (θ = %.1f deg)\n",
             o["sigma_tr_a0_2"], o["max_sherman"], th[argmax(abs.(s))])
-    @printf("l_max = %d / δ の裾 = %.2e%s / フィット残差 %.2e\n",
-            o["l_max"], o["delta_tail"],
-            o["truncated"] ? " ★打ち切り誤差が残る (--lmax で伸ばす)" : "",
+    @printf("l_max = %d / δ の裾 = %.2e (較正前 %.2e)%s / フィット残差 %.2e\n",
+            o["l_max"], o["delta_tail"], o["delta_tail_raw"],
+            o["truncated"] ? " ★打ち切り誤差が残る (--lcap/--lmax で伸ばす)" : "",
             o["max_match_resid"])
     println("場: ", sp === :static ? "純静電 −Z/r + V_H (既定)" :
                     sp === :fm ? "静電 + Furness–McCarthy 局所交換 (エネルギー依存)" :
@@ -317,7 +333,8 @@ function main_mott(args)
         end
         println("\n$json_path に保存しました")
     end
-    return 0
+    # JSON は診断込みで保存するが、未収束結果をバッチが成功扱いしないよう非 0 を返す。
+    return o["truncated"] ? 2 : 0
 end
 
 "phase サブコマンド: 中性原子の静的場に対する弾性散乱位相シフト δ_l"
@@ -336,8 +353,11 @@ function main_phase(args)
         end
         i += 1
     end
+    ("--fm" in args && "--xapot" in args) && error("--fm と --xapot は排他")
+    sp = "--xapot" in args ? :xalpha : ("--fm" in args ? :fm : :static)
     println("初回はこの元素の SCF を解くため時間がかかります...")
-    o = compute_phase(z, eps_eV; l_max=l_max, exchange=parse_exchange(args))
+    o = compute_phase(z, eps_eV; l_max=l_max, exchange=parse_exchange(args),
+                      scat_pot=sp)
     @printf("\n%4s  %14s  %14s  %12s\n", "l", "δ_l [rad]", "sin²δ_l", "フィット残差")
     for (l, d, s2, rs, ok) in zip(o["l"], o["delta_rad"], o["sin2_delta"],
                                   o["match_resid"], o["ok"])
@@ -346,7 +366,8 @@ function main_phase(args)
     d = o["delta_rad"]
     @printf("\n最大 |δ_l| = %.4f rad (l=%d) / 最高部分波 |δ| = %.2e (0 へ収束していること)\n",
             maximum(abs, d), argmax(abs.(d)) - 1, abs(d[end]))
-    println("参照: ", o["reference"], " / 交換: ", o["exchange"])
+    println("参照: ", o["reference"], " / 散乱場: ", o["scattering_potential"],
+            " / SCF交換: ", o["scf_exchange"])
     println("注意: ", o["note"], "。Mott 断面積 (スピン分解) は P4")
     if json_path !== nothing
         open(json_path, "w") do io

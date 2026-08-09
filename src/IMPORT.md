@@ -45,9 +45,9 @@ julia -t auto ionization.jl 26 K 200 --quick
 python -X utf8 ionization.py selftest       # Python 版 (~2 分)
 ```
 
-⚠ SCF の結果は `atom_cache_jl*_*.jls` / `atom_cache_*.pkl` に保存される。
-**物理を変更したらキャッシュを手で消すこと** (キーに処方が入っていない)。
-ファイル名には Julia のバージョンが入る — Serialization 形式が版間で非互換なため。
+SCF の結果は `atom_cache/atom_cache_<schema>_<source指紋>_jl*_*.jls` /
+`atom_cache_*.pkl` に保存される。Julia 版は処方・ソース指紋・Julia 版を鍵に含め、
+payload checksum も検証するので、物理変更時の手動削除は不要。旧世代は容量回収時だけ削除する。
 
 ## 既知の運用上の注意 (実際に踏んだもの)
 

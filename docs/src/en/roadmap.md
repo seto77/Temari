@@ -61,11 +61,11 @@ come first.
 | **P0** | Repository, design principles, layer declaration | **done** |
 | **P1** | Vectorization across radial points | **done** — 11.7× over the dataset-generation code, all bit-identical |
 | **P2** | Split into the L0–L5 layer files; verification in CI | **done** — bit-identical; the operator/exit seam waits for a second exit to define it |
-| **P3** | The discarded exits: GOS, dσ/dΔE, δ_l, stopping power | **next** |
-| **P4** | Elastic side: $f_x(s)$, Mott–Bethe, Mott DCS; add the sum-rule check | |
+| **P3** | The discarded exits: GOS, dσ/dΔE, δ_l, stopping power | **done** |
+| **P4** | Elastic side: $f_x(s)$, Mott–Bethe, Mott DCS; add the sum-rule check | **done** |
 | **P5** | EELS quantification σ(β, Δ); systematic comparison against Egerton SIGMAK/SIGMAL and Hartree–Slater GOS | |
 | **P6** | Photon side: σ_nl, β_nl; comparison against xraylib | |
-| **P7** | M shell, full Dirac continuum | the bound side is done — `--dscf` solves the SCF itself from the Dirac equation; what remains is the *continuum* |
+| **P7** | M shell, full Dirac continuum | **done** — M1–M5 and the κ-resolved two-component continuum ship in dataset v5 |
 
 P2 was deliberately unglamorous: pure code movement, so **bit identity was a
 hard requirement** — verified with `selftest`, `refcheck` (unchanged at

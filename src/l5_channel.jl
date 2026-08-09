@@ -442,6 +442,26 @@ const _cache = Dict{Tuple,Any}()
 # 旧 v1 ファイルは読まれずに残る (無害。消したければ手で消す)
 # 260807Cl: KLI の 3 フィールド (exchange / vx / z_asym) 追加で v4 へ。
 const CACHE_SCHEMA = "v4"
+# 260809Cl: スキーマを手で上げ忘れても、SCF・束縛解へ入るソースが変われば
+# 自動的に別ファイルへ分かれる。コメントだけの変更でも安全側に失効する。
+const CACHE_FINGERPRINT_FILES = ("l0_numerics.jl", "l1_atomic.jl")
+const CACHE_FINGERPRINT_FALLBACK = "embedded1"  # 単一ファイル版では手動で上げる
+const CACHE_FORMAT_VERSION = 1
+
+function cache_source_fingerprint()
+    io = IOBuffer()
+    for name in CACHE_FINGERPRINT_FILES
+        path = joinpath(@__DIR__, name)
+        isfile(path) || return CACHE_FINGERPRINT_FALLBACK
+        write(io, name)
+        write(io, UInt8(0))
+        write(io, read(path))
+        write(io, UInt8(0))
+    end
+    return bytes2hex(sha256(take!(io)))[1:16]
+end
+
+const CACHE_SOURCE_FINGERPRINT = cache_source_fingerprint()
 # 260807Cl: リポ直下に散らばると 100 個超・100 MB 超になるのでサブディレクトリへ集める。
 # ⚠ **cwd 相対のまま**にしてある — フリート実行でワーカーごとに作業ディレクトリを
 # 分ける運用 (指示書 §3) を壊さないため。共有したいなら同じ cwd から起動する
@@ -449,16 +469,54 @@ const CACHE_SCHEMA = "v4"
 const CACHE_DIR = "atom_cache"
 cache_file(key::Tuple) =
     joinpath(CACHE_DIR,
-             "atom_cache_$(CACHE_SCHEMA)_jl$(VERSION.major)$(VERSION.minor)_" *
+             "atom_cache_$(CACHE_SCHEMA)_$(CACHE_SOURCE_FINGERPRINT)_" *
+             "jl$(VERSION.major)$(VERSION.minor)_" *
              join(string.(key), "_") * ".jls")
 
+cache_provenance() = Dict{String,Any}(
+    "schema" => CACHE_SCHEMA,
+    "format_version" => CACHE_FORMAT_VERSION,
+    "source_fingerprint" => CACHE_SOURCE_FINGERPRINT,
+    "source_files" => collect(CACHE_FINGERPRINT_FILES),
+    "julia_version" => string(VERSION))
+
+"オブジェクトを独立 payload に直列化し、内容の SHA-256 も持たせる。"
+function cache_envelope(key::Tuple, obj)
+    io = IOBuffer()
+    serialize(io, obj)
+    payload = take!(io)
+    return (cache_format=CACHE_FORMAT_VERSION,
+            schema=CACHE_SCHEMA,
+            source_fingerprint=CACHE_SOURCE_FINGERPRINT,
+            key=key,
+            payload_sha256=bytes2hex(sha256(payload)),
+            payload=payload)
+end
+
+"キャッシュ包を検証してから payload を復元する。"
+function cache_unwrap(envelope, key::Tuple)
+    envelope isa NamedTuple || error("legacy cache payload without envelope")
+    envelope.cache_format == CACHE_FORMAT_VERSION || error("cache format mismatch")
+    envelope.schema == CACHE_SCHEMA || error("cache schema mismatch")
+    envelope.source_fingerprint == CACHE_SOURCE_FINGERPRINT ||
+        error("cache source fingerprint mismatch")
+    envelope.key == key || error("cache key mismatch")
+    bytes2hex(sha256(envelope.payload)) == envelope.payload_sha256 ||
+        error("cache payload checksum mismatch")
+    return deserialize(IOBuffer(envelope.payload))
+end
+
 function cache_put(key::Tuple, obj)
-    _cache[key] = obj
     fname = cache_file(key)
     mkpath(dirname(fname))
-    tmp = fname * ".tmp$(getpid())"
-    serialize(tmp, obj)
-    mv(tmp, fname; force=true)                  # 原子的に置き換え
+    tmp = fname * ".tmp$(getpid()).$(Threads.threadid()).$(time_ns())"
+    try
+        serialize(tmp, cache_envelope(key, obj))
+        mv(tmp, fname; force=true)              # 原子的に置き換え
+    finally
+        isfile(tmp) && rm(tmp; force=true)       # serialize 失敗時の書きかけだけを掃除
+    end
+    _cache[key] = obj
     return obj
 end
 
@@ -470,7 +528,7 @@ function disk_cached(builder, key::Tuple)
         # 読めない .jls (構造体の定義変更・書きかけ) は捨てて作り直す。
         # 黙って古い型を使うより、作り直す方が常に正しい (遅いだけ)
         try
-            _cache[key] = deserialize(fname)
+            _cache[key] = cache_unwrap(deserialize(fname), key)
             return _cache[key]
         catch err
             @printf("WARN: キャッシュ %s を読めないので作り直します (%s)\n",

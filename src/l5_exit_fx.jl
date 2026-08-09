@@ -91,6 +91,9 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
                     relativistic::Bool=true, x_alpha::Float64=X_ALPHA,
                     exchange::Symbol=:xalpha, verbose::Bool=true)
     s_nodes === nothing && (s_nodes = collect(0.0:0.1:6.0))
+    isempty(s_nodes) && error("s_nodes は 1 点以上")
+    all(isfinite, s_nodes) || error("s_nodes は有限値")
+    all(>=(0.0), s_nodes) || error("s_nodes は 0 以上")
     issorted(s_nodes) || error("s_nodes は昇順で")
     a = get_neutral(z; relativistic=relativistic, x_alpha=x_alpha,
                     exchange=exchange)
@@ -107,7 +110,12 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
     verbose && @printf("Z=%d  電子数 %.1f  規格化補正 %.3e (台形則バイアス Z×1.67e-7)\n",
                        z, a.nel, corr - 1.0)
     return Dict{String,Any}(
+        "schema_version" => SINGLE_RUN_SCHEMA_VERSION,
+        "cache_provenance" => cache_provenance(),
         "exit" => "scattering-factor", "z" => z,
+        "settings" => Dict{String,Any}(
+            "relativistic" => relativistic, "x_alpha" => x_alpha,
+            "scf_exchange" => String(exchange)),
         "n_electrons_raw" => nel_raw,      # 補正前の Simpson 積分 (格子品質の指標)
         "n_electrons_scf" => a.nel, "norm_correction" => corr - 1.0,
         "s_A_inv" => s_nodes, "q_a0inv" => K,

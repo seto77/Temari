@@ -147,12 +147,13 @@ presets are not interchangeable in a dataset.
 
 Solving the self-consistent field for an element is the expensive part of a
 first run, so the result is serialized next to the working directory as
-`atom_cache_jl<version>_<kind>_<Z>...jls`.
+`atom_cache/atom_cache_<schema>_<source-fingerprint>_jl<version>_<kind>_<Z>...jls`.
 
-!!! warning "Delete the caches whenever you change the physics"
-    The cache key does **not** include the prescription. If you modify the SCF,
-    the potential, or anything that feeds them, delete `atom_cache_*.jls` by hand
-    or you will keep computing with stale input.
+The key includes the SCF prescription, and a SHA-256-derived fingerprint of the
+numerics and atomic-SCF source automatically separates caches after code changes.
+Each file also carries a payload checksum and is rebuilt if validation fails.
+Old files are left in place for recoverability and may be deleted later only to
+reclaim disk space.
 
 The Julia version is part of the filename because Julia's serialization format
 is not compatible across versions. The Python implementation keeps its own

@@ -207,8 +207,8 @@ passes only on a newer Julia is not accepted — see
 
 - **Absolute cross sections.** They are Bote–Salvat values; the engine's own
   $\sigma(N_0)$ is a sanity indicator, not a product.
-- **The M shell.** The coefficient data covers it, the prescription has not been
-  validated there.
+- **Systematic external M-shell coverage.** M1–M5 are implemented and pass the
+  internal production gates, but independent reference coverage remains sparse.
 - **Quantitative white lines.** Structurally out of reach for an isolated atom in
   a mean field.
 

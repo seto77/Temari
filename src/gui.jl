@@ -72,6 +72,7 @@ const REPO_ROOT   = dirname(@__DIR__)                       # atom_cache_jl_*.jl
 const ENGINE_PATH = joinpath(@__DIR__, "ionization.jl")
 const JULIA_EXE   = joinpath(Sys.BINDIR, Base.julia_exename())
 const ENGINE_THREADS    = 4                                  # 掟: -t auto にしない
+const ENGINE_Z_MAX      = 86                                 # src/l1_atomic.jl ORBITALS の上限
 const COMPUTE_TIMEOUT_S = 7200.0                             # 2 時間 (寛大に。超えたら kill)
 const PORT_SCAN_RANGE   = 20                                 # 希望ポートから +20 まで探索
 const LOG_TAIL_BYTES    = 2048                               # /progress が返すログ末尾
@@ -286,11 +287,11 @@ end
 function handle_compute(q::Dict{String,String})
     # ---- 引数のホワイトリスト検証 (エンジンに渡す前に GUI 側で弾く) ----
     z = tryparse(Int, get(q, "z", ""))
-    (z === nothing || !(1 <= z <= 99)) &&
-        return (400, json_err("Z は 1..99 の整数 (Bote–Salvat 表の範囲)"))
+    (z === nothing || !(1 <= z <= ENGINE_Z_MAX)) &&
+        return (400, json_err("Z は 1..86 の整数 (原子配置を実装済みの範囲)"))
     tag = uppercase(get(q, "channel", ""))
     tag in CHANNEL_TAGS ||
-        return (400, json_err("channel は K/L1/L2/L3 のいずれか"))
+        return (400, json_err("channel は K/L1/L2/L3/M1/M2/M3/M4/M5 のいずれか"))
     e0 = tryparse(Float64, get(q, "e0", ""))
     (e0 === nothing || !isfinite(e0) || !(0.0 < e0 <= 10_000.0)) &&
         return (400, json_err("E0 [keV] は 0 < E0 <= 10000 の数値"))
@@ -650,6 +651,7 @@ footer p { color: var(--muted); font-size: 12px; }
         <label>チャネル
           <select id="channel">
             <option>K</option><option>L1</option><option>L2</option><option>L3</option>
+            <option>M1</option><option>M2</option><option>M3</option><option>M4</option><option>M5</option>
           </select>
         </label>
         <label>E0 [keV]
@@ -679,7 +681,7 @@ footer p { color: var(--muted); font-size: 12px; }
       <pre id="runlog" class="hidden"></pre>
       <p class="note">初めての元素はエンジンが SCF を解くため時間がかかります
         (atom_cache_jl_*.jls に保存され 2 回目以降は速い)。
-        L1/L2/L3 は Bote 表に端がある元素のみ。E0 は吸収端より上。
+        L1–L3/M1–M5 は Bote 表と原子配置に該当副殻がある元素のみ。E0 は吸収端より上。
         同時 1 ジョブ (実行中の追加要求は 423)。進捗はログ末尾の 1 秒ポーリング表示、
         中止ボタンでエンジンを kill します。ページ再読み込みでジョブ表示は失われます。</p>
     </form>

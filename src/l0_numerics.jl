@@ -53,6 +53,23 @@ const QUICK_SETTINGS = (n1=8, n2=16, n3=8, l_cap=72, n_x=32, n_phi=16,
 const HIGH_SETTINGS = (n1=20, n2=56, n3=20, l_cap=128, n_x=96, n_phi=48,
                        n_q=360, sig_thresh=1e-13, ppw=30.0, dt_log=1.0e-3)
 
+# 単発出口の JSON 契約。model_id は物理処方を表すが、求積プリセットは意図的に
+# 含めないため、再現に必要な数値設定を別フィールドで必ず保存する。
+const SINGLE_RUN_SCHEMA_VERSION = 1
+
+"QUICK / PROD / HIGH / custom を、値が同じ NamedTuple に対しても安定に返す。"
+settings_preset(settings) = settings == QUICK_SETTINGS ? "quick" :
+                            settings == PROD_SETTINGS  ? "prod"  :
+                            settings == HIGH_SETTINGS  ? "high"  : "custom"
+
+"求積設定を JSON 化できる Dict にし、暗黙の連続状態設定も明示する。"
+function settings_dict(settings)
+    d = Dict{String,Any}(String(k) => v for (k, v) in pairs(settings))
+    get!(d, "ppw", CONT_PPW)
+    get!(d, "dt_log", CONT_DT_LOG)
+    return d
+end
+
 const GRID_R0 = 1e-7         # 動径 log メッシュの内端 [a0]
 const GRID_DT = 1e-3         # 束縛系 log メッシュの刻み Δ(ln r)
 const SCF_RMAX = 60.0        # SCF メッシュの外端 [a0]

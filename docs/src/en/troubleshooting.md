@@ -59,21 +59,27 @@ Windows PowerShell 5.1 is not enough.
 
 ## Results changed after I edited the physics
 
-Delete the SCF caches:
+This is expected on the first run after changing the numerical or atomic-SCF
+source. The cache filename contains a source fingerprint, so TEMARI builds a new
+cache instead of reading the old one. Cache payloads are checksummed and a damaged
+file is rebuilt automatically.
+
+Old cache generations are retained. To reclaim their disk space after confirming
+the new results, remove only the cache files inside the cache directory:
 
 ```powershell
-Remove-Item atom_cache_*.jls
+Remove-Item atom_cache\atom_cache_*.jls
 ```
 
-The cache key does **not** include the prescription, so a modified SCF, potential
-or anything feeding them will keep reading stale results. The Python
-implementation has its own `atom_cache_*.pkl`.
+The Python implementation has its own `atom_cache_*.pkl` and does not share this
+integrity mechanism.
 
 The Julia version appears in the cache filename because Julia's serialization
 format is not compatible across versions — a cache written by 1.12 is not read
 by 1.11.
 
-Leftover `atom_cache_*.jls.tmp*` files after a kill are harmless; delete them.
+Leftover `atom_cache/atom_cache_*.jls.tmp*` files after a kill are harmless;
+delete them.
 
 ## `selftest` fails
 
@@ -99,8 +105,8 @@ julia -e 'include("src/ionization.jl"); exit(refcheck() < 1e-5 ? 0 : 1)'
 
 ## The first calculation for an element is slow
 
-That is the SCF being solved. The result is cached as `atom_cache_*.jls` next to
-the working directory, and subsequent runs for the same element are much faster.
+That is the SCF being solved. The result is cached under `atom_cache/` in the
+working directory, and subsequent runs for the same element are much faster.
 
 ## A channel fails its gates
 

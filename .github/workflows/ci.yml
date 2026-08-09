@@ -67,6 +67,9 @@ jobs:
       - name: Dirac radial-integral q lane vs reference (75 cases)
         run: julia --startup-file=no -t 1 tools/verify_e5_qlane_dirac.jl
 
+      - name: Cache and production-checkpoint integrity
+        run: julia --startup-file=no -t 1 tools/verify_integrity.jl
+
       # The v4 angular fast path: the Q+ hoist, the packed channel arrays and the
       # interleaved Legendre recurrence, all against the preserved oracle.
       - name: Angular fast path vs oracle (61440 elements)

@@ -48,7 +48,16 @@ function compute_channel(z::Int, tag::String, e0_keV::Float64;
                          l_init=ch.l_b, occ_init=ch.occ_init, progress=verbose,
                          rel=ch.rel, dirac=ch.dirac)
     return Dict{String,Any}(
-        "model_id" => ch.model_id,
+        "schema_version" => SINGLE_RUN_SCHEMA_VERSION,
+        "model_id" => ch.model_id, "exit" => "edx-form-factor",
+        "cache_provenance" => cache_provenance(),
+        "quadrature_preset" => settings_preset(settings),
+        "settings" => settings_dict(settings),
+        "physics" => Dict{String,Any}(
+            "continuum" => ch.dirac !== nothing ? "dirac-kappa-2c" :
+                           (ch.rel !== nothing ? "scalar-relativistic" : "nonrelativistic"),
+            "dirac_scf" => dirac_scf, "scf_exchange" => String(exchange),
+            "x_alpha" => x_alpha, "final_state" => String(final_state)),
         "z" => z, "channel" => tag, "e0_keV" => e0_keV,
         "shell_nl" => [ch.n_b, ch.l_b], "kappa" => ch.kappa,
         "occupancy" => ch.occ_init,

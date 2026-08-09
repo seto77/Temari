@@ -145,7 +145,16 @@ function compute_gos(z::Int, tag::String;
     # 和則の左辺 ∫ (df/dΔE) dΔE を各 Q で。dΔE = dε なので ε の重みがそのまま使える
     f_sum = [sum(we[ie] * gos[ie, iq] for ie in 1:ne) for iq in 1:n_q_out]
     return Dict{String,Any}(
+        "schema_version" => SINGLE_RUN_SCHEMA_VERSION,
+        "cache_provenance" => cache_provenance(),
         "model_id" => ch.model_id, "exit" => "gos",
+        "quadrature_preset" => settings_preset(settings),
+        "settings" => settings_dict(settings),
+        "physics" => Dict{String,Any}(
+            "continuum" => ch.dirac !== nothing ? "dirac-kappa-2c" :
+                           (ch.rel !== nothing ? "scalar-relativistic" : "nonrelativistic"),
+            "dirac_scf" => dirac_scf, "scf_exchange" => String(exchange),
+            "x_alpha" => x_alpha, "final_state" => String(final_state)),
         "z" => z, "channel" => tag,
         "shell_nl" => [ch.n_b, ch.l_b], "kappa" => ch.kappa,
         "occupancy" => ch.occ_init,

@@ -11,15 +11,15 @@
 #
 # 依存は **Julia 標準ライブラリのみ**です (CONTRIBUTING.md「No dependencies」)。
 # したがって `Pkg.instantiate()` は何もダウンロードしません。このファイルの
-# 実質的な役目は **処理系のバージョンを固定すること**です — 出荷データセットは
-# 世代ごとに処理系をピン留めする規約で、v3 / v4 はどちらも Julia 1.11.9 です
-# (Manifest.toml は .gitignore。標準ライブラリしか無いので固定する状態がありません)。
+# 実質的な役目は **対応する処理系の系列を宣言すること**です — 出荷データセットは
+# MANIFEST の記録で処理系をピン留めする規約で、v3 / v4 はどちらも Julia 1.11.9 です
+# (Manifest.toml は .gitignore。標準ライブラリしか無いので固定する依存状態がありません)。
 
 [deps]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
-SHA = "ea8e919c-243c-51af-8825-aaa63cd1f353"
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 Serialization = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
 Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
 

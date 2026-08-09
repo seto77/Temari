@@ -91,9 +91,19 @@ function compute_edge(z::Int, tag::String, e0_keV::Float64;
                          rel=ch.rel, dirac=ch.dirac, transverse=transverse)
     e = eels_from_NK(N, diag, ch.E_th, ch.T0)
     return Dict{String,Any}(
+        "schema_version" => SINGLE_RUN_SCHEMA_VERSION,
+        "cache_provenance" => cache_provenance(),
         "model_id" => model_id_of(ch.rel !== nothing, dirac_scf, x_alpha,
                                   exchange, final_state, transverse,
                                   dirac_continuum),
+        "quadrature_preset" => settings_preset(settings),
+        "settings" => settings_dict(settings),
+        "physics" => Dict{String,Any}(
+            "continuum" => ch.dirac !== nothing ? "dirac-kappa-2c" :
+                           (ch.rel !== nothing ? "scalar-relativistic" : "nonrelativistic"),
+            "dirac_scf" => dirac_scf, "scf_exchange" => String(exchange),
+            "x_alpha" => x_alpha, "final_state" => String(final_state),
+            "transverse" => transverse),
         "exit" => "eels-dsde", "transverse" => transverse,
         "z" => z, "channel" => tag, "e0_keV" => e0_keV,
         "shell_nl" => [ch.n_b, ch.l_b], "kappa" => ch.kappa,

@@ -20,23 +20,23 @@ julia -t auto src/ionization.jl refcheck
 julia -t auto src/ionization.jl      <Z> <channel> <E0_keV> [--quick|--high] [--rel|--no-kdirac] [--frozen] [--s ...] [--json <path>]
 julia -t auto src/ionization.jl edge <Z> <channel> <E0_keV> [--quick|--high] [--rel|--no-kdirac] [--frozen] [--no-transverse] [--json <path>]
 julia -t auto src/ionization.jl gos  <Z> <channel>          [--quick|--high] [--rel|--no-kdirac] [--frozen] [--epsmax <Ha>] [--qmax <a0^-1>] [--json <path>]
-julia -t auto src/ionization.jl phase <Z> <eps_eV> [--lmax <N>] [--json <path>]
-julia -t auto src/ionization.jl mott  <Z> <eps_eV> [--lmax <N>] [--xapot] [--json <path>]
-julia -t auto src/ionization.jl fx   <Z> [--s s1 s2 ...] [--json <path>]
+julia -t auto src/ionization.jl phase <Z> <eps_eV> [--lmax <N>] [--fm|--xapot] [--json <path>]
+julia -t auto src/ionization.jl mott  <Z> <eps_eV> [--lmax <N>|--lcap <N>] [--fm|--xapot] [--json <path>]
+julia -t auto src/ionization.jl fx   <Z> [--s s1 s2 ...] [--xalpha] [--json <path>]
 ```
 
 ### Subcommands
 
 | Subcommand | What it does | Time |
 | --- | --- | --- |
-| `selftest` | The analytic ladder T0–T9. Failures are assertions; a non-zero exit is a real failure. | ~10 s |
+| `selftest` | The analytic ladder T0–T24. Failures are assertions; a non-zero exit is a real failure. | ~50 s |
 | `refcheck` | Compares against `src/reference_values.json`, the values produced by the independent Python implementation. Prints `WORST vs Python`. | ~1 min |
 | *(none)* | The **F(s, E₀) exit**: compute one channel on an s grid. | seconds to minutes |
 | `edge` | The **dσ/dΔE exit**: the EELS core-loss edge shape and the inner-shell stopping-power contribution, at K = 0. | cheaper than the above — one K node instead of the whole s grid |
-| `phase` | The **δ_l exit**: elastic scattering phase shifts in the neutral atom's static field. Takes `<Z> <ε_eV>`, not a channel. | seconds |
+| `phase` | The **δ_l exit**: elastic scattering phase shifts in the neutral atom's purely electrostatic field by default. `--fm` adds Furness–McCarthy exchange; `--xapot` reproduces the old target-Xα field for comparison. Takes `<Z> <ε_eV>`, not a channel. | seconds |
 | `gos` | The **GOS exit**: the generalized oscillator strength surface df/dΔE(Q). Takes `<Z> <channel>` and **no beam energy** — the GOS does not depend on one. | comparable to one F(s) run, and it serves every E₀ |
-| `fx` | The **scattering-factor exit**: f_x(s) for X-rays and f_e(s) for electrons. Takes `<Z>` alone — no channel, no energy. | the SCF, then milliseconds |
-| `mott` | The **Mott elastic exit** (P4): dσ/dΩ, the Sherman function S(θ), σ_el and σ_tr from the κ-resolved Dirac phase shifts. Takes `<Z> <ε_eV>`. Uses the **purely electrostatic** field −Z/r + V_H by default; `--xapot` adds the target's Xα exchange for comparison (that field is wrong for a projectile — see `docs/mott_elastic_2026-08-07.md` §3). | seconds; the partial-wave count grows with energy |
+| `fx` | The **scattering-factor exit**: f_x(s) for X-rays and f_e(s) for electrons. Takes `<Z>` alone — no channel, no energy. Its CLI default is Dirac+KLI; `--xalpha` reproduces the former Xα default. | the SCF, then milliseconds |
+| `mott` | The **Mott elastic exit** (P4): dσ/dΩ, the Sherman function S(θ), σ_el and σ_tr from the κ-resolved Dirac phase shifts. Takes `<Z> <ε_eV>`. Uses the **purely electrostatic** field −Z/r + V_H by default; `--fm` adds Furness–McCarthy exchange and `--xapot` reproduces the target-Xα comparison. A same-grid free-particle solve removes the integrator's numerical phase before the tail test; both raw and calibrated tails are reported. The automatic cap is 600, and a genuinely non-converged tail returns exit code 2. | seconds; the partial-wave count grows with energy |
 
 `refcheck` reports but does not gate — it always exits 0. To gate it (as CI
 does), call the function and inspect the return value:
@@ -63,13 +63,14 @@ julia -e 'include("src/ionization.jl"); exit(refcheck() < 1e-5 ? 0 : 1)'
 | `--rel` | Scalar-relativistic continuum, the **v3** prescription (model id `...DiracB-SRC...v3`). ⚠ Its one-component reduction is defective — see below — so this exists to reproduce v3, not as a choice for new work. Mutually exclusive with `--no-kdirac`. |
 | `--no-kdirac` | Non-relativistic continuum, the **v2** prescription (`...v2`). This was the command line's default until 2026-08-09. |
 | `--nodscf` | Solve the atom's SCF from the Schrödinger equation instead of the **radial Dirac** one, which is the default — every occupied orbital, resolved in κ, with the small component in the density. Removes `-DSCF` from the model id. The Dirac SCF costs 2–3× the SCF time (once per element, then cached) and matters for heavy atoms: it moves σ_own/σ_Bote for Au L3 from 0.924 to 0.947. |
-| `--kli` | Replace local Xα exchange with **exact exchange** in the KLI form, and drop the Latter correction — the $-(Z-N+1)/r$ tail then comes out of the physics. Adds `-KLI` to the model id. Works with either SCF, so `--kli` alone gives Dirac + exact exchange and `--kli --nodscf` the non-relativistic comparison. Costs 1.9× the SCF time (Au 56 s, once per element, then cached). It brings $f_x$ and $f_e$ down to the level at which published parameterizations disagree with each other — see [Physics](physics.md#exact-exchange---kli). |
+| `--kli` | Replace local Xα exchange with **exact exchange** in the KLI form, and drop the Latter correction — the $-(Z-N+1)/r$ tail then comes out of the physics. Adds `-KLI` to the model id. This remains opt-in for ionization/GOS; it is already the `fx` CLI default. Costs 1.9× the SCF time (Au 56 s, once per element, then cached). |
+| `--xalpha` | `fx` only: reproduce its former Dirac+Xα CLI default. |
 | `--frozen` | **Exact frozen core**: solve the bound *and* the continuum state in one and the same potential — the neutral atom's KS potential, Latter tail included (`z_asym = 1`) — instead of putting the continuum in the relaxed core-hole ion's field. Adds `-FZ` to the model id. This is the convention of Zhang et al.'s Dirac GOS database ("the potential remains unchanged for the initial and final states"). Because the two states then share a Hamiltonian, they are *exactly* orthogonal and the Gram–Schmidt projection has nothing left to remove. Also skips the ion SCF, so it is cheaper. The bound orbital is bit-identical to the default. |
 | `--frozen-static` | The same frozen core built on the neutral atom's **static** field instead (tail clipped to 0, `z_asym = 0`) — the field the `phase` exit uses. Adds `-FZS`. Differs from `--frozen` by under 0.2 % except right at threshold. |
 | `--kdirac` | **κ-resolved Dirac continuum plus the small-component matrix element — the default since 2026-08-09**, so passing it is a no-op kept for compatibility. Solves the coupled radial Dirac equations for each κ instead of the scalar-relativistic one-component reduction, keeps both G and F, and uses $R^\lambda = \int [G_aG_b + F_aF_b] j_\lambda(qr)\,dr$ with the Wigner 6j angular factor. Strictly more than `--rel`, so the two are mutually exclusive; the model id carries the `-KDIRAC2C-…-v4` base. Matters for heavy elements: it moves the Au L3 GOS 8 % toward Zhang et al.'s Dirac database and shrinks the disagreement across six channels from 11.2 % to 4.0 %. Roughly 2× the partial waves and a costlier integrator. |
 | `--no-transverse` | Drop the **transverse (Møller) interaction**, leaving the longitudinal kernel alone. The transverse term is **on by default in the `edge` exit** as of 2026-08-08: $1/q^4 \to 1/q^4 + \beta_t^2 (\Delta E/\hbar c)^2 / [q^2 (q^2 - (\Delta E/\hbar c)^2)^2]$, with the matrix elements untouched. It is worth a few percent at 200–300 keV and largely removes the E₀ drift of σ_own/σ_Bote, and it agrees exactly with the independent dipole-limit result (T22b). **`edge` exit only** — the mixed form for the F(s) MDFF ($Q_+ \neq Q_-$) is a separate prescription decision and is not implemented, so **shipped F(s) tables are unaffected either way**. The model id carries `-TR` when it is on, so any output says which kernel made it. `--transverse` is still accepted and is now a no-op. |
 | `--s s1 s2 ...` | Explicit s nodes in Å⁻¹, replacing the default grid. Consumes every following argument until the next `--`. F(s) exit only — `edge` evaluates K = 0 alone. |
-| `--json <path>` | Write the full result object to `<path>` as JSON. |
+| `--json <path>` | Write the full result object to `<path>` as JSON. Single-run JSON includes `schema_version`, structured physics settings, and the complete numerical quadrature settings needed to reproduce the run. |
 
 `--frozen` and `--frozen-static` are **off by default** — research knobs, not
 prescriptions. The transverse term is on by default, in the `edge` exit only.
@@ -187,8 +188,9 @@ julia +1.11 -t auto src/ionization.jl fx 26 --json fe_factors.json
 ```
 
 X-ray and electron atomic scattering factors, straight from the SCF charge
-density. No channel and no energy: nothing is being excited, so the operator is
-just the Fourier transform of the density.
+density. The CLI uses the externally validated Dirac+KLI prescription by default;
+pass `--xalpha` only to reproduce the former default. No channel and no energy:
+nothing is being excited, so the operator is just the Fourier transform of the density.
 
 $$f_x(s) = \int 4\pi r^2 \rho(r)\, j_0(Kr)\, \mathrm{d}r, \qquad K = 4\pi s a_0$$
 

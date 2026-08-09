@@ -4,9 +4,10 @@
     The comments in the source are the authoritative statement of the
     prescription: the overview in the header of `src/ionization.jl`, the details
     in the layer files it loads (`l0_numerics.jl` … `l5_exit_*.jl`), and the
-    fullest theoretical discussion — including the options that were *not* taken
-    and the references [1]–[17] — in `src/ionization.py`, which implements the
-    same prescription. This page is a map of them.
+    fullest historical discussion — including the options that were *not* taken
+    and the references [1]–[17] — in `src/ionization.py`. The Python file is the
+    independent v2 baseline; the κ-resolved v4 additions live in the Julia layer
+    files. This page is a map of them.
 
 ## What is computed
 
@@ -33,7 +34,7 @@ own value. It comes from the Bote–Salvat analytic formulas, which are fitted t
 distorted-wave and plane-wave Born calculations over a wide energy range. The
 engine's own $\sigma$ from $N(0)$ is reported only as a sanity indicator.
 
-### The same calculation, reported four ways
+### One engine, six exits
 
 The two integrals above are where the other exits branch off. Nothing below L5
 knows which one is running.
@@ -44,6 +45,8 @@ knows which one is running.
 | $\mathrm{d}\sigma/\mathrm{d}\Delta E$ | Stops before the $\varepsilon$ integral and reports its integrand at $K = 0$, times $4\gamma^2 a_0^2$. Contracting that same integrand against $\Delta E$ gives the stopping-power contribution |
 | $\mathrm{d}f/\mathrm{d}\Delta E(Q)$ | Skips the angular integral entirely and reports $2\Delta E\, S(Q, Q, 1)/Q^2$. Since $S$ never references $k_i$ or $k_f$ as physics, **the GOS carries no $E_0$** |
 | $\delta_l$ | Uses only the continuum solver, in the neutral atom's static field, and reports the phase of the asymptotic fit rather than a matrix element |
+| Mott elastic | Builds the spin-preserving and spin-flip amplitudes from κ-resolved Dirac phases and reports $\mathrm{d}\sigma/\mathrm{d}\Omega$, $\sigma_{el}$, $\sigma_{tr}$ and the Sherman function |
+| $f_x(s), f_e(s)$ | Fourier-transforms the neutral-atom density and applies the Mott–Bethe relation; no ionization channel or beam energy is involved |
 
 Because they share the solvers, they also share the prescription's limits below —
 and the $\varepsilon$ integral's verification status. What is new in the EELS and
@@ -56,10 +59,11 @@ The chapter numbering below is the chapter numbering in the source.
 | Chapter | Step | Prescription |
 | --- | --- | --- |
 | 2 | Neutral-atom field | SCF Hartree–Fock–Slater with Xα exchange (α = 1, Slater) and the Latter tail correction. A **full Dirac SCF** (the default; `--nodscf` turns it off): every occupied orbital solved from the radial Dirac equation, resolved in κ, with the small component kept in the density. Decisive for heavy elements — it moves Au's $f_x$ by 10.8 % at $s = 4$ Å⁻¹ and brings the 1s eigenvalue onto the experimental K edge (0.9908 → 1.00004). `--kli` replaces the local exchange with **exact exchange in the KLI form** — see below |
-| 4 | Initial state | Radial Dirac equation solved in that field; the large component is $u_{nl}$. K/L1/L2/L3 are resolved in $j$ through $\kappa$, and renormalized to $\int G^2 \mathrm{d}r = 1$ |
+| 4 | Initial state | Radial Dirac equation solved in that field. K, L1–L3 and M1–M5 are resolved in $j$ through $\kappa$; both large and small components are retained and normalized together |
 | 5 | Final-state field | The core hole is opened and the ion is re-converged (relaxed core-hole SCF), plus a Kohn–Sham (2/3) static exchange — the distorted-wave approximation |
-| 3 | Continuum state | Three-segment Numerov integration, asymptotically matched to Coulomb functions for energy normalization $\langle\varepsilon\vert\varepsilon'\rangle = \delta(\varepsilon - \varepsilon')$; the partial wave with the same $l$ as the initial state is Gram–Schmidt orthogonalized against it |
-| 3.5 | Scalar relativity | (Julia only, `--rel`) the continuum electron is treated scalar-relativistically — this is model v3 |
+| 3 | Legacy continuum | Three-segment Numerov integration for the non-relativistic v2 path, asymptotically matched to Coulomb functions |
+| 3.5 | Scalar relativity | `--rel` reproduces the legacy v3 scalar-reduction path; it has a documented Darwin-term defect and is not the default for new calculations |
+| 3.6 | Shipping continuum | The v4 default solves the coupled radial Dirac equations for every κ and retains both components in the matrix element |
 | 6 | MDFF assembly | $S = q_{nl} \sum_{l'\lambda} (2l'+1)(2\lambda+1)\,[3j]^2\,R\,R'\,P_\lambda(\cos\Theta)$ with $R_{l'\lambda}(Q) = \int u_{\varepsilon l'}\, j_\lambda(Qr)\, u_{nl}\,\mathrm{d}r$, over the symmetric Ewald pair $(Q_+, Q_-)$: a double angular integral followed by the $\varepsilon$ integral |
 | 7 | Cross section | Bote–Salvat analytic coefficients (`bote_salvat.json`). No physics is computed here — it is a table lookup and an evaluation |
 
@@ -176,8 +180,9 @@ Every run prints and records the model id of the prescription it used:
 
 | Model id | Meaning |
 | --- | --- |
-| `DHFS-KS23-Dirac-jsplit-fullrange-sym-v2` | Default. Non-relativistic continuum. Identical to the Python implementation. |
-| `DHFS-KS23-DiracB-SRC-jsplit-fullrange-sym-v3` | With `--rel`: scalar-relativistic continuum. The prescription used for the current shipped tables. |
+| `DHFS-KS23-Dirac-jsplit-fullrange-sym-v2` | Legacy non-relativistic continuum (`--no-kdirac`). Identical to the Python implementation. |
+| `DHFS-KS23-DiracB-SRC-jsplit-fullrange-sym-v3` | Legacy scalar-relativistic continuum (`--rel`); retained for reproduction, not recommended for new work. |
+| `DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4` | **Current CLI and shipping physics:** κ-resolved two-component Dirac continuum. Dataset v5 changes the sampling/format, not this physics id. |
 
 The id identifies the *physics*, not the quadrature. Two runs with the same model
 id and different `--quick` / `--high` settings are not interchangeable in a
@@ -212,12 +217,12 @@ Stated plainly, because they bound what the numbers mean:
   included.
 - **Isolated atom.** No chemical-state dependence, no solid-state density of
   states.
-- **Relativity is partial.** The bound side is the Dirac large component; the
-  continuum side is scalar-relativistic in v3. Spin–orbit effects in the
-  continuum, small-component matrix elements, and Breit/retardation are not
-  included.
-- **M shell is not validated.** The coefficient data covers it, but the
-  prescription has not been checked there.
+- **Relativity remains a central-field treatment.** The v4 default includes
+  κ-resolved Dirac bound and continuum states and both components in the matrix
+  elements, but Breit terms and direct–exchange interference are not included.
+- **M-shell external validation is limited.** M1–M5 are implemented and pass the
+  internal production gates, but the systematic external coverage is much thinner
+  than for K and L, especially for the absolute Bote–Salvat cross sections.
 
 Quantitative white lines are deliberately out of scope: an isolated atom in a
 mean field cannot produce multiplets or a solid-state DOS. The planned route is

@@ -66,7 +66,8 @@
   "sigma_tr_a0_2"  σ_tr [a₀²] (輸送断面積)
   "delta_kappa"    δ_κ [rad] と対応する κ
   "closure_rel"    |σ_el(角度積分) − σ_el(部分波和)| / σ_el — **主たる数値検査**
-  "delta_tail"     最大 l 付近の max|δ_κ| — **部分波の打ち切りが足りているか**
+  "delta_tail"     最大 l 付近の max|δ_κ| — 同一格子の自由解を差し引いた収束量
+  "delta_tail_raw" 較正前の生の裾 (自由解にも現れる数値位相を含む)
   "truncated"      l_cap に張り付いた (= 打ち切り誤差が残りうる) かどうか
 
 ⚠ **光学定理は独立な検査にならない。**σ_el = (4π/k)Im f(0) は部分波表示では
@@ -79,7 +80,7 @@
 同じ l_max で打ち切られるため。足りているかは `delta_tail` で見ること。
 """
 function compute_mott(z::Int, eps_eV::Float64;
-                      l_max::Union{Nothing,Int}=nothing, l_cap::Int=400,
+                      l_max::Union{Nothing,Int}=nothing, l_cap::Int=600,
                       tol_delta::Float64=1e-7, n_theta::Int=181,
                       r_core::Float64=0.5, r_match::Float64=60.0,
                       ppw::Float64=CONT_PPW, dt_log::Float64=CONT_DT_LOG,
@@ -89,8 +90,10 @@ function compute_mott(z::Int, eps_eV::Float64;
     # `c` はパラメータ化してある: c → ∞ でスピン軌道分裂が消え、g ≡ 0 かつ
     # Sherman 関数 ≡ 0 にならなければならない (T8 と同じ思想の構造検査 T24)
     eps_eV > 0 || error("eps_eV は正 (入射電子の運動エネルギー)")
-    scat_pot in (:static, :fm, :xalpha) ||
-        error("scat_pot は :static / :fm / :xalpha")
+    l_max === nothing || l_max >= 1 || error("l_max は 1 以上")
+    l_cap >= 12 || error("l_cap は 12 以上")
+    tol_delta > 0 || error("tol_delta は正")
+    n_theta >= 2 || error("n_theta は 2 以上")
     eps = eps_eV / HARTREE_EV
     k = krel(eps, c)                            # 相対論的波数
     # 密度は既定で **完全 Dirac SCF** (エンジン全体の既定に揃える)。重元素では
@@ -99,39 +102,43 @@ function compute_mott(z::Int, eps_eV::Float64;
     a.converged || error("Z=$z の中性 SCF が未収束")
     # 飛来電子が感じる場 (章頭 `scat_pot` 参照)。`exchange` は **SCF の交換処方**で、
     # 密度を通してしか効かない — 散乱ポテンシャルに足すかどうかは `scat_pot` の話
-    pot = if scat_pot === :xalpha
-        V_bound_callable(a; latter_charge=0.0, local_exchange=true)
-    else
-        vh = hartree(a.r, a.rho)                # 純静電。中性なので尾は自然に 0
-        vst = -a.z ./ a.r .+ vh
-        if scat_pot === :fm                     # Furness–McCarthy 局所交換
-            # V_ex = ½(ε−V_st) − ½√[(ε−V_st)² + 4πρ]。ρ は数密度 [a₀⁻³]
-            @inbounds for i in eachindex(vst)
-                q = eps - vst[i]
-                vst[i] += 0.5 * q -
-                          0.5 * sqrt(q * q + 4.0 * pi * max(a.rho[i], 0.0))
-            end
-        end
-        RvSpline(a.r, vst .* a.r, 0.0)
-    end
+    pot = elastic_scattering_potential(a, eps, scat_pot)
 
     # ---- 部分波の上限: δ_κ が落ちるまで伸ばす ----
     lm = l_max === nothing ? clamp(ceil(Int, k * 6.0) + 12, 12, l_cap) : l_max
-    local cont, dtail
+    local cont, free, dtail, dtail_raw
     while true
         cont = DiracContinuumSet(pot, eps, lm, r_core, r_match, z;
                                  q_resolve=0.0, ppw=ppw, dt_log=dt_log,
                                  z_asym=0.0, c=c, store_int=false)
         nd = length(cont.delta)
-        dtail = maximum(abs(cont.delta[ic]) for ic in max(1, nd - 7):nd)
+        tail_range = max(1, nd - 7):nd
+        dtail_raw = maximum(abs(cont.delta[ic]) for ic in tail_range)
+
+        # 同じ格子・同じ Dirac 積分器で自由粒子 (厳密 δκ=0) を解く。高 l の生位相は
+        # 物理的な裾より RK4 + 漸近フィットの共通数値床が支配するため、この参照位相を
+        # 差し引いてから収束判定と散乱振幅の構築を行う。
+        free = DiracContinuumSet(ZeroElasticPotential(), eps, lm, r_core, r_match, 0;
+                                 q_resolve=0.0, ppw=ppw, dt_log=dt_log,
+                                 z_asym=0.0, c=c, store_int=false)
+        @assert free.kappas == cont.kappas
+        @inbounds for ic in eachindex(cont.delta)
+            cont.ok[ic] &= free.ok[ic]
+            cont.delta[ic] = phase_difference(cont.delta[ic], free.delta[ic])
+        end
+        dtail = all(cont.ok[tail_range]) ?
+                maximum(abs(cont.delta[ic]) for ic in tail_range) : Inf
         (l_max !== nothing || lm >= l_cap || dtail < tol_delta) && break
         lm = min(l_cap, ceil(Int, lm * 1.6) + 4)
         verbose && @printf("  [mott] δ の裾が %.1e なので l_max を %d へ\n", dtail, lm)
     end
-    truncated = l_max === nothing && dtail >= tol_delta
-    truncated && verbose &&
-        @printf("  ⚠ [mott] l_cap=%d に到達したが δ の裾が %.1e — 打ち切り誤差が残る\n",
-                l_cap, dtail)
+    # 明示 l_max でも裾が落ちていなければ未収束。旧実装はこの場合 false を返し、
+    # 固定上限を指定した結果だけ打ち切りを見逃していた。
+    truncated = dtail >= tol_delta
+    if truncated && verbose
+        limit = l_max === nothing ? "l_cap=$l_cap" : "指定 l_max=$l_max"
+        @printf("  ⚠ [mott] %s で δ の裾が %.1e — 打ち切り誤差が残る\n", limit, dtail)
+    end
     nl = maximum(cont.ls) + 1
     # δ_κ を (l, j) の 2 本に並べ替える: dp[l+1] = δ_{κ=−(l+1)}、dm[l+1] = δ_{κ=+l}
     dp = zeros(nl)
@@ -199,7 +206,17 @@ function compute_mott(z::Int, eps_eV::Float64;
     verbose && @printf("Z=%d  ε=%.1f eV  k=%.4f a₀⁻¹  l_max=%d  (κ %d 本)\n",
                        z, eps_eV, k, nl - 1, length(cont.kappas))
     return Dict{String,Any}(
+        "schema_version" => SINGLE_RUN_SCHEMA_VERSION,
+        "cache_provenance" => cache_provenance(),
         "exit" => "mott-elastic", "z" => z, "eps_eV" => eps_eV,
+        "settings" => Dict{String,Any}(
+            "l_max_requested" => l_max, "l_cap" => l_cap,
+            "tol_delta" => tol_delta, "n_theta" => n_theta,
+            "r_core" => r_core, "r_match" => r_match,
+            "ppw" => ppw, "dt_log" => dt_log, "c_au" => c),
+        "physics" => Dict{String,Any}(
+            "dirac_scf" => dirac_scf, "scf_exchange" => String(exchange),
+            "x_alpha" => X_ALPHA, "scattering_potential" => String(scat_pot)),
         "k_a0inv" => k, "l_max" => nl - 1,
         "theta_deg" => th .* (180.0 / pi),
         "dcs_a0_2_sr" => dcs,
@@ -209,17 +226,25 @@ function compute_mott(z::Int, eps_eV::Float64;
         "sigma_tr_a0_2" => sig_tr,
         "kappa" => cont.kappas,
         "delta_kappa" => cont.delta,
-        "max_match_resid" => maximum(cont.match_resid),
+        "max_match_resid" => max(maximum(cont.match_resid), maximum(free.match_resid)),
+        "max_target_match_resid" => maximum(cont.match_resid),
+        "max_free_match_resid" => maximum(free.match_resid),
         "closure_rel" => abs(sig_el - sig_pw) / max(sig_pw, 1e-300),
         "optical_rel" => abs(sig_el - opt) / max(sig_el, 1e-300),
         "delta_tail" => dtail,
+        "delta_tail_raw" => dtail_raw,
         "truncated" => truncated,
+        "tail_converged" => !truncated,
         "max_sherman" => maximum(abs, sher),
         "reference" => "riccati-bessel (z_asym=0)",
-        "exchange" => a.exchange === :kli ?
-                      "slater-local (飛来電子用。密度は KLI 厳密交換の SCF)" :
-                      "slater-local (SCF と同じ Xα)",
-        "note" => "静的場のみ。非局所交換・分極・吸収ポテンシャルは無し")
+        "phase_calibration" => "same-grid free-particle subtraction",
+        "max_free_phase_rad" => maximum(abs, free.delta),
+        "exchange" => String(a.exchange),
+        "scf_exchange" => String(a.exchange),
+        "scattering_potential" => String(scat_pot),
+        "note" => (scat_pot === :fm ? "Furness–McCarthy 局所交換を含む。" :
+                   scat_pot === :xalpha ? "標的 Xα 場は旧処方の比較専用。" :
+                   "飛来電子の交換なし。") * "分極・吸収ポテンシャルは無し")
 end
 
 """x = cosθ の配列上で dσ/dΩ = |f|²+|g|² を評価 (積分の被積分関数用)。
