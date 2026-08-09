@@ -870,9 +870,11 @@ Si 0.694 → Ag 0.596 → Au 0.569 と、**Z とともに 0.5 へ寄る**（重�
 - ❌ **「ζ ÷ (E_b/mc²) は 0.5 に等しい」** — 0.5 は**点核の極限**。
   遮蔽のある実原子では 0.57〜1.62 で、軌道と Z に依存する
 
-**release gate にするかは作者判断。**材料は揃った — 数秒で走り、決定論的で、
-基準が「参照が許す最大分解能」として明示されている。⚠ ただし**捕まえられるのは
-Si で 17 %、Au で 25 % より粗い誤りだけ**で、それより細かい破損は原理的に素通りする。
+★★ **作者決定（2026-08-13）: release gate にする。**CI に `small-component` ジョブを追加した。
+⚠ **参照データをディスクに置かなくても走る** — 引用した 3 値はスクリプトの定数で、
+軌道はその場で解くので、素のチェックアウトで完結する。
+⚠ ただし**捕まえられるのは Si で 17 %、Au で 25 % より粗い誤りだけ**で、
+それより細かい破損は原理的に素通りする。**厳密な内部検査は selftest T6/T6b のほう。**
 
 ### V2. v5 の s = 8–16 Å⁻¹ の外部照合 → **「無い」と書くのが正解**
 
@@ -996,7 +998,6 @@ A1–A3 は実装せず、**A4（現形式維持）で決着済**。
 | **公開時期と位置取り** | ⚠⚠ **Zhang らが「Bloch 波・マルチスライス用の Dirac ベース EDS DB を将来公開する」と明記**（arXiv:2405.10151 §7）。**Temari の製品そのもの**。差別化候補 = ALCHEMI 用の差ベクトル K 依存 / s ≤ 16 / KLI / σ を Bote に揃えた出荷 |
 | **GOSH 標準の採用** | **F は入れない**で確定。**真の GOS を出すなら GOSH** — 出すかどうかが判断事項 |
 | **配布（Zenodo/DOI）** | manifest はできた。immutable asset として出すかと時期 |
-| **小成分照合を release gate にするか** | §3 V1。桁の検査にしかならない点を踏まえて |
 | **次の物理変更世代の開始時期** | O3 の 2 件がここに紐づく |
 
 ### 既決事項（再議しない）
@@ -1006,7 +1007,7 @@ A1–A3 は実装せず、**A4（現形式維持）で決着済**。
 - イオン化 = κ 分解 Dirac 連続状態 + Xα + relaxed core-hole / `fx` = Dirac + KLI /
   絶対断面積 = Bote–Salvat
 - S_req = 16 / ALCHEMI 下限 80 kV は hard gate にしない / ReciPro の Bloch 上限 1600 /
-  `AlchemiCheck tail` はゲート
+  `AlchemiCheck tail` はゲート / **V1（小成分の外部照合）は release gate**（2026-08-13 決定）
 
 ---
 
@@ -1088,7 +1089,7 @@ julia +1.11 --project=. tools/c2_negative_test.jl                          # C2/
 julia +1.11 --project=. -t auto tools/rho_weight_probe.jl 26 K 200         # 重みの測定 (自己検査込み)
 julia +1.11 --project=. -t 8 --gcthreads=1 src/gen_production.jl audit     # 求積 + 正規化前の量 (P1b-a)
 julia +1.11 --project=. -t auto tools/e0_interp_probe.jl sweep --out e0_sweep.json  # E0 補間 (P1b-b)
-julia +1.11 --project=. -t auto tools/small_component_check.jl --scan     # 小成分の外部照合 (V1)
+julia +1.11 --project=. -t auto tools/small_component_check.jl           # V1 ゲート (exit 0 が合格)
 julia +1.11 tools/make_manifest.jl src/prod_v5_jl --verify
 julia +1.11 tools/json_escape_audit.jl src/prod_v5_jl
 python tools/temari_contract.py src/prod_v5_jl
