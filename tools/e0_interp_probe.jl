@@ -167,7 +167,7 @@ function probe_channel(z::Int, tag::String, prod::String;
     end
     n_edge = length(rows) - 1
     worst_all = 0.0; worst_j = 0; worst_gap = 0; worst_frac = 0.0
-    worst_edge = 0.0; worst_mid = 0.0
+    worst_edge = 0.0; worst_mid = 0.0; worst_lo = 0.0
     worst_eps = 0.0
     npts = 0
     for g in gaps
@@ -188,10 +188,17 @@ function probe_channel(z::Int, tag::String, prod::String;
             (dmax, jmax) = findmax(dd)
             j8 = searchsortedfirst(s, 8.0 - 1e-12)   # 低 s と高 s を分ける
             d_hi = j8 <= n_cmp ? maximum(@view dd[j8:n_cmp]) : 0.0
+            # ★ 260813Cl: **観測量が感じるのは低 s だけ**。ReciPro 側の感度試験
+            # (`AlchemiCheck sens`、β-AlCo の h00 系統反射列) では s > 1 Å⁻¹ の摂動が
+            # 観測量へ与える影響が 1e-05 以下、s > 5 Å⁻¹ では 1e-12 に落ちた。
+            # ⇒ **s ≤ 2 Å⁻¹ に限った最悪値**を別に出す (全 s の最悪と 3 桁違うことがある)
+            j2 = min(searchsortedlast(s, 2.0 + 1e-12), n_cmp)
+            d_lo = j2 >= 1 ? maximum(@view dd[1:j2]) : 0.0
             npts += 1
             if dmax > worst_all
                 worst_all = dmax; worst_j = jmax; worst_gap = g; worst_frac = f
             end
+            worst_lo = max(worst_lo, d_lo)
             if g == 1 || g == n_edge
                 worst_edge = max(worst_edge, dmax)
             else
@@ -202,8 +209,8 @@ function probe_channel(z::Int, tag::String, prod::String;
                         g, us[g], us[g+1], f, e0q, uq)
                 @printf("           s_cert: 消費側 %.2f / 直接計算 %.2f → 比較は s ≤ %.2f (%d 点)\n",
                         sc_cons, s[n_cert], s[n_cmp], n_cmp)
-                @printf("           max|ΔF| = %.3e @s=%.2f  (s>8 だけ %.3e)  直接=%+.6e 補間=%+.6e\n",
-                        dmax, s[jmax], d_hi, o["F"][jmax], Fi[jmax])
+                @printf("           max|ΔF| = %.3e @s=%.2f  (s≤2 だけ %.3e / s>8 だけ %.3e)  直接=%+.6e 補間=%+.6e\n",
+                        dmax, s[jmax], d_lo, d_hi, o["F"][jmax], Fi[jmax])
             end
             # おまけ: 消費側が「0 ± ε」としか言わない帯で、ε が実際に上界か
             # (⚠ **ノードではない E0** に対する out-of-sample 検査。C12 はノード上でしか見ない)
@@ -239,7 +246,7 @@ function probe_channel(z::Int, tag::String, prod::String;
                     worst_eps)
     end
     return (; z, tag, u_min=us[1], n_rows=length(rows), npts,
-            worst=worst_all, worst_gap, worst_frac,
+            worst=worst_all, worst_lo, worst_gap, worst_frac,
             worst_s=(worst_j == 0 ? 0.0 : s[worst_j]),
             worst_is_edge=(worst_gap == 1 || worst_gap == n_edge),
             edge=worst_edge, mid=worst_mid,
@@ -332,9 +339,9 @@ function sweep(prod::String, outpath::String)
         end
         push!(results, merge(r, (; layer)))
         # ⚠ `@printf` の書式は**リテラル 1 個**でなければならない (`*` で連結できない)
-        @printf("[%2d/%2d] %-5s Z=%3d %-2s u_min=%7.4f  直接 %.3e (%s, s=%.2f)  C6 %.3e  C6b %.3e  同s列 C6b %.3e  %s  [%.1f 分]\n",
+        @printf("[%2d/%2d] %-5s Z=%3d %-2s u_min=%7.4f  直接 %.3e (%s, s=%.2f)  s<=2 %.3e  C6 %.3e  C6b %.3e  %s  [%.1f 分]\n",
                 i, length(picked), layer, z, tag, r.u_min, r.worst,
-                r.worst_is_edge ? "端" : "内部", r.worst_s, r.c6, r.c6b, r.c6b_at_s,
+                r.worst_is_edge ? "端" : "内部", r.worst_s, r.worst_lo, r.c6, r.c6b,
                 r.c6b >= r.worst ? "C6b>=直接" : "★C6b<直接", (time() - t0) / 60)
         flush(stdout)
     end
@@ -343,10 +350,16 @@ function sweep(prod::String, outpath::String)
     q(v, p) = isempty(v) ? NaN : sort(v)[clamp(ceil(Int, p * length(v)), 1, length(v))]
     for layer in ("risk", "shell", "c6b", "ctrl")
         w = [r.worst for r in results if r.layer == layer]
+        wl = [r.worst_lo for r in results if r.layer == layer]
         isempty(w) && continue
-        @printf("%-5s n=%2d  直接 中央 %.3e / p90 %.3e / 最大 %.3e\n",
-                layer, length(w), q(w, 0.5), q(w, 0.9), maximum(w))
+        @printf("%-5s n=%2d  直接 中央 %.3e / p90 %.3e / 最大 %.3e   s<=2 の最大 %.3e\n",
+                layer, length(w), q(w, 0.5), q(w, 0.9), maximum(w), maximum(wl))
     end
+    # ★ 観測量が感じるのは低 s だけ (ReciPro 側 `AlchemiCheck sens` の実測)。
+    #   ⚠ 全 s の最悪をそのまま観測量の誤差に読み替えてはいけない
+    @printf("\n全 s の最大 %.3e  /  s<=2 の最大 %.3e  → 比 %.0f 倍\n",
+            maximum(r.worst for r in results), maximum(r.worst_lo for r in results),
+            maximum(r.worst for r in results) / max(maximum(r.worst_lo for r in results), eps()))
     nb = count(r -> r.c6b >= r.worst, results)
     nb_s = count(r -> r.c6b_at_s >= r.worst, results)
     n6 = count(r -> r.c6 >= r.worst, results)
