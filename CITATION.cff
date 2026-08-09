@@ -9,8 +9,8 @@ authors:
 repository-code: "https://github.com/seto77/Temari"
 url: "https://seto77.github.io/Temari/"
 license: MIT
-version: "1.0.0"
-date-released: "2026-08-09"
+version: "1.0.1"
+date-released: "2026-08-10"
 keywords:
   - electron microscopy
   - EELS
