@@ -997,6 +997,86 @@ function selftest()
         @assert d_phys > 20 * d_inf "T23d FAIL: 物理の c で相対論効果が出ていない"
     end
 
+    # ⚠ `PRESC_V4` は `gen_production.jl` にあり、依存の向きが逆 (gen_production が
+    #   ionization を include する) のでここからは見えない。出荷処方をここに書き下す。
+    #   ⚠ 出荷処方を変えたらここも直すこと (二重定義になっている)
+    PRESC_V4_KW = (rel_continuum=false, dirac_continuum=true, dirac_scf=true,
+                   exchange=:xalpha, final_state=:relaxed)
+
+    # ---- T26: κ 分解が c→∞ で**一電子あたり縮退**するか (260813Cl 追加) ----
+    # (T24/T25 は Mott の閉包・光学定理で使用済みなので T26/T27 を採った。T25 は欠番)
+    #
+    # ⚠ T23d は水素 1s (l=0、κ=−1 のみ) なので、**κ が 2 値を取る l>0 は無検査**だった。
+    # スピン軌道分裂は c→∞ で消えるので、**同じ動径軌道**を κ=+l と κ=−(l+1) に載せた
+    # GOS は**一電子あたりで一致**しなければならない。これは 6j 角度因子・占有数
+    # (2j+1)・l>0 の部分波列挙の配線を直接検査する — **外部参照ゼロ**。
+    # ⚠ 束縛軌道を共通にするのが要点。κ ごとに解き直すと「軌道の差」と「κ 機構の差」が
+    #   混ざり、何を測ったのか分からなくなる。
+    # 動機: Zhang DB との ridge 帯の食い違い (1.12–1.36) が κ の配線由来かを切り分けるため。
+    let z = 26, l_init = 1
+        ch = prepare_channel(z, "L3"; PRESC_V4_KW...)
+        rb = ch.dirac.r_b
+        gb = ch.dirac.G_b ./ sqrt(sum(ch.dirac.G_b .^ 2 .* gradient_(rb)))
+        fb = zeros(length(rb))                 # 非相対論極限では小成分ゼロ
+        eps_g = [1.0, 5.0, 20.0, 80.0]
+        qg = exp.(range(log(0.5), log(40.0), length=12))
+        run(kap, occ, cc) = gos_surface(ch.ion_pot, rb, gb, ch.E_th, z, eps_g, qg,
+                                        l_init, occ; l_cap=64, n_q=240,
+                                        dirac=(r_b=rb, G_b=gb, F_b=fb, kappa=kap, c=cc))[1]
+        rel_(a, b) = maximum(abs.(a .- b) ./ max.(abs.(b), 1e-300))
+        cinf = C_LIGHT * 1e4
+        d_so = rel_(run(l_init, 2.0, cinf) ./ 2.0, run(-(l_init + 1), 4.0, cinf) ./ 4.0)
+        d_phys = rel_(run(l_init, 2.0, C_LIGHT) ./ 2.0,
+                      run(-(l_init + 1), 4.0, C_LIGHT) ./ 4.0)
+        @printf("[T26] κ 分解の c→∞ 一電子縮退 (Fe L2/L3): %.2e (消える) / 物理 c %.2e (残る) — 比 %.0f\n",
+                d_so, d_phys, d_phys / max(d_so, 1e-300))
+        @assert d_so < 3e-2 "T26 FAIL: c→∞ で L2/L3 が一電子あたり縮退しない (6j・占有数・l>0 の配線)"
+        @assert d_phys > 3 * d_so "T26 FAIL: 物理の c でスピン軌道差が出ていない (検査に検出力が無い)"
+    end
+
+    # ---- T27: 尾根の衝撃 (impulse) 極限 = 自分の束縛軌道の Compton プロファイル ----
+    #
+    # 衝撃極限では、尾根 ω = q²/2 に沿って **q·df/dω → occ·J(0)** となる。
+    # J(0) = (1/2)∫ũ(p)²/p dp は、**我々自身の u_b を独立に Fourier 変換**して作る
+    # (GOS の経路を一切通らない) ので、これは**多電子の場を含んだ実チャネルに対する
+    # 外部参照ゼロの検査**になる。合えば「尾根の値は束縛軌道の運動量密度で決まっている」
+    # ことが確定し、問いは「軌道が正しいか」へ狭まる (それは f_x vs OFFV1 が別途拘束する)。
+    # ⚠ 式は水素で先に検算する — J(0) = 8/(3π) = 0.848826 (1s の Compton プロファイル)。
+    # ⚠ q を上げ過ぎると部分波打ち切り (l_cap) で GOS が落ちる。実測では q=140 で比 0.35 まで
+    #   崩れた。**これは物理ではなく打ち切り**なので、検査は q ≲ 90 で行う。
+    let
+        function j0_of(r, u, l)                # ũ(p) = √(2/π)·p∫u(r)j_l(pr)r dr
+            ps = exp.(range(log(1e-3), log(400.0), length=1200))
+            dr = gradient_(r); jb = zeros(l + 1); ut = similar(ps)
+            for (i, p) in enumerate(ps)
+                s = 0.0
+                @inbounds for j in eachindex(r)
+                    sph_jl_all!(jb, l, p * r[j])
+                    s += u[j] * jb[l+1] * r[j] * dr[j]
+                end
+                ut[i] = sqrt(2.0 / pi) * p * s
+            end
+            dp = gradient_(ps)
+            return 0.5 * sum(ut .^ 2 ./ ps .* dp), sum(ut .^ 2 .* dp)
+        end
+        rbH = exp.(range(log(1e-7), log(60.0), length=6000))
+        ubH = 2.0 .* rbH .* exp.(-rbH)
+        ubH ./= sqrt(sum(ubH .^ 2 .* gradient_(rbH)))
+        j0H, _ = j0_of(rbH, ubH, 0)
+        @assert abs(j0H / (8 / (3pi)) - 1) < 1e-3 "T27 FAIL: J(0) の実装が水素の 8/(3π) と合わない"
+
+        ch = prepare_channel(26, "K"; PRESC_V4_KW...)
+        j0, nrm = j0_of(ch.r_b, ch.u_b, ch.l_b)
+        q = 60.0
+        g, _ = gos_surface(ch.ion_pot, ch.r_b, ch.u_b, ch.E_th, 26, [q * q / 2 - ch.E_th],
+                           [q], ch.l_b, ch.occ_init; l_cap=128, n_q=320, ppw=40.0,
+                           dirac=ch.dirac)
+        ratio = q * g[1, 1] / (ch.occ_init * j0)
+        @printf("[T27] 尾根の衝撃極限 (Fe K, q=%.0f): q·df/dω / [occ·J(0)] = %.4f  (水素の J(0) 検算 %.2e, ∫ũ²=%.4f)\n",
+                q, ratio, abs(j0H / (8 / (3pi)) - 1), nrm)
+        @assert abs(ratio - 1.0) < 0.15 "T27 FAIL: 尾根が自分の束縛軌道の Compton プロファイルへ収束しない"
+    end
+
     # ---- T23e: **F(s) (MDFF) の** c→∞ 退化 ----
     # T23d は GOS (Q = Q′、cosΘ = 1) しか通っていない。**出荷される量は F(s)** で、
     # そちらは Q₊ ≠ Q₋ の混合形式・2 重角度積分・P_λ(cosΘ) を通る。Dirac の
