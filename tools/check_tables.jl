@@ -36,6 +36,14 @@ ReciPro 側の `check_tables.py` (v3 の QC に使ったもの) を Julia へ移
       260813Cl: **抜き取り 10 列 → 全 321 列。**抜き取りの隙間に落ちた単点破損は
       C6 からも見えなかった (C2 の負のテストで実演)。全列でも最悪 1.183e-03・
       所要 +1 秒
+      ⚠⚠ **C6 は E0 補間誤差の上界ではない** (260813Cl 実測)。LOO が `k ∈ 3:n−2` なので
+      **E0 軸の両端 = 閾値直上と最高電圧側が構造的に死角**。区間の内側を直接計算すると
+      Sn K で 2.606e-03 に対し C6 は 8.392e-04 = **3.1 倍過小**、
+      一方 Rn L2 では C6 が 4.0 倍**保守的**。**破損検出器であって保証ではない**。
+      区間内の直接測定は `tools/e0_interp_probe.jl`
+  C6b 外側 2 ノードも抜いた LOO。**記録のみ・ゲートにしない** (理由は
+      `c6_edge_worst` の docstring — ゲート 5e-3 の余裕が 4.2 倍 → 1.02 倍に潰れ、
+      しかも代理量として 1.9 倍過大)
   C7  σ_own/σ_Bote が 0.7..1.4 (u≥2 のみ。閾値近傍は形状 F だけが問われる)
   C8  生成時のゲート失敗 (failures 配列) がゼロ
   C9  軌道の割り当て: C9a 絶対値 / C9b スピン軌道分裂 (--eb)
@@ -131,19 +139,20 @@ const C6_COLS_LEGACY = [5, 20, 40, 60, 80, 120, 161, 220, 281, 321]
 ⚠ `s_cert < s[j]` の行を基底から外すのは、出荷 C# の `GridAt` の基底 subsetting と
 同じ規則。低 E0 行の s>s_cert は 0 の埋め草なので、混ぜると LOO が埋め草を
 「補間誤差」として報告する。"""
-function c6_worst(s, F, u, s_cert; cols=eachindex(s))
+function c6_worst(s, F, u, s_cert; cols=eachindex(s), kmin::Int=3)
     length(u) >= 5 || return 0.0
     worst = 0.0
     x = log.(u .- 1.0 .+ 1e-12)
     for j in cols
         j <= length(s) || continue
         keep = [i for i in eachindex(u) if s_cert[i] >= s[j] - 1e-9]
-        length(keep) >= 5 || continue
+        n = length(keep)
+        n >= 5 || continue
         xk = x[keep]
         col = [F[i][j] for i in keep]
         pos = all(>(0.0), col)
         yy = pos ? log.(col) : col
-        for k in 3:length(keep)-2
+        for k in kmin:(n - kmin + 1)
             xs = vcat(xk[1:k-1], xk[k+1:end])
             ys = vcat(yy[1:k-1], yy[k+1:end])
             v = Pchip(xs, ys)(xk[k])
@@ -154,7 +163,33 @@ function c6_worst(s, F, u, s_cert; cols=eachindex(s))
     return worst
 end
 
-"1 ファイルの C1-C8 を検査して (問題のリスト, 符号反転回数, C6 最悪値) を返す"
+"""C6b (260813Cl 追加、**記録のみ・ゲートにしない**): 外側 2 ノードも抜いた LOO。
+
+⚠⚠ **C6 の `k ∈ 3:n−2` は E0 軸の両端を構造的に見ていない** — 抜けるのは
+内側のノードだけなので、**閾値直上の第 1 区間**と 400 kV 側の最終区間は
+一度も検査されない。閾値近傍こそ `u−1` に対する曲率が最大の領域なので、
+**いちばん危ない場所が死角**だった ([[convergence-test-blind-axis]])。
+
+`tools/e0_interp_probe.jl` が区間の内側を**直接計算**して測った実測 (指示書 §2 P1b):
+
+| チャネル | u_min | 直接測定 | C6 (k≥3) | 比 |
+|---|---|---|---|---|
+| Sn K (Z=50) | 1.0279 | **2.606e-03** | 8.392e-04 | **0.32 = C6 が 3.1 倍過小** |
+| Rn L2 (Z=86) | 1.7244 | 2.990e-04 | 1.183e-03 | 3.96 = C6 が保守的 |
+| Fe K (Z=26) | 4.2352 | 2.858e-05 | 6.686e-05 | 2.34 = C6 が保守的 |
+
+⇒ **C6 は上界でも下界でもない。**内側のノードでは区間が 2 倍になるので過大に、
+端では見ていないので過小に出る。
+
+⚠ **これをゲートにしてはいけない。**k=2 まで広げると全 525 チャネルの最悪が
+1.183e-03 → **4.916e-03** になり、ゲート 5e-3 に対する余裕が 4.2 倍 → **1.02 倍**に潰れる。
+しかも k=2 の LOO は区間が 2 倍になるうえ端点の傾き規則に載るので、
+**直接測定の 2.606e-03 を 1.9 倍過大に見積もっている**。過大な代理量を 1.02 倍の
+余裕でゲートにすれば、次世代で正常な行を「破損」と判定する (C2 の窓を 10.0 に
+しなかったのと同じ判断)。**記録して見えるようにするだけ**にする。"""
+c6_edge_worst(s, F, u, s_cert) = c6_worst(s, F, u, s_cert; kmin=2)
+
+"1 ファイルを検査して (問題のリスト, 符号反転回数, C6 最悪値, C6b 最悪値, 文書) を返す"
 function check_file(path::String)
     d = parse_json_file(path)
     z = round(Int, d["z"])
@@ -234,6 +269,8 @@ function check_file(path::String)
     worst = c6_worst(s, F, u, s_cert)
     worst > GATE_C6 &&
         push!(probs, "C6: leave-one-out 最悪 |dF|=$(worst) > $GATE_C6")
+    # C6b: 外側 2 ノード込みの LOO。**記録のみ** (理由は c6_edge_worst の docstring)
+    c6b = c6_edge_worst(s, F, u, s_cert)
     # ---- C7 ----
     for r in rows
         ratio = Float64(r["sigma_own_nm2"]) /
@@ -265,7 +302,7 @@ function check_file(path::String)
     else
         push!(probs, "C11: N0 の中央値が異常 ($med)")
     end
-    return (probs, nflip, worst, d)
+    return (probs, nflip, worst, c6b, d)
 end
 
 """C9: 軌道の割り当て (節数・κ・占有数) が正しいことの独立確認。
@@ -313,14 +350,17 @@ function main(args)
     end
     n_bad = 0
     c6_worst = 0.0
+    c6b_worst = 0.0
+    c6b_where = ""
     flips = Tuple{String,Int}[]
     meta = Dict{String,Set{Any}}("model_id" => Set(), "dataset_version" => Set(),
                                  "schema_version" => Set())
     sgrid = nothing
     chans = Tuple{Int,String}[]
     for p in files
-        probs, nflip, worst, d = check_file(p)
+        probs, nflip, worst, c6b, d = check_file(p)
         c6_worst = max(c6_worst, worst)
+        c6b > c6b_worst && (c6b_worst = c6b; c6b_where = basename(p))
         nflip > 0 && push!(flips, (basename(p), nflip))
         for k in keys(meta)
             push!(meta[k], d[k])
@@ -342,6 +382,11 @@ function main(args)
     end
     println("\n検査 $(length(files)) 本: $(length(files) - n_bad) OK / $n_bad NG")
     println("C6 leave-one-out 最悪 |dF| = $(c6_worst)  (ゲート $GATE_C6)")
+    # C6b は**記録のみ** — ゲートにしない理由は `c6_edge_worst` の docstring
+    println("C6b 外側 2 ノード込みの LOO 最悪 |dF| = $(c6b_worst)  " *
+            "($(c6b_where)、記録のみ・ゲートにしない)")
+    println("    ⚠ C6 は E0 軸の両端を見ていない。**上界でも下界でもない** — " *
+            "区間の内側の実測は tools/e0_interp_probe.jl")
     # ---- C10 ----
     ok10 = true
     for (k, v) in meta

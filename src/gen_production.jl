@@ -781,7 +781,18 @@ u < 1.05 に届くのは K だけなので (実測: L1 の最小 u は 1.66、M5
 
 ⚠ **s ノードは行の `s_cert` で切る。**固定 `0:0.25:16` を渡すと 30 kV では
 s_kin = 14.33 を越えた時点で `sym kinematics requires K < 2*k_i` で落ちる。
-高過電圧 3 ケースは s_cert = 16.0 なので**ノード集合は従来と同一** = 既存の結果は動かない。"""
+高過電圧 3 ケースは s_cert = 16.0 なので**ノード集合は従来と同一** = 既存の結果は動かない。
+
+260813Cl: **正規化前の量も別々に報告する** (指示書 §2 P1b)。それまでは比
+F = N(K)/N(0) の変化しか見ておらず、**分子と分母が揃って動いた場合を除外できて
+いなかった**。恒等式は
+
+    ΔF ≈ δN/N0 − F·(δ0/N0)          (δN = 分子の変化, δ0 = 分母 N0 の変化)
+
+なので、**δ0/N0 と δN/N0 を別々に出さないと「収束した」を誤って言える**。
+δ0/N0 はそれ自体が **σ_own の求積誤差**でもある (σ_own は N0 から直接作られる)。
+⚠ s=0 では δN ≡ δ0 かつ F=1 なので ΔF(0) は恒等的に 0 — **打ち消しは s=0 で
+厳密**であって、これは収束の証拠ではない。見るべきは s>0 での両者の比較。"""
 function audit(; presc=PRESC_V4)
     # 高過電圧 3 ケース (従来) + 閾値直上 2 ケース + 床が効く 1 ケース (260813Cl 追加)
     cases = [(26, "K", 200.0), (79, "L3", 300.0), (79, "M5", 200.0),
@@ -812,21 +823,37 @@ function audit(; presc=PRESC_V4)
         i8 = searchsortedfirst(s, 8.0 - 1e-12)
         dF_of(o) = (d = abs.(o["F"] .- base["F"]);
                     (maximum(d), i8 <= length(s) ? maximum(@view d[i8:end]) : 0.0))
+        # 260813Cl: 正規化前 (指示書 §2 P1b)。分母 N0 の相対変化と、分子 N(K) の
+        # 変化を**同じ N0 で割って** ΔF と直接比べられる単位に揃える。
+        base_N0 = base["N0"]
+        base_N = base["F"] .* base_N0
+        dN_of(o) = (abs(o["N0"] / base_N0 - 1.0),
+                    maximum(abs.(o["F"] .* o["N0"] .- base_N)) / abs(base_N0))
         o_prod = compute_channel(z, tag, e0; settings=PROD_SETTINGS, s_nodes=s,
                                  verbose=false, presc...)
         (d_all, d_hi) = dF_of(o_prod)
-        @printf("  %-26s max|ΔF| = %.2e (s>8: %.2e)  (t=%.0fs) ← v2 求積に残っていた誤差\n",
-                "(参考) PROD→HIGH の差", d_all, d_hi, o_prod["elapsed_s"])
-        worst = worst_hi = 0.0
+        (d_n0, d_num) = dN_of(o_prod)
+        @printf("  %-26s max|ΔF| = %.2e (s>8: %.2e)  [δ0/N0 = %.2e, max|δN|/N0 = %.2e]  (t=%.0fs) ← v2 求積に残っていた誤差\n",
+                "(参考) PROD→HIGH の差", d_all, d_hi, d_n0, d_num, o_prod["elapsed_s"])
+        worst = worst_hi = worst_n0 = worst_num = 0.0
         for (name, st) in bumps
             o = compute_channel(z, tag, e0; settings=st, s_nodes=s,
                                 verbose=false, presc...)
             (dF, dF_hi) = dF_of(o)
+            (dn0, dnum) = dN_of(o)
             worst = max(worst, dF)
             worst_hi = max(worst_hi, dF_hi)
-            @printf("  %-26s max|ΔF| = %.2e (s>8: %.2e)  (t=%.0fs)\n",
-                    name, dF, dF_hi, o["elapsed_s"])
+            worst_n0 = max(worst_n0, dn0)
+            worst_num = max(worst_num, dnum)
+            @printf("  %-26s max|ΔF| = %.2e (s>8: %.2e)  [δ0/N0 = %.2e, max|δN|/N0 = %.2e]  (t=%.0fs)\n",
+                    name, dF, dF_hi, dn0, dnum, o["elapsed_s"])
         end
+        # 打ち消しの有無を 1 行で: 比が 1 に近ければ打ち消しは無く、
+        # 大きければ「分子と分母が揃って動いて ΔF だけが小さい」。
+        # ⚠ max|δN|/N0 ≥ δ0/N0 は**恒等的** (s=0 の項が δ0 そのもの) なので、
+        #   2 つが一致することは一致の証拠ではない。意味があるのは ΔF との比のほう
+        @printf("  → 正規化前: δ0/N0 ≲ %.1e, max|δN|/N0 ≲ %.1e  (ΔF との比 = %.1f)\n",
+                worst_n0, worst_num, worst_num / max(worst, eps()))
         # 裾の大きさ自体も出す: 閾値直上の行は |F| が s≤s_cert で 0.3 級まで残るので、
         # 同じ max|ΔF| でも相対的な意味が高過電圧の行と全く違う
         @printf("  → HIGH の打ち切り誤差 ≲ %.1e  (s>8 だけなら ≲ %.1e ← EPS_FLOOR の根拠)\n",

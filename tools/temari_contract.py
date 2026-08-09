@@ -12,7 +12,7 @@
 
     python tools/temari_contract.py src/prod_v5_jl
 
-罠の一覧 (それぞれ C1..C5 として検査する):
+罠の一覧 (それぞれ C1..C6 として検査する):
 
   C1  **F は符号付き**。clip(0) / abs / 単調性の仮定はデータを壊す
   C2  **運動量の規約は q = 4*pi*s [A^-1]** (K = 4*pi*s*a0 [a.u.])。
@@ -21,8 +21,15 @@
       補間の基底に入れると 0 へ引っ張られる
   C4  **E0 軸はチャネルごとに違う**。共通軸を仮定できない
   C5  **eps (上界) を E0 で内挿してはいけない**。挟む 2 行の max を取る
+  C6  **E0 補間の座標は x = ln(u-1)、全正の列は y = log F** (260813Cl 追加)。
+      ⚠ **このファイル自身が落ちていた罠** — 座標だけでなく**端点の傾き**
+      (片側差分 vs 3 点公式) と**範囲外**(clamp vs 外挿) も違っていた。
+      同じ JSON から ReciPro と違う F が出る — 出荷 525ch の全 E0 中点 x
+      全 s ノード (4,580,991 点) で最悪 **2.8942e-03**、最悪相対 **175 %**
+      (**符号が逆になる点がある**)
 """
 
+import bisect
 import json
 import math
 import os
@@ -47,70 +54,107 @@ def q_from_s(s_A_inv):
     return 4.0 * math.pi * s_A_inv
 
 
+def _sign(v):
+    """C# の Math.Sign と同じ (0 の符号は 0)。`v > 0` だけで書くと端点規則がずれる。"""
+    return (v > 0.0) - (v < 0.0)
+
+
+def _pchip_edge(h0, h1, m0, m1):
+    """端点の傾き = 3 点公式 + 単調性の制限 (C# `Pchip.EdgeCase`)。
+
+    ⚠⚠ **片側差分 `m0` で代用してはいけない。**端点は基底の最初と最後の区間を
+    支配するので、E0 方向なら閾値直上 (u が最小の区間) と 400 kV 側、
+    s 方向なら s=0 の隣がまるごとずれる。**このファイルは実際に代用していた。**"""
+    d = ((2.0 * h0 + h1) * m0 - h0 * m1) / (h0 + h1)
+    if _sign(d) != _sign(m0):
+        return 0.0
+    if _sign(m0) != _sign(m1) and abs(d) > 3.0 * abs(m0):
+        return 3.0 * m0
+    return d
+
+
 def _pchip_slopes(x, y):
-    """PCHIP の傾き (Fritsch-Carlson)。出荷側 C# の `Pchip` と同じ規則。"""
+    """PCHIP の傾き (Fritsch-Carlson)。出荷側 C# `Pchip.Derivatives` の写し。"""
     n = len(x)
     if n == 2:
         d = (y[1] - y[0]) / (x[1] - x[0])
         return [d, d]
     h = [x[i + 1] - x[i] for i in range(n - 1)]
-    d = [(y[i + 1] - y[i]) / h[i] for i in range(n - 1)]
-    m = [0.0] * n
-    for i in range(1, n - 1):
-        if d[i - 1] * d[i] <= 0.0:
-            m[i] = 0.0
+    m = [(y[i + 1] - y[i]) / h[i] for i in range(n - 1)]
+    d = [0.0] * n
+    for k in range(1, n - 1):
+        if _sign(m[k]) != _sign(m[k - 1]) or m[k] == 0.0 or m[k - 1] == 0.0:
+            d[k] = 0.0
         else:
-            w1, w2 = 2.0 * h[i] + h[i - 1], h[i] + 2.0 * h[i - 1]
-            m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i])
-    m[0] = d[0]
-    m[-1] = d[-1]
-    return m
+            w1, w2 = 2.0 * h[k] + h[k - 1], h[k] + 2.0 * h[k - 1]
+            whmean = (w1 / (w1 + w2)) / m[k - 1] + (w2 / (w1 + w2)) / m[k]
+            d[k] = 1.0 / whmean
+    d[0] = _pchip_edge(h[0], h[1], m[0], m[1])
+    d[n - 1] = _pchip_edge(h[n - 2], h[n - 3], m[n - 2], m[n - 3])
+    return d
 
 
-def _pchip_eval(x, y, m, t):
-    if t <= x[0]:
-        return y[0]
-    if t >= x[-1]:
-        return y[-1]
-    lo, hi = 0, len(x) - 1
-    while hi - lo > 1:
-        mid = (lo + hi) // 2
-        if x[mid] <= t:
-            lo = mid
-        else:
-            hi = mid
-    h = x[hi] - x[lo]
-    u = (t - x[lo]) / h
-    u2, u3 = u * u, u * u * u
-    return (y[lo] * (2 * u3 - 3 * u2 + 1) + y[hi] * (-2 * u3 + 3 * u2) +
-            m[lo] * h * (u3 - 2 * u2 + u) + m[hi] * h * (u3 - u2))
+def _pchip_eval(x, y, d, t):
+    """1 点評価。出荷側 C# `Pchip.Evaluate` の写し。
+
+    ⚠ **範囲外は端区間の 3 次式で外挿する** (scipy extrapolate=True 相当)。
+    端の値で clamp してはいけない — 呼び出し側は基底の範囲を別途検査しており、
+    clamp するとその検査を黙って無効化する。"""
+    n = len(x)
+    i = min(max(bisect.bisect_right(x, t) - 1, 0), n - 2)
+    hh = x[i + 1] - x[i]
+    slope = (y[i + 1] - y[i]) / hh
+    c0 = (d[i] + d[i + 1] - 2.0 * slope) / (hh * hh)
+    c1 = (3.0 * slope - 2.0 * d[i] - d[i + 1]) / hh
+    s = t - x[i]
+    return ((c0 * s + c1) * s + d[i]) * s + y[i]
 
 
-def grid_at(ch, e0_keV):
+def grid_at(ch, e0_keV, naive=False, keep_padding=False):
     """E0 で補間した F を s 格子上に返す。返り値 (F, s_cert, eps)。
+
+    ⚠⚠ **補間座標は x = ln(u-1)、列が全正なら y = log F。**生の E0 と生の F で
+    PCHIP してはいけない — 出荷側 C# `IonizationChannel.GridAt` がこの座標を使う
+    ので、素朴版は**同じデータから違う F を返す** (実測は C6 の検査を見よ)。
+    E0 格子自体が u = E0/E_th のノードで設計されている (`U_NODES`) ので、
+    ln(u-1) は「格子が等間隔に近くなる座標」でもある。
 
     ⚠ **s ノードごとに基底を作り直す。**その s に届かない行 (s_cert < s_j) は
     埋め草 0 を持っているだけなので、基底から外さないと補間が 0 へ引かれる。
     ⚠ **eps は内挿しない。**挟む 2 行の max を取る (内挿した上界は上界ではない)。
+
+    naive / keep_padding は**罠の実演専用** (C6 / C3 の負のテスト)。前者は
+    生の E0 + 生の F で補間し、後者は届かない行の埋め草 0 を基底に残す。
+    ⚠ **2 つを別の旗にしてあるのは、罠を 1 つずつ分けて測るため** — 混ぜると
+    「座標の効き」と「埋め草の効き」のどちらを見ているのか分からなくなる。
     """
     s = ch["s_grid_A_inv"]
     rows = sorted(ch["rows"], key=lambda r: r["e0_keV"])
     e0s = [r["e0_keV"] for r in rows]
     if e0_keV < e0s[0] - 1e-9 or e0_keV > e0s[-1] + 1e-9:
         raise ValueError(f"E0={e0_keV} は収録範囲 [{e0s[0]}, {e0s[-1]}] の外")
+    eth = ch["e_th_keV_bote"]
+    xq = e0_keV if naive else math.log(e0_keV / eth - 1.0)
+    xr = e0s if naive else [math.log(r["u"] - 1.0) for r in rows]
 
     out = [0.0] * len(s)
     s_cert = 0.0
     for j, sj in enumerate(s):
-        basis = [r for r in rows if r["s_cert_A_inv"] >= sj - 1e-12]
-        if len(basis) < 2:
+        keep = list(range(len(rows))) if keep_padding else \
+            [i for i, r in enumerate(rows) if r["s_cert_A_inv"] >= sj - 1e-12]
+        if len(keep) < 2:
             continue                      # この s には誰も届かない -> 0 のまま
-        bx = [r["e0_keV"] for r in basis]
-        if e0_keV < bx[0] - 1e-9 or e0_keV > bx[-1] + 1e-9:
+        bx = [xr[i] for i in keep]
+        if xq < bx[0] - 1e-9 or xq > bx[-1] + 1e-9:
             continue                      # 問い合わせ E0 が基底の外 -> 届かない
-        by = [r["F"][j] for r in basis]
-        out[j] = _pchip_eval(bx, by, _pchip_slopes(bx, by), e0_keV)
+        by = [rows[i]["F"][j] for i in keep]
+        if not naive and all(v > 0.0 for v in by):
+            ly = [math.log(v) for v in by]
+            out[j] = math.exp(_pchip_eval(bx, ly, _pchip_slopes(bx, ly), xq))
+        else:
+            out[j] = _pchip_eval(bx, by, _pchip_slopes(bx, by), xq)
         s_cert = sj
+    out[0] = 1.0                          # s=0 は厳密 1 (契約)
 
     # eps: 挟む 2 行の max (内挿しない)
     lo = max((r for r in rows if r["e0_keV"] <= e0_keV + 1e-9),
@@ -210,20 +254,23 @@ def contract(pdir):
         # 害の実演: 埋め草を基底に入れると答えがどれだけ動くか、
         # **全 E0 中点 x 全 s ノードを走査して最悪値を報告する**。
         # (害の大小を先に決めつけない — 小さければ小さいと書く)
+        # ⚠ 補間座標は**両方とも出荷規則** (ln(u-1)) にする。生の E0 で素朴版を
+        #   組むと C6 の罠と混ざり、「埋め草の害」を測ったことにならない。
+        # ⚠ 埋め草を入れると列が全正でなくなるので log 変換も外れるが、
+        #   **それも罠の一部** — 出荷 C# も `allPositive` を見て同じ分岐をする。
+        #   つまりこれは「subsetting を省いた消費側が実際に得る値」である。
         rows_all = sorted(ch["rows"], key=lambda r: r["e0_keV"])
-        bx_all = [r["e0_keV"] for r in rows_all]
         worst = (1.0, None, None)          # (比, E0, s)
         for a, b in zip(rows_all, rows_all[1:]):
             e0q = 0.5 * (a["e0_keV"] + b["e0_keV"])
             F, _, _ = grid_at(ch, e0q)
+            Fpad, _, _ = grid_at(ch, e0q, keep_padding=True)
             for j, sj in enumerate(s):
                 if F[j] == 0.0:
                     continue
                 if all(r["s_cert_A_inv"] >= sj - 1e-12 for r in rows_all):
                     continue               # 除外される行が無い節点は検査対象外
-                by = [r["F"][j] for r in rows_all]
-                naive = _pchip_eval(bx_all, by, _pchip_slopes(bx_all, by), e0q)
-                rat = naive / F[j]
+                rat = Fpad[j] / F[j]
                 if abs(rat - 1.0) > abs(worst[0] - 1.0):
                     worst = (rat, e0q, sj)
         if worst[1] is None:
@@ -264,6 +311,46 @@ def contract(pdir):
     else:
         print(f"   ✅ Au M4: 全 {len(rows)-1} 区間で max を返す "
               f"(内挿だと最悪 {worst_ratio:.2f} 倍の過小)")
+
+    # ---- C6: E0 補間の座標 ----
+    # 260813Cl 追加。⚠ **この罠にはこのファイル自身が落ちていた** — 出荷側 C#
+    # `IonizationChannel.GridAt` は x = ln(u-1) / 全正列は y = log F で PCHIP するのに、
+    # ここは生の E0 と生の F で補間していた。同じ JSON から違う F が出る。
+    # 全 525 チャネルの leave-one-out で測ると、出荷規則 1.183e-03 に対して
+    # 素朴版は 2.510e-03 (2.12 倍)。しかも C6 (check_tables) が測っているのは
+    # 出荷規則のほうなので、**素朴版の補間誤差はどのゲートも見ていなかった**。
+    print("C6: E0 補間の座標は x = ln(u-1)、全正の列は y = log F")
+    ch = load_channel(os.path.join(pdir, "F_L1_Z84.json"))
+    rows = sorted(ch["rows"], key=lambda r: r["e0_keV"])
+    s = ch["s_grid_A_inv"]
+    # (a) 出荷規則は E0 ノード上で行の F をそのまま返すこと (loader が壊れていない証明)
+    node_worst = 0.0
+    for r in rows:
+        F, _, _ = grid_at(ch, r["e0_keV"])
+        for j, sj in enumerate(s):
+            if sj > r["s_cert_A_inv"] + 1e-12:
+                continue
+            node_worst = max(node_worst, abs(F[j] - r["F"][j]))
+    # (b) 素朴版との差 — **全 E0 中点 x 全 s ノード**の最悪値
+    worst = (0.0, None, None, 0.0, 0.0)    # (|dF|, E0, s, 出荷, 素朴)
+    for a, b in zip(rows, rows[1:]):
+        e0q = 0.5 * (a["e0_keV"] + b["e0_keV"])
+        F, _, _ = grid_at(ch, e0q)
+        Fn, _, _ = grid_at(ch, e0q, naive=True)
+        for j, sj in enumerate(s):
+            d = abs(F[j] - Fn[j])
+            if d > worst[0]:
+                worst = (d, e0q, sj, F[j], Fn[j])
+    if node_worst > 1e-12:
+        bad += _fail(f"E0 ノード上で行の F を再現できない (最悪 {node_worst:.3e})")
+    elif worst[0] < 1e-6:
+        bad += _fail(f"素朴版と区別がつかない (最悪 {worst[0]:.3e}) — 検査に teeth が無い")
+    else:
+        print(f"   ✅ Po L1: E0 ノード上の再現 {node_worst:.1e} (機械精度)")
+        print(f"      素朴版 (生 E0 + 生 F) との最悪差 = {worst[0]:.4e} "
+              f"@E0={worst[1]:.4g}kV s={worst[2]:g} "
+              f"(出荷 {worst[3]:+.4e} / 素朴 {worst[4]:+.4e})")
+        print("      ⇒ 生の E0 で PCHIP すると ReciPro と違う F になる")
 
     # ---- golden vector ----
     print("golden: E0 補間の基準値 (移植先はこれを再現すること)")

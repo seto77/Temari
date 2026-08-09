@@ -62,7 +62,7 @@ other_than_c2(probs) = filter(p -> !startswith(p, "C2:"), probs)
 
 function run_case(name, src, dir, mutate!; want_new::Bool, want_old::Bool)
     path = mutate! === nothing ? src : corrupt_copy(src, dir, mutate!)
-    (probs, _, _, d) = check_file(path)
+    (probs, _, _, _, d) = check_file(path)   # 260813Cl: C6b が増えて 5 要素
     s = Float64[x for x in d["s_grid_A_inv"]]
     F = [Float64[x for x in r["F"]] for r in d["rows"]]
     e0 = [Float64(r["e0_keV"]) for r in d["rows"]]
@@ -85,7 +85,7 @@ end
 新 C6 (全 321 列) は捕まえ、旧 C6 (抜き取り 10 列) は素通りすることを示す。"""
 function run_c6_case(name, src, dir, mutate!)
     path = corrupt_copy(src, dir, mutate!)
-    (probs, _, _, d) = check_file(path)
+    (probs, _, _, _, d) = check_file(path)   # 260813Cl: C6b が増えて 5 要素
     s = Float64[x for x in d["s_grid_A_inv"]]
     F = [Float64[x for x in r["F"]] for r in d["rows"]]
     u = [Float64(r["u"]) for r in d["rows"]]

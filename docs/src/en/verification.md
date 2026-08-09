@@ -169,6 +169,8 @@ A separate axis: not "is the number right" but "did this change move any bit".
 | `julia -t 4 tools/bitident_snapshot.jl --v4 <file>` | The same for the shipping v4 prescription: seven channels, adding M1 (3s, two radial nodes) and M5 (3d, `l_init = 2`) so the kappa-resolved Dirac continuum and the d-shell angular path are covered |
 | `julia -t auto tools/check_tables.jl <prod_dir> [--eb]` | A generated dataset: F(0)=1, finiteness, K-shell positivity and monotonicity below s = 8, tail consistency (kind, epsilon floor, filler beyond s_cert), leave-one-out E0 interpolation error over every s column, sigma_own/sigma_Bote band, generator gate failures, channel-set completeness, and — with `--eb` — the binding energy against the Bote-Salvat subshell edge |
 | `julia tools/c2_negative_test.jl [prod_dir]` | The negative test for the two checks above: it injects defects into copies of the shipped files and asserts that the widened C2 window and the all-column C6 fire where the old ones passed, and that neither fires on a physically normal high-s sign reversal |
+| `julia -t auto tools/e0_interp_probe.jl <Z> <shell>` | The E0 interpolation error measured **directly**: it recomputes rows *inside* the shipped E0 intervals and compares them against the shipping interpolation rule. It first proves it can reproduce a shipped row bit-for-bit, so any remaining difference is interpolation and not code drift |
+| `python tools/temari_contract.py <prod_dir>` | The executable contract: the six traps a consumer falls into (signed F, q = 4πs, the filler beyond s_cert, per-channel E0 axes, the epsilon bound, and the E0 interpolation coordinate), plus a golden vector a port must reproduce |
 | `julia -t auto tools/e5_dump.jl <dir>` | The four `refcheck` channels as raw `Float64` bytes, compared by SHA-256 |
 
 The five snapshot channels are chosen to span the space that matters: a light
@@ -182,6 +184,22 @@ exactly a `===` comparison on `Float64`, including the sign of zero.
 !!! tip "Take the 'before' snapshot first"
     It cannot be reconstructed after the change. This is the single most common
     way to lose an afternoon.
+
+!!! warning "C6 is not a bound on the E0 interpolation error"
+    C6 leaves out only the *interior* E0 nodes (`k ∈ 3:n−2`), so the first and
+    last intervals — the ones straddling the ionization threshold and the top of
+    the voltage range — are never examined, and the threshold side is exactly
+    where the curvature in `ln(u − 1)` is largest.
+
+Measured directly, by recomputing points *inside* the intervals with
+`e0_interp_probe.jl`, Sn K just above threshold comes to **2.6 × 10⁻³** where C6
+reports 8.4 × 10⁻⁴ — C6 low by 3.1×. For Rn L2 the same comparison has C6
+conservative by 4.0×. C6 is therefore neither an upper nor a lower bound; read it
+as a corruption detector. Widening it does not fix this: the interior of an end
+interval is not a node, so leave-one-out cannot reach it at all, and admitting
+`k = 2` collapses the gate margin from 4.2× to 1.02× on a proxy that already
+overestimates the true error by about a factor of two. `check_tables` reports
+that widened figure as C6b for visibility, and does not gate on it.
 
 ### Separating an intended change from an accident
 
