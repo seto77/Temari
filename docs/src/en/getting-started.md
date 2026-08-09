@@ -45,25 +45,49 @@ noticeably longer than the ones after it — the result is cached
 Output:
 
 ```text
-Z=26 K @ 200.0 keV   出口: F(s) (EDX)   処方: DHFS-KS23-Dirac-jsplit-fullrange-sym-v2
+Z=26 K @ 200.0 keV   出口: F(s) (EDX)   処方: DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4-DSCF
 求積: QUICK (参考値)   スレッド: 4
 初回はこの元素の SCF を解くため時間がかかります (atom_cache_jl_*.jls に保存)...
   eps 32/32
 
-完了 (3 s)   E_bound = -7099.1 eV (小成分ノルム比 0.0088)
+完了 (4 s)   E_bound = -7083.6 eV (小成分ノルム比 0.0088)
 
    s [1/Å]             F(s)
      0.000   1.00000000e+00
-     0.250   9.78645380e-01
-     0.500   9.22677199e-01
+     0.250   9.78528239e-01
+     0.500   9.22283795e-01
      ...
-     4.000   1.63489376e-01
+     4.000   1.62492458e-01
 
 σ (Bote–Salvat, 出荷値)   = 3.184786e-08 nm²
-σ (自前 N0, 健全性の目安) = 3.246841e-08 nm²  (比 1.0195)
+σ (自前 N0, 健全性の目安) = 3.197913e-08 nm²  (比 1.0041)
 
-診断: match_resid=7.17e-06 (ゲート<1e-4) / r_tail=0.00e+00 (<1e-4) / badL=0 (=0)
+診断: match_resid=4.43e-06 (ゲート<1e-4) / r_tail=0.00e+00 (<1e-4) / badL=0 (=0)
 ```
+
+The console output is Japanese — that is what the program prints, so it is
+reproduced verbatim above rather than rewritten. Line by line it reads:
+
+```text
+Z=26 K @ 200.0 keV   exit: F(s) (EDX)   prescription: DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4-DSCF
+quadrature: QUICK (indicative)   threads: 4
+The first run for this element solves its SCF and takes a while (cached in atom_cache_jl_*.jls)...
+  eps 32/32
+
+done (4 s)   E_bound = -7083.6 eV (small-component norm fraction 0.0088)
+
+   s [1/Å]             F(s)
+     ... unchanged ...
+
+sigma (Bote-Salvat, shipped)      = 3.184786e-08 nm²
+sigma (own N0, sanity indicator)  = 3.197913e-08 nm²  (ratio 1.0041)
+
+diagnostics: match_resid=4.43e-06 (gate<1e-4) / r_tail=0.00e+00 (<1e-4) / badL=0 (=0)
+```
+
+!!! warning "This is a translation, not program output"
+    The block above is provided so the page reads in English. Running the
+    command prints the Japanese form.
 
 Reading it:
 
