@@ -1,12 +1,18 @@
 # Temari
 
-[![Documentation](https://img.shields.io/badge/docs-seto77.github.io%2FTemari-blue)](https://seto77.github.io/Temari/)
+[![Documentation](https://img.shields.io/badge/%F0%9F%93%96_Documentation-blue)](https://seto77.github.io/Temari/)
 [![CI](https://github.com/seto77/Temari/actions/workflows/ci.yml/badge.svg)](https://github.com/seto77/Temari/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Julia 1.11.9](https://img.shields.io/badge/Julia-1.11.9-9558B2)](https://julialang.org/)
 [![Dependencies: none](https://img.shields.io/badge/dependencies-none-lightgrey)](#design-commitments)
+[![Dataset DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21872050.svg)](https://doi.org/10.5281/zenodo.21872050)
 
 **Atomic scattering and excitation factors from first principles.**
+
+***[📖 Read the documentation](https://seto77.github.io/Temari/)*** — getting
+started, the full command-line reference, the prescription, verification, the
+reproducibility policy, and
+***[the published dataset](https://seto77.github.io/Temari/data/)***.
 
 Temari solves an isolated atom from scratch — self-consistent field, bound
 orbitals, distorted continuum waves — and derives the scattering and excitation
@@ -20,17 +26,34 @@ beyond the Julia standard library.
 > atomic field.
 
 **Status: early. The engine exists and is in production use; this repository is
-being assembled around it.** See [計画書.md](計画書.md) (Japanese) for the full
-plan and [docs/architecture.md](docs/architecture.md) for the layer structure.
+being assembled around it.** See [docs/architecture.md](docs/architecture.md)
+for the layer structure.
 
-**📖 Documentation: <https://seto77.github.io/Temari/>** — getting started, the
-full command-line reference, the prescription, verification and the
-reproducibility policy.
+## The tables are already computed
+
+![Coverage: 525 channels over Z and subshell](docs/src/assets/figures/coverage.svg)
+
+You do not need to run anything. The inner-shell ionization form factors
+F(s, E₀) are published as a dataset in their own right — **525 channels
+(K, L1–L3, M1–M5), 14,796 rows, s ≤ 16 Å⁻¹**, under
+[10.5281/zenodo.21872050](https://doi.org/10.5281/zenodo.21872050) (CC-BY-4.0),
+mirrored byte-identically at
+[release `dataset-v5.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-v5.0.0).
+
+- **Is my element and edge in there?** —
+  [`tables/channels.csv`](tables/channels.csv), 525 rows, rendered as a
+  searchable table right here on GitHub. No download.
+- **What do the numbers mean, and what will bite me?** —
+  **<https://seto77.github.io/Temari/data/>**. Read it before use: F is signed,
+  q = 4πs, and values past each row's `s_cert` are padding rather than physics.
+
+The dataset and the software carry independent version lines and are never
+mixed in the same release.
 
 ## Quick start
 
-No package to install, no build step: Julia's standard library is the only
-dependency.
+If you do want to compute your own: no package to install, no build step, and
+Julia's standard library is the only dependency.
 
 ```bash
 git clone https://github.com/seto77/Temari.git
@@ -86,7 +109,8 @@ operator and in what is reported:
   also means they stay correct past s ≈ 3 Å⁻¹, where Gaussian parameterizations
   decay exponentially and the real f_e falls as s⁻² (`fx`)
 
-Planned, in rough order (see the roadmap in 計画書.md):
+Planned, in rough order (see the
+[roadmap](https://seto77.github.io/Temari/roadmap/)):
 
 - Double-differential d²σ/dΩdΔE, partial cross sections σ(β, Δ) for EELS
   quantification

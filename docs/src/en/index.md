@@ -8,6 +8,11 @@ factors that electron microscopy, spectroscopy and transport simulation need.
 No external atomic-structure code, no fitted parameter tables, no dependencies
 beyond the Julia standard library.
 
+!!! tip "Just want the numbers?"
+    The inner-shell ionization form factors are already computed and published
+    as a dataset with its own DOI — 525 channels, K through M5. You do not need
+    to run anything. See **[Data](data.md)**.
+
 !!! quote "The name"
     *Temari* (手毬) is a traditional Japanese craft: a sphere divided
     geometrically, then wound with many threads to form a pattern. That is what
@@ -48,6 +53,7 @@ See [The physics](physics.md) for the prescription and its known limits, and
 
 | Goal | Start here |
 | --- | --- |
+| Use the published tables without running anything | [Data](data.md) |
 | Run it once and see a number | [Getting started](getting-started.md) |
 | Every subcommand and flag | [Command-line reference](cli.md) |
 | What prescription is actually implemented | [The physics](physics.md) |
@@ -95,8 +101,11 @@ already computed inside the current call graph and thrown away before returning
 
 ## What is *not* here
 
-- **No shipped tables.** This repository holds code and documentation. The
-  generated dataset lives with the application that ships it.
+- **No dataset inside the repository.** The generated tables are large and are
+  versioned independently of the code, so they are distributed as their own
+  release under their own DOI rather than committed here — see
+  [Data](data.md). This repository holds code, documentation and small derived
+  index tables.
 - **No reference data from restricted sources.** Comparison against published
   tables and GPL-licensed codes is part of development, but those numbers are
   never copied into this repository.
