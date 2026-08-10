@@ -41,3 +41,6 @@ desktop.ini
 
 # Claude Code のローカル作業ディレクトリ
 .claude/
+
+# データセット配布物 (`make_dataset_release.sh` の出力。release asset として配る)
+dist/
