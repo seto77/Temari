@@ -76,8 +76,19 @@ compared rather than merely trusted.
 ## Citation and licence
 
 Cite the software through `CITATION.cff` in the
-[repository](https://github.com/seto77/Temari), and this dataset by its own
-version and DOI.
+[repository](https://github.com/seto77/Temari), and this dataset by its own DOI:
+
+> Seto, Y. (2026). *Inner-shell ionization form factors F(s, E0) for STEM-EDX:
+> 525 channels (K, L1-L3, M1-M5) computed with Temari* (Version 5.0.0)
+> \[Data set\]. Zenodo. <https://doi.org/10.5281/zenodo.21872050>
+
+⚠ **Cite the version DOI**, `10.5281/zenodo.21872050` — it guarantees the files
+have not changed since. `10.5281/zenodo.21872049` is version-independent and
+resolves to whichever version is current, which is what you want only when
+referring to the dataset in general rather than to the numbers you used.
+
+**Zenodo holds the record of reference**; the copy attached to the GitHub
+release is a byte-identical mirror.
 
 **The data is CC-BY-4.0; the bundled loader is MIT.** `LICENSE.md` says which
 applies to what, and the full texts are in `licenses/`. Attribution may be given

@@ -37,6 +37,25 @@ abstract: >-
   verified by the author; the bulk of the implementation was written by an AI
   assistant (Anthropic Claude) under that direction.
 references:
+  - type: dataset
+    title: >-
+      Inner-shell ionization form factors F(s, E0) for STEM-EDX: 525 channels
+      (K, L1-L3, M1-M5) computed with Temari
+    authors:
+      - family-names: Seto
+        given-names: Yusuke
+    version: "5.0.0"
+    year: 2026
+    doi: "10.5281/zenodo.21872050"
+    license: CC-BY-4.0
+    notes: >-
+      Dataset v5.0.0, released separately from this software and under different
+      terms (CC-BY-4.0; the software is MIT). Cite this version DOI for
+      reproducibility -- it guarantees the files have not changed. The
+      version-independent DOI 10.5281/zenodo.21872049 resolves to the latest
+      version instead. A byte-identical mirror is attached to the GitHub release
+      dataset-v5.0.0; the archive is built deterministically so the two copies
+      can be compared rather than merely trusted.
   - type: article
     title: >-
       Cross sections for ionization of inner shells of atoms by electron impact

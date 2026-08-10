@@ -141,6 +141,20 @@ DOI が 1 つ無駄に増える。**Publish 前に必ず確認する。**
 
 ---
 
+## 3.4 ✅ v5.0.0 の実績 (2026-08-10)
+
+| | |
+|---|---|
+| 版の DOI | **10.5281/zenodo.21872050** |
+| 版に依らない DOI | 10.5281/zenodo.21872049 |
+| md5 の照合 | Zenodo 表示 `989cfd95…` = 手元 **一致** |
+
+⚠ **Related works の欄名は「Related identifiers」ではなく `Related works`** だった
+(Zenodo の UI が変わっている)。Scheme は `URL`、**Resource type は相手の種別**を選ぶ —
+リポジトリなら Software、配布物なら Dataset。
+⚠ *is identical to* は **release ページではなく asset の直リンク**を指す。ページには
+GitHub が自動で付ける source アーカイブも並ぶので、ページ相手では「同一」が成り立たない。
+
 ## 4. DOI が出たあとの作業
 
 ⚠ **相互記載しないと「どちらが正本か」が読み手に分からない**。次の 4 箇所へ:
