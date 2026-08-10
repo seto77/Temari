@@ -22,7 +22,8 @@
 #    チェックポイント経由で 1 行だけ生き残った前例がある。QC を必ず通すこと。
 set -u
 
-# 260813Cl 追加: レーンの julia.exe が消費した CPU 秒。取れなければ**空文字**を返す
+# 260813Cl 追加 (⚠ **既定 off**。WATCHDOG_FAST_WEDGE=1 のときだけ使う):
+# レーンの julia.exe が消費した CPU 秒。取れなければ**空文字**を返す
 # (呼び出し側は空なら何もしない = 従来の 15 分規則へ落ちる)。
 # ⚠ juliaup のランチャは子 julia.exe を起こすので、**親 PID で辿る**。
 #   コマンドラインには引数が出ない (実測) のでレーン名では特定できない。
@@ -42,7 +43,10 @@ chan=${4:-+1.11}
 tags=${5:-}
 outdir=${6:-}
 cd "$(dirname "$0")/.." || exit 1
-log="../temari_v5_lane${lane}_log.txt"   # 260810Cl: v4 → v5 (s ≤ 16 Å⁻¹ の全再生成)
+# 260813Cl: ログ名を**出力先から引く** — 世代決め打ちだと、別世代の評価 (O1 の
+# 1.12 フリート実行など) のログが同名で混ざる。既定は従来どおり v5。
+tag=$(basename "${outdir:-prod_v5_jl}" | sed "s/^src.//")
+log="../temari_${tag}_lane${lane}_log.txt"
 opts=""
 [ -n "$tags" ] && opts="$opts --tags $tags"
 [ -n "$outdir" ] && opts="$opts --out $outdir"
@@ -65,7 +69,12 @@ for attempt in $(seq 1 60); do
     #   落ちる。**健全なレーンを誤 kill するくらいなら 15 分待つほうが安い。**
     # ⚠ juliaup のランチャは引数をコマンドラインに出さないので、レーンの特定は
     #   **親 PID の連鎖** (MSYS pid → WINPID → 子 julia.exe) で行う。
-    cpu=$(cpu_of_lane $jpid)
+    # ⚠⚠ **既定は off** (260813Cl)。この高速検知は実戦で動かした実績が無いので、
+    #   処理系の評価 (O1) のような**測定**に混ぜてはいけない — レーンが落ちたとき
+    #   「処理系のせいか watchdog のせいか」を切り分けられなくなる。
+    #   有効にするときは WATCHDOG_FAST_WEDGE=1 を明示する。
+    cpu=""
+    [ "${WATCHDOG_FAST_WEDGE:-0}" = "1" ] && cpu=$(cpu_of_lane $jpid)
     if [ -n "$cpu" ] && [ -n "$prev_cpu" ]; then
       if awk "BEGIN{exit !($cpu - $prev_cpu < 0.5)}"; then
         zero_cpu=$((zero_cpu + 1))
