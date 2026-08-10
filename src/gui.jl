@@ -2,10 +2,10 @@
 #=
 gui.jl — Temari 最小 GUI v0.1 (ゼロ依存・localhost ブラウザ GUI)
 
-── 設計契約 (2026-08-05 決定。計画書 §3-6 の実装) ──────────────────
+── 設計契約 (2026-08-05 決定。README「Design commitments」6 の実装) ──
 1. **依存ゼロ**: Julia 標準ライブラリのみ (Sockets, Dates, Base)。
    HTML/JS/SVG は全てこのファイルに埋め込み。CDN・外部アセット・JS ライブラリ無し
-2. **GUI とエンジンの界面は CLI 契約に固定** (計画書 §3-6)。GUI は
+2. **GUI とエンジンの界面は CLI 契約に固定** (同 6)。GUI は
      julia --startup-file=no -t 4 src/ionization.jl Z channel E0keV
            [--quick|--high] [--rel] --json <tmpfile>
    を**別プロセス**で起動し、--json の出力ファイルをそのまま返すだけの薄いシェル。
@@ -311,7 +311,7 @@ function handle_compute(q::Dict{String,String})
         tmpjson = tempname() * "_temari_gui.json"
         logfile = tempname() * "_temari_gui.log"
 
-        # ---- CLI 契約どおりの引数列 (計画書 §3-6。シェル非経由) ----
+        # ---- CLI 契約どおりの引数列 (冒頭の設計契約 2。シェル非経由) ----
         eargs = String[string(z), tag, string(e0)]
         mode == "quick" && push!(eargs, "--quick")
         mode == "high"  && push!(eargs, "--high")
@@ -639,7 +639,7 @@ footer p { color: var(--muted); font-size: 12px; }
 <div class="wrap">
   <header>
     <h1>Temari — 内殻イオン化形状因子 F(s, E0)</h1>
-    <p class="sub">v0.1 最小 GUI: エンジン (src/ionization.jl) を CLI 契約どおり別プロセスで起動します (計画書 §3-6)。</p>
+    <p class="sub">v0.1 最小 GUI: エンジン (src/ionization.jl) を CLI 契約どおり別プロセスで起動します。</p>
   </header>
 
   <section class="card">
@@ -716,7 +716,7 @@ footer p { color: var(--muted); font-size: 12px; }
 
   <footer>
     <p>Temari GUI v0.1 — 127.0.0.1 のみ待ち受け / GET のみ /
-       依存は Julia 標準ライブラリのみ / エンジン界面は CLI 契約 (計画書 §3-6) /
+       依存は Julia 標準ライブラリのみ / エンジン界面は CLI 契約 /
        ジョブ状態はメモリ + 一時ファイル (サーバ再起動で消えます)</p>
   </footer>
 </div>

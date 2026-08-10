@@ -44,3 +44,9 @@ desktop.ini
 
 # データセット配布物 (`make_dataset_release.sh` の出力。release asset として配る)
 dist/
+
+# 計画書 (内部文書。ローカルパス・関係者名を含むため公開しない)
+計画書.md
+
+# Claude Code のプロジェクト指示 (内部文書。ローカルパス・作業経緯を含むため公開しない)
+CLAUDE.md
