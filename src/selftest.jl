@@ -115,7 +115,8 @@ function selftest()
     @assert worst < 1e-10 "T0b FAIL"
 
     # ---- T0c: 球ベッセルの零点近傍 — Miller 規格化ガードの回帰テスト ----
-    # j_0(x) ≈ 0 (x ≈ nπ) で規格化係数 j_0/j̃_0 が 0/0 になる欠陥 (計画書 §8.1)。
+    # j_0(x) ≈ 0 (x ≈ nπ) で規格化係数 j_0/j̃_0 が 0/0 になる欠陥
+    # (経緯と実測は docs/src/en/physics.md)。
     # 誤差は ~ε_mach/|sin x| で効くので、ガード発火域とその外で別々に見る。
     # 判定量は「j_l 族の自然な大きさ (~1/x) で割った誤差」= R 積分に効く量。
     # 規格化を j_1 に乗り換えた窓では j_0 単体の**相対**精度は保証されない
@@ -515,6 +516,46 @@ function selftest()
         # Mott–Bethe: f_e = 2(Z−f_x)/K² は K→∞ で 2Z/K² (裸核) へ漸近する
         fe_hi = mott_bethe_a0(1.0, fx[end], Ks[end])
         @assert abs(fe_hi / (2.0 / Ks[end]^2) - 1.0) < 1e-4 "T12 FAIL: Mott–Bethe の裸核極限"
+    end
+
+    # ---- T12b: f_e の K→0 極限と動径モーメント (260810Cl 追加) ----
+    # 中性原子では f_e(K) = 2(Z−f_x)/K² の極限が有限で、j₀ の展開から
+    #     f_e(K) = M₂/3 − K² M₄/60 + O(K⁴),   M_n = 4π∫r^(2+n)ρ dr
+    # 水素 1s (ρ = e^{−2r}/π) は全部閉形式で出る:
+    #     M₂ = 4·4!/2⁵ = 3     M₄ = 4·6!/2⁷ = 22.5     f_e(0) = M₂/3 = 1 a₀
+    # さらに厳密形 f_x = [1+(K/2)²]⁻² を直接展開すると f_e = 1 − 3K²/8 で、
+    # −M₄/60 = −22.5/60 = −3/8 と**一致する**。つまり単位・係数・求積・展開が
+    # まとめて検査できる。⚠ 直接式は K→0 で桁落ちするので、極限の実装は
+    # 差ではなくモーメントから取る — その 2 経路が合うことをここで示す。
+    let dt = GRID_DT
+        t = log(1e-7) .+ dt .* (0:ceil(Int, (log(60.0) - log(1e-7)) / dt))
+        r = exp.(t)
+        rho = exp.(-2 .* r) ./ pi
+        m0 = density_moment(r, dt, rho, 0)
+        m2 = density_moment(r, dt, rho, 2)
+        m4 = density_moment(r, dt, rho, 4)
+        e0 = abs(m0 - 1.0)                       # 電子数
+        e2 = abs(m2 / 3.0 - 1.0)
+        e4 = abs(m4 / 22.5 - 1.0)
+        fe0 = fe_zero_limit_a0(m2)
+        # 小 K で「直接式」と「2 項展開」が合うこと。⚠ 大きさの閾値だけでは弱い
+        # (M₄ の係数が間違っていても K を小さくすれば通る) ので、**残差が K⁴ で
+        # 落ちること**を検査する — これが「次の項は O(K⁴)」= M₄ の係数が正しい証拠。
+        dev(K) = let direct = mott_bethe_a0(1.0, 1.0 / (1.0 + (K / 2)^2)^2, K)
+            abs(direct - (m2 / 3.0 - K^2 * m4 / 60.0)) / abs(direct)
+        end
+        worst = maximum(dev, (0.02, 0.05, 0.1))
+        ratio = dev(0.1) / dev(0.05)               # K を 2 倍 → K⁴ なら 16
+        @printf("[T12b] 水素 1s モーメント (相対誤差): M₀ %.2e / M₂ %.2e / M₄ %.2e\n",
+                e0, e2, e4)
+        @printf("       f_e(0) = %.12f a₀ (厳密 1) / 展開との差 max %.2e / K⁴ 比 %.3f (期待 16)\n",
+                fe0, worst, ratio)
+        @assert e0 < 1e-14 "T12b FAIL: M₀ が電子数でない"
+        @assert e2 < 1e-14 "T12b FAIL: M₂ が閉形式 3 と合わない"
+        @assert e4 < 1e-14 "T12b FAIL: M₄ が閉形式 22.5 と合わない"
+        @assert abs(fe0 - 1.0) < 1e-14 "T12b FAIL: f_e(0) = M₂/3 が 1 a₀ でない"
+        @assert worst < 1e-4 "T12b FAIL: 小 K で直接式と展開が合わない"
+        @assert abs(ratio / 16.0 - 1.0) < 0.05 "T12b FAIL: 残差が K⁴ で落ちていない"
     end
 
     # ---- T14: 動径 Slater 関数 Y^k と、自己相互作用の厳密な相殺 ----

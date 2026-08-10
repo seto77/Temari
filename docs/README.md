@@ -49,7 +49,19 @@ rather than in a wiki:
 | `release_readiness_2026-08-07.md` | The M shell, σ against experiment, and the exchange prescription decision. Japanese. |
 | `fs_external_validation_2026-08-07.md` | How F(s) compares against external references, and how to pick a yardstick. Rankings only — no numbers derived from restricted sources. Japanese. |
 | `frozen_core_and_transverse_2026-08-07.md` / `mott_elastic_2026-08-07.md` / `exchange_diagnosis_2026-08-07.md` | The frozen core and transverse interaction, the Mott elastic exit, and the exchange diagnosis. Japanese. |
+| `scattering_factor_dataset_plan_2026-08-10.md` | **Plan, not a record**: what the f_x/f_e dataset needs before it can be published to the same standard as F — the prescription decision (Dirac + KLI), the X1–X15 verification suite, and the checks that must *not* be used as gates. Japanese. |
 | `next_phase_2026-08-0*.md` | Handover: current state, settled decisions, remaining work in priority order. **The highest-numbered one is current** (`2026-08-09`). Japanese. |
 
-The overall plan is `計画書.md` in the repository root (Japanese; it is the
-canonical design document), and `CLAUDE.md` holds the working rules.
+The published statement of the working rules is `CONTRIBUTING.md` (the
+verification a change is expected to show) together with the Reproducibility and
+Verification pages of the site.
+
+> **Note.** The handover documents above were written for the author, and refer
+> in places to two internal working documents — the planning document and the
+> Claude Code instruction file.
+> **Neither is part of this repository.**
+> Those references are left as written rather than edited out, because these
+> files are a record of what was decided when. Nothing a reader needs is only in
+> them: the prescription is in the source comments, the discipline is in
+> `CONTRIBUTING.md`, and the dataset contract is on the
+> [Data page](https://seto77.github.io/Temari/data/).

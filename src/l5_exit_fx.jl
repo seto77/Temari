@@ -76,14 +76,51 @@ end
 "Mott–Bethe 変換: f_e [a₀] = 2(Z_net − f_x)/K²。K=0 は発散しうるので呼ばない"
 mott_bethe_a0(z_net::Float64, fx::Float64, K::Float64) = 2.0 * (z_net - fx) / (K * K)
 
+"""球対称密度の**動径モーメント** M_n = 4π∫ r^(2+n) ρ(r) dr (260810Cl 追加)。
+
+`n = 0` なら電子数、`n = 2` なら M₂ = 4π∫r⁴ρ dr、`n = 4` なら M₄ = 4π∫r⁶ρ dr。
+⚠ **⟨r²⟩ ではない。**⟨r²⟩ = M₂/N なので、規約が紛れないよう名前で区別する
+(Zhang らの ζ と同じく、記号が曖昧なままだと消費側が 4π や N の分だけ外す)。
+
+f_x と**同じ求積** (対数格子上の Simpson、dr = r dt) を使うのが要点。別の積分器で
+求めると、下の `f_e(0)` が「f_x の K→0 極限」であることが保証されなくなる。"""
+function density_moment(r::Vector{Float64}, dt::Float64, rho::Vector{Float64}, n::Int)
+    w = simpson_weights(length(r), dt) .* r        # dr = r dt
+    return 4.0 * pi * sum(r .^ (2 + n) .* rho .* w)
+end
+
+# ---- f_e の K → 0 極限 -----------------------------------------------------
+# j₀(x) = 1 − x²/6 + x⁴/120 − … を f_x = ∫4πr²ρ j₀(Kr) dr に入れると
+#
+#     f_x(K) = N − K² M₂/6 + K⁴ M₄/120 − …
+#
+# 中性原子 (Z_net = N) では第 0 次が厳密に相殺するので
+#
+#     Z − f_x(K) = K² M₂/6 − K⁴ M₄/120 + …
+#     f_e(K) = 2(Z − f_x)/K² = M₂/3 − K² M₄/60 + O(K⁴)      [a₀]
+#
+# ⇒ **f_e(0) = M₂/3 [a₀]** は有限で、前方散乱値として実用がある。
+#   ⚠ **イオンでは発散する** — Z_net − f_x(0) = 正味電荷 ≠ 0 なので f_e ~ 2q/K²。
+#     そこは極限が存在しないので `nothing` のままにする (0 を置いてはいけない)。
+# ⚠ 直接式 2(Z−f_x)/K² は K → 0 で**桁落ち**する (分子が 0 に向かう差)。
+#   極限は差を取らずモーメントから求めるので、その影響を受けない。
+"中性原子の f_e(K→0) [a₀]。M₂ = 4π∫r⁴ρ dr から f_e(0) = M₂/3"
+fe_zero_limit_a0(m2::Float64) = m2 / 3.0
+
 """1 元素の X 線・電子線原子散乱因子を計算する。
 
-`s_nodes` は sinθ/λ [Å⁻¹] (既定 0..6 の 61 点)。s=0 は f_x のみ報告し、f_e は
-`nothing` にする (中性でも定義に極限操作が要り、イオンでは発散するため)。
+`s_nodes` は sinθ/λ [Å⁻¹] (既定 0..6 の 61 点)。
+
+⚠ **s=0 の f_e は「未定義」ではない** (260810Cl 修正)。中性原子では Mott–Bethe の
+極限が有限で **f_e(0) = M₂/3 [a₀]** (前方散乱値。実用がある) なので、差の桁落ちを
+避けてモーメントから直接求める。**イオンでのみ発散する**ので、そのときだけ null。
 
 戻り値は Dict (そのまま JSON 化できる):
   "f_x"              X 線原子散乱因子 [電子数]。f_x(0) = Z を厳密に満たす
-  "f_e_A"            電子線原子散乱因子 [Å] (Mott–Bethe)。s=0 は null
+  "f_e_A"            電子線原子散乱因子 [Å] (Mott–Bethe)。s=0 は中性なら M₂/3、
+                     イオンなら null
+  "m2_a0sq"          M₂ = 4π∫r⁴ρ dr [a₀²]。⚠ ⟨r²⟩ ではない (⟨r²⟩ = M₂/N)
+  "m4_a0four"        M₄ = 4π∫r⁶ρ dr [a₀⁴]。小 K 展開の 2 次項
   "n_electrons_raw"  規格化補正**前**の ∫4πr²ρ dr。Z との差が格子品質の指標
   "norm_correction"  掛けた一様補正 −1 (期待値 +Z×1.67e-7 / Z ≈ 1.67e-7)
 """
@@ -104,7 +141,14 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
     corr = a.nel / nel_raw
     fx = xray_form_factor(a.r, a.dt, a.rho, K) .* corr
     z_net = Float64(z)                             # 中性原子: 核電荷 = 電子数
-    fe = Union{Nothing,Float64}[k < 1e-12 ? nothing :
+    # モーメントも**同じ補正**を掛ける。掛けないと f_e(0) が f_x の K→0 極限で
+    # なくなり、s=0 と s→0 で食い違う (規格化補正は一様スケールなので単純に乗る)
+    m2 = density_moment(a.r, a.dt, a.rho, 2) * corr
+    m4 = density_moment(a.r, a.dt, a.rho, 4) * corr
+    neutral = abs(z_net - fx[1]) < 1e-8 * max(1.0, z_net)
+    fe = Union{Nothing,Float64}[k < 1e-12 ?
+                                # K=0: 中性なら極限 M₂/3 が有限。イオンは発散するので null
+                                (neutral ? fe_zero_limit_a0(m2) * BOHR_ANG : nothing) :
                                 mott_bethe_a0(z_net, fx[i], k) * BOHR_ANG
                                 for (i, k) in enumerate(K)]
     verbose && @printf("Z=%d  電子数 %.1f  規格化補正 %.3e (台形則バイアス Z×1.67e-7)\n",
@@ -120,6 +164,11 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
         "n_electrons_scf" => a.nel, "norm_correction" => corr - 1.0,
         "s_A_inv" => s_nodes, "q_a0inv" => K,
         "f_x" => fx, "f_e_A" => fe,
+        # 動径モーメント (規格化補正込み)。f_e(0) = M₂/3 [a₀] の出所であり、
+        # 小 K での展開 f_e(K) = M₂/3 − K²M₄/60 + O(K⁴) の検算にも使える
+        "m2_a0sq" => m2, "m4_a0four" => m4,
+        "f_e_zero_source" => neutral ? "M2/3 (K->0 limit of the Mott-Bethe form)" :
+                             "null (ion: Z_net - f_x(0) != 0, so f_e diverges as K^-2)",
         "relativistic" => a.relativistic, "exchange" => String(a.exchange),
         "density" => (a.relativistic ? "DHFS (完全 Dirac SCF、小成分込み)" :
                       "HFS (非相対論)") *
