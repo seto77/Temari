@@ -31,7 +31,7 @@ stage="$outdir/$name"
 
 echo "=== $name を組む (prod=$prod) ==="
 rm -rf "$stage"
-mkdir -p "$stage/schema" "$stage/tools"
+mkdir -p "$stage/schema" "$stage/tools" "$stage/licenses"
 
 # ---- データ本体 + 正本 ------------------------------------------------------
 cp "$prod"/F_*.json "$stage/"
@@ -39,11 +39,17 @@ cp "$prod/MANIFEST.md" "$prod/manifest.json" "$stage/"
 # ---- 読み方 (これが無いとデータだけ残って規約が失われる) --------------------
 cp schema/temari_dataset_v2.schema.json "$stage/schema/"
 cp tools/temari_contract.py "$stage/tools/"
-cp LICENSE "$stage/"
+# ⚠ **ライセンスは 2 本立て** (作者決定 2026-08-10): データ本体は **CC-BY-4.0**、
+# 同梱の loader (`temari_contract.py`) は **MIT**。どちらがどれに掛かるかを
+# `LICENSE.md` に明記する — 1 枚の LICENSE を置くと、混在パッケージでは
+# **どちらの条件で配られたのか読み手が判断できない**。
+cp licenses/CC-BY-4.0.txt licenses/MIT.txt "$stage/licenses/"
+cp docs/dataset_release_LICENSE.md "$stage/LICENSE.md"
 cp docs/dataset_release_README.md "$stage/README.md"
 
 n=$(ls "$stage"/F_*.json | wc -l)
-echo "  チャネル $n / schema・manifest・contract・LICENSE・README 同梱"
+echo "  チャネル $n / schema・manifest・contract・README 同梱"
+echo "  ライセンス: データ = CC-BY-4.0 / 同梱 loader = MIT (LICENSE.md に明記)"
 
 # ---- 決定論的な tar.gz ------------------------------------------------------
 # mtime は**データセットの日付**に固定する (ビルド時刻ではない = 何度作っても同じ)

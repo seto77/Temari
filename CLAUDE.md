@@ -2,9 +2,14 @@
 
 孤立原子の内殻イオン化形状因子 F(s, E0) と断面積テーブルを生成する Julia コード。
 ReciPro の STEM-EDX 機能のデータ生成層を独立させたリポ。
-**★ 既に公開済** — https://github.com/seto77/Temari (MIT、CITATION.cff v1.0.1、
+**★ 既に公開済** — https://github.com/seto77/Temari (コードは MIT、CITATION.cff v1.0.1、
 mkdocs は https://seto77.github.io/Temari/)。⚠ **出荷データ (`prod*/`) は .gitignore**
-なので repo には入っていない — データの配布は Zenodo/DOI が別途必要 (§7 の未決事項)。
+なので repo には入っていない — 配布は `tools/make_dataset_release.sh` が組む
+**決定論的な tar.gz** を `dataset-vX.Y.Z` タグの release で出す (**コードの release と別立て**)。
+★ **ライセンスは 2 本立て (作者決定 2026-08-10)**: **データ本体 = CC-BY-4.0** /
+**同梱 loader = MIT**。全文は `licenses/`、掛かり分けは `licenses/README.md`。
+⚠ MIT をデータに使わない理由 = 条文が "the Software" で書かれており、
+EU の sui generis データベース権に一切触れていないため (CC-BY 4.0 は §4 で明示)。
 
 ## ⚠ ReciPro との関係 (2026-08-08 更新)
 
