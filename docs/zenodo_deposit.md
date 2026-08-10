@@ -88,7 +88,7 @@ DOI が 1 つ無駄に増える。**Publish 前に必ず確認する。**
 | Title | `Temari dataset v5.0.0: inner-shell ionization form factors F(s, E0) for STEM-EDX` |
 | Creators | Seto, Yusuke（+ ORCID・所属）。⚠ **AI は著者に入れない** — `CITATION.cff` と同じ扱いで、寄与は Description に書く |
 | Publication date | **初めて公開した日**（= GitHub release を作った日。v5.0.0 は 2026-08-10）|
-| | ⚠ **生成日ではない。**`MANIFEST.md` の 2026-08-08 は計算が終わった日であって、
+| | ⚠ **生成日ではない** — `MANIFEST.md` の 2026-08-08 は計算が終わった日であって、
   公開日ではない（Zenodo の欄の説明も「first publication」と書いている）|
 | Version | `5.0.0` |
 | License | **Creative Commons Attribution 4.0 International (CC-BY-4.0)** |
