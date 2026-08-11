@@ -326,8 +326,12 @@ function grid_study(z::Int; relativistic::Bool=true, exchange::Symbol=:kli,
 
     @printf("\n=== 採用格子の判定  Z=%d  %s + %s  numerics=%s ===\n", z,
             relativistic ? "Dirac" : "非相対論", String(exchange), String(numerics))
-    @printf("評価点: s = 0..6 Å⁻¹ の %d 節点 / 予算 B_num = %.3e 電子\n",
-            length(nodes), B_NUM)
+    # ⚠ **見出しと判定を食い違わせない** (codex 2026-08-11 指摘)。以前ここは
+    #   「予算 B_num」と印字しながら B_GRID で合否を出していた。監査ログとして
+    #   紛らわしい以上に、読んだ人が余裕を 1.5 倍甘く受け取る
+    @printf("評価点: s = 0..6 Å⁻¹ の %d 節点 / 判定に使う予算 B_grid = %.3e 電子\n",
+            length(nodes), B_GRID)
+    @printf("  (参考: B_num = %.3e。⚠ 格子の判定に B_num を当ててはいけない)\n", B_NUM)
 
     # ---- 1. 点ごとの符号付き比から次数 ----
     @printf("\n  %-28s %10s %8s %8s %10s %9s\n",
@@ -361,30 +365,57 @@ function grid_study(z::Int; relativistic::Bool=true, exchange::Symbol=:kli,
     # ⚠⚠ D = |f(h) − f(h/2)| から出る量は 2 つある。**行がどちらの段の誤差か**を
     #   取り違えると 2^p 倍 (p=2 で 4 倍) ずれる。粗い方は D/(1−2^{−p})、
     #   細い方は D/(2^p−1)。最細段だけは最後の対から後者で出す
-    D = [maximum(abs.(f[k] .- f[k+1])) for k in 1:(stages-1)]
-    coarse(d) = isfinite(p_use) ? d / (1.0 - 2.0^(-p_use)) : NaN
-    finer(d)  = isfinite(p_use) ? d / (2.0^p_use - 1.0) : NaN
-    # ⚠⚠ **主判定はこちら。**三角不等式から、点ごとに
-    #     |f(h) − f(∞)| ≤ |f(h) − f(h_min)| + |f(h_min) − f(∞)|
-    #   なので、**外挿の仮定は最細段の 1 個だけ**に閉じ込められる。
-    #   Richardson を全段に当てるのは「p が全段・全点で成り立つ」という強い仮定で、
-    #   Fe では最終 3 段で符号反転が 21 % の点に出ている (最大点は健全だが)。
-    e_fine = finer(D[end])
+    # ⚠⚠ **点ごとに外挿してから最大を取る** (codex 2026-08-11 指摘、260811Cl 修正)。
+    #   以前はここで `D[k] = max_i |f[k][i] − f[k+1][i]|` というスカラを作り、
+    #   **別の点で測った p_use** を当てていた。最大を取る位置は段ごとに動きうるので、
+    #   その組み合わせには意味が無い。⇒ 全部の量を点ごとに作る。
+    # ⚠⚠ **p が使えないなら Richardson を出さない** (同指摘)。以前は
+    #   `p_stable == false` でも有限の p_use があれば Richardson 値で合否を出して
+    #   いた — コメントは「主判定にしない」と書いてあるのに実装がそうなっていない。
+    p_pt = fill(NaN, length(nodes))          # 点ごとの符号付き次数 (最後の 3 段)
+    if stages >= 3
+        d1 = f[stages-2] .- f[stages-1]
+        d2 = f[stages-1] .- f[stages]
+        for i in eachindex(p_pt)
+            (abs(d2[i]) > 1e-15 && d1[i] / d2[i] > 0) || continue
+            p_pt[i] = log2(d1[i] / d2[i])
+        end
+    end
+    usable = p_stable && isfinite(p_use)
+    # 最細段の残差を**点ごとに** E(h/2) = D/(2ᵖ−1) で埋める
+    e_fine_pt = [isfinite(p_pt[i]) ? abs(f[stages-1][i] - f[stages][i]) /
+                                     (2.0^p_pt[i] - 1.0) : NaN
+                 for i in eachindex(nodes)]
+    e_fine_max = maximum(x -> isfinite(x) ? x : 0.0, e_fine_pt)
     @printf("\n  %-14s %12s %12s %-11s %12s %8s %s\n",
             "採用候補 dt", "上界", "Richardson", "式", "最細との差", "予算比", "判定")
     verdicts = NamedTuple[]
     for k in 1:stages
-        rich, how = k < stages ? (coarse(D[k]), "D/(1−2⁻ᵖ)") : (finer(D[end]), "D/(2ᵖ−1)")
+        # Richardson (参考値)。⚠ p が安定していなければ**出さない**
+        good_pts = findall(isfinite, p_pt)
+        rich, how = if !usable || isempty(good_pts)
+            (NaN, "p 不安定→不可")
+        elseif k < stages
+            (maximum(i -> abs(f[k][i] - f[k+1][i]) / (1.0 - 2.0^(-p_pt[i])),
+                     good_pts), "D/(1−2⁻ᵖ)")
+        else
+            (e_fine_max, "D/(2ᵖ−1)")
+        end
+        # ⚠ 主判定 = 三角不等式の点ごとの上界。max は**最後に**取る
+        bnd = [abs(f[k][i] - f[stages][i]) +
+               (isfinite(e_fine_pt[i]) ? e_fine_pt[i] : e_fine_max)
+               for i in eachindex(nodes)]
+        bound = maximum(bnd)
         direct = maximum(abs.(f[k] .- f[end]))
-        bound = direct + e_fine             # 最細段の誤差だけが外挿由来
-        est = isfinite(bound) ? bound : rich
         @printf("  dt=%-11.3e %12.3e %12.3e %-11s %12.3e %8.2f %s\n",
-                dts[k], bound, rich, how, direct, est / B_GRID,
-                est <= B_GRID ? "✅" : "❌")
-        push!(verdicts, (dt=dts[k], bound=bound, rich=rich, direct=direct, est=est,
-                         ok=est <= B_GRID))
+                dts[k], bound, rich, how, direct, bound / B_GRID,
+                bound <= B_GRID ? "✅" : "❌")
+        push!(verdicts, (dt=dts[k], bound=bound, rich=rich, direct=direct, est=bound,
+                         ok=bound <= B_GRID))
     end
-    println("  ⚠ 「上界」= 最細との差 + 最細段の残差推定。外挿の仮定は最細段だけ")
+    println("  ⚠ 「上界」= 点ごとの (最細との差 + 最細段の残差推定) の最大。")
+    println("    外挿の仮定は最細段だけに閉じている。p が取れない点は最大値で代用する")
+    usable || println("  ⚠⚠ p が安定していないので Richardson 列は出していない")
     # ⚠ これは「独立な検算」ではない。**逐次差が全段で 1 本の冪則に乗るか**を
     #   見ているだけで、p をその同じ対から取れば恒等的に 0 になる (3 段のときは
     #   まさにそれが起きる)。4 段以上で、離れた段どうしを比べたときだけ意味を持つ
