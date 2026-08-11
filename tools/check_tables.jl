@@ -329,6 +329,97 @@ function check_file(path::String)
     return (probs, nflip, worst, c6b, d)
 end
 
+"""C16: **model_id ↔ 生成処方 ↔ dataset_version を機械的に照合する** (260811Cl 追加)。
+
+## なぜ C10 では足りないか
+
+C10 は「全ファイルで `model_id` と `dataset_version` が**一致する**」ことしか見ない。
+処方ごと取り違えていれば、全ファイルが仲良く同じ誤った値を持つので**素通りする**。
+実際、v5 世代の出荷 JSON が機械可読で持つ処方フィールドは `rel_continuum` と
+`dirac_continuum` の **2 つだけ**で、`dirac_scf` / `exchange` / `final_state` は
+**散文と `model_id` の文字列の中にしか無かった**。⇒ ファイル自身から
+`model_id` を引き直して照合することが**原理的にできなかった**。
+
+## 実際に起きた事故 (ReciPro 側、2026-08-11 に文献調査で発覚)
+
+出荷中の v5 の連続状態を「スカラー相対論的 (SRC)」と記録していた。正しくは
+**κ 分解 2 成分 Dirac (KDIRAC2C)**。v3 の記述を v5 に付け替えた混同である。
+⚠ Temari のリポジトリ本体は正しかったが、**散文が識別子から独立に書ける限り
+同じ事故は繰り返せる**。だから散文を識別子に**縛る**。
+
+## 検査
+
+1. **`prescription_id` があれば** (次世代以降): その機械フィールドから
+   `presc_model_id` / `presc_dataset_version` を**計算し直して**一致を要求する
+2. **常に** (出荷済み v5 にも効く): `model_id` の字句と `prescription` の散文が
+   矛盾しないこと。⚠ 対象は `prescription.*` だけ — `validated` は
+   「v4 が v3 の SRC を置き換えた」という**履歴**を正しく述べているので、
+   そこまで縛ると正しい記述を弾く
+
+⚠ 負のテストは `tools/c16_negative_test.jl`。"""
+function provenance_consistency(files::Vector{String})
+    ok = true
+    n_machine = 0
+    # (model_id の字句, prescription のどのキーに, 何が必要か / 何があってはいけないか)
+    RULES = [("KDIRAC2C", "continuum", "kappa-resolved Dirac", "scalar-relativistic"),
+             ("-DSCF",    "bound",     "Dirac SCF",            nothing),
+             ("KLI",      "bound",     "KLI",                  nothing)]
+    for p in files
+        d = parse_json_file(p)
+        mid = String(d["model_id"])
+        presc = get(d, "prescription", Dict{String,Any}())
+        for (token, key, must, mustnot) in RULES
+            prose = String(get(presc, key, ""))
+            has_tok = occursin(token, mid)
+            if has_tok && !occursin(must, prose)
+                println("[NG] C16 $(basename(p)): model_id が $token を名乗るのに " *
+                        "prescription.$key に「$must」が無い")
+                ok = false
+            end
+            if has_tok && mustnot !== nothing && occursin(mustnot, prose)
+                println("[NG] C16 $(basename(p)): model_id が $token なのに " *
+                        "prescription.$key が「$mustnot」と書いている")
+                ok = false
+            end
+            if !has_tok && occursin(must, prose)
+                println("[NG] C16 $(basename(p)): prescription.$key が「$must」と " *
+                        "書いているのに model_id に $token が無い")
+                ok = false
+            end
+        end
+        # ---- 機械可読な処方があれば、識別子を引き直して照合する ----
+        haskey(d, "prescription_id") || continue
+        n_machine += 1
+        pid = d["prescription_id"]
+        # ⚠ 生成側の NamedTuple と**同じ名前・同じ順序**で組み直す。順序が違うと
+        #   `presc_dataset_version` の等値比較が落ちる (Julia の NamedTuple は
+        #   フィールド順まで見る)。順序の正本は PRESC_V4
+        pr = NamedTuple{keys(PRESC_V4)}(map(keys(PRESC_V4)) do k
+            v = pid[String(k)]
+            PRESC_V4[k] isa Symbol ? Symbol(v) : v
+        end)
+        if presc_model_id(pr) != mid
+            println("[NG] C16 $(basename(p)): 処方から引いた model_id " *
+                    "$(presc_model_id(pr)) がファイルの $mid と違う")
+            ok = false
+        end
+        dv = String(d["dataset_version"])
+        if presc_dataset_version(pr) != dv
+            println("[NG] C16 $(basename(p)): 処方から引いた dataset_version " *
+                    "$(presc_dataset_version(pr)) がファイルの $dv と違う")
+            ok = false
+        end
+    end
+    if ok
+        println("C16: model_id と処方の散文が整合  " *
+                (n_machine == length(files) ?
+                 "識別子を処方から引き直して $(n_machine) 本とも一致" :
+                 "⚠ prescription_id を持つのは $(n_machine)/$(length(files)) 本 " *
+                 "(v5 以前は散文照合のみ)"))
+    end
+    return ok
+end
+
 """C9: 軌道の割り当て (節数・κ・占有数) が正しいことの独立確認。
 **M 殻を出荷に入れるなら必須** — 1 つでもずれると F(s) は「それらしい形」のまま
 別の軌道のものになる。E_b は E0 に依らないのでチャネルあたり 1 回でよい。
@@ -453,6 +544,8 @@ function main(args)
     end
     ok15 && println("C15: チャネル集合 $(length(have))/$(length(want)) 本そろっている  " *
                     "schema_version = $sv")
+    # ---- C16: model_id ↔ 生成処方 ↔ dataset_version (260811Cl 追加) ----
+    ok16 = provenance_consistency(files)
     if !isempty(flips)
         # 260813Cl: 文言を C2 の窓に合わせた (旧「s>4」は C2 の窓が 4 だった頃の記述)。
         # ⚠ **回数はゲートにしない** — v5 の K 実測は 0 回 1254 行 / 1 回 150 行 /
@@ -506,7 +599,7 @@ function main(args)
                 "$(round(worst_sp, sigdigits=3))")
         (bad9 + bad9b) > 0 && (n_bad += bad9 + bad9b)
     end
-    return n_bad == 0 && ok10 && ok15 ? 0 : 1
+    return n_bad == 0 && ok10 && ok15 && ok16 ? 0 : 1
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

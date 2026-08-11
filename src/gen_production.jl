@@ -726,6 +726,16 @@ function run_channel(z::Int, tag::String, outdir::String;
     doc = Dict{String,Any}(
         "provenance" => presc_provenance(presc),
         "prescription" => presc_block(presc),
+        # ★260811Cl: **処方を機械可読で出す。**それまで機械フィールドは
+        # `rel_continuum` / `dirac_continuum` の 2 つだけで、`dirac_scf` /
+        # `exchange` / `final_state` は**散文と model_id の中にしか無かった**。
+        # だから `model_id` も `dataset_version` も「ファイル自身から引き直して
+        # 照合する」ことができず、C10 は**ファイル同士が一致すること**しか
+        # 見られなかった (処方ごと間違っていれば全ファイル仲良く同じ値になる)。
+        # ⚠ ここは**処方 NamedTuple をそのまま**出す。手で書き写すと、
+        #   写し間違いを検出するための欄が写し間違いを持つことになる
+        "prescription_id" => Dict{String,Any}(
+            String(k) => (v isa Symbol ? String(v) : v) for (k, v) in pairs(presc)),
         "z" => z, "shell" => tag, "e_th_keV_bote" => eth,
         "edge_source" =>
             "Bote-Salvat 2008 (xion.f) subshell edges (per subshell)",
