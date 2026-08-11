@@ -92,20 +92,70 @@ function pointwise_bound_diffs(d::Vector{Vector{Float64}}, floor_abs::Float64)
     return (bound = bound, q = qv, cls = cls, d = d)
 end
 
-"""水準間の δf_e [Å] を、f_x の差から**直接**作る。
+"""水準間の δf_e [Å]。⚠⚠ **低 s は Mott–Bethe で作ってはいけない** (260811Cl 実測)。
 
-⚠ `nodes[1] = 0` の点は Mott–Bethe が 0/0 になるので、モーメント差から埋める。"""
-function delta_fe(dfx::Vector{Float64}, nodes::Vector{Float64}, dm2::Float64)
+`δf_e = −2a₀ δf_x/K²` は、**δf_x に載っている丸め床 ε を 1/K² 倍に増幅する**。
+f_x は 32 万点の総和なので水準間の差には ε ≈ **1e-13 電子**の床があり
+(下の `eps_est` で実測)、一方で信号は δf_x = −K²δM₂/6 で K² とともに消える。
+⇒ **s が小さいほど比が悪化し、ある点から下は雑音しか見えない。**
+
+実測 (Z=6、δ_3 = L3−L4。⚠ codex が予告したとおりの形):
+
+| s | δf_e^MB / 2 項展開 |
+|---|---|
+| 0.00039 | **−8.21** (符号すら違う) |
+| 0.00078 | −0.31 |
+| 0.0031 | 0.85 |
+| **0.0063 – 0.050** | **0.97 – 1.00** ← 重なり域 |
+| 0.10 | 1.07 (展開が破れ始める) |
+| 0.20 | −0.53 (展開は使えない) |
+
+⇒ **モーメント 2 項展開と Mott–Bethe を、重なり域の中で切り替える**
+(⚠ docstring に LaTeX の `\$` を書くと Julia の文字列補間になって落ちる。
+計画書 §4.20 に記録した罠で、ここで実際に踏んだので平文で書く):
+
+    s <= s_sw :  δf_e = a₀ (δM₂/3 − K² δM₄/60)
+    s >  s_sw :  δf_e = −2 a₀ δf_x / K²
+
+切替は**解析的な規則**で決める — K_sw² = 2|δM₂/δM₄|
+(2 項目が 1 項目の 10 % になる点)。⚠ **雑音の実測から決めない** (それだと
+結果を見てから閾値を動かすことになる)。⚠ 外れ値は [0.005, 0.2] に丸める。
+**切替点で 2 経路が一致することを検査する** (`ratio_at_switch`)。
+
+戻り値は `(val, s_switch, ratio_at_switch, eps_est)`。"""
+function delta_fe(dfx::Vector{Float64}, nodes::Vector{Float64}, dm2::Float64,
+                  dm4::Float64)
     K = 4.0 * pi .* nodes .* BOHR_ANG
+    expand(i) = BOHR_ANG * (dm2 / 3.0 - K[i] * K[i] * dm4 / 60.0)
+    mb(i) = -2.0 * BOHR_ANG * dfx[i] / (K[i] * K[i])
+    s_sw = dm4 == 0.0 ? 0.2 :
+           clamp(sqrt(2.0 * abs(dm2 / dm4)) / (4.0 * pi * BOHR_ANG), 0.005, 0.2)
     out = similar(dfx)
-    out[1] = BOHR_ANG * dm2 / 3.0                  # δf_e(0) = a₀ δM₂/3
+    out[1] = BOHR_ANG * dm2 / 3.0                  # δf_e(0) = a₀ δM₂/3 (厳密)
+    isw = 1
     @inbounds for i in 2:length(dfx)
-        out[i] = -2.0 * BOHR_ANG * dfx[i] / (K[i] * K[i])
+        if nodes[i] <= s_sw
+            out[i] = expand(i); isw = i
+        else
+            out[i] = mb(i)
+        end
     end
-    return out
+    ratio = isw > 1 ? mb(isw) / expand(isw) : NaN
+    # ⚠ 丸め床の実測 (診断のみ。切替の決定には使わない)。最も低い 8 点で
+    #   MB − 展開 ≈ −2a₀ε/K² と読む
+    est = [abs((mb(i) - expand(i)) * K[i] * K[i] / (2.0 * BOHR_ANG))
+           for i in 2:min(9, length(dfx))]
+    return (val = out, s_switch = s_sw, ratio_at_switch = ratio,
+            eps_est = isempty(est) ? NaN : sort(est)[max(1, end ÷ 2)])
 end
 
-"f_e [Å] そのもの (大きさの報告用。⚠ 差の計算にはこれを使わない)"
+"""f_e [Å] そのもの (大きさの報告用。⚠ 差の計算にはこれを使わない)。
+
+⚠⚠ **値には切替を掛けない。**差では 2 項展開で十分だったが、値に求める精度は
+けた違いに高い (相対 1e-9 級) ので、s = 0.078 まで 2 項で打ち切ると
+**打ち切り誤差の方が桁落ちよりずっと大きくなる**。値の側では桁落ちは無害である —
+最小節点で 2a₀ε/K² ≈ 4e-09 Å、f_e(0) = 2.46 Å に対して相対 1.6e-09。
+**差と値で必要な精度が違うので、同じ処理をしてはいけない。**"""
 function fe_from_fx(fx::Vector{Float64}, nodes::Vector{Float64}, z_net::Float64,
                     m2::Float64)
     K = 4.0 * pi .* nodes .* BOHR_ANG
@@ -149,23 +199,20 @@ function fe_element(dir::String, doc; floor_scale::Float64=0.5)
            for i in eachindex(stages)]
 
     # ---- 水準差 (δ_2 = L2−L3、δ_3 = L3−L4、…) ----
-    d = [delta_fe(ft[k] .- ft[k+1], nodes, m2[k] - m2[k+1])
-         for k in 1:(length(stages)-1)]
-
-    # ---- ⚠ 低 s の切替点の健全性: 2 経路が繋がるか ----
-    #   δf_e(0) をモーメントから出した値と、最初の数節点を Mott–Bethe から出した値。
-    #   δf_x = −K²δM₂/6 なら両者は一致するはずで、**そのずれが低 s の指標**になる
-    last = d[end]
-    join_ratio = [abs(last[1]) > 0 ? last[i] / last[1] : NaN for i in 2:5]
+    dres = [delta_fe(ft[k] .- ft[k+1], nodes, m2[k] - m2[k+1], m4[k] - m4[k+1])
+            for k in 1:(length(stages)-1)]
+    d = [r.val for r in dres]
 
     # ---- 停止影響 U_e (採用段) ----
     ai = findfirst(==(ADOPTED_STAGE), stages)
     key = @sprintf("prod_stage%d", ADOPTED_STAGE)
-    ue_curve = haskey(arrays, key) ?
+    ue = haskey(arrays, key) ?
         delta_fe(arrays[key] .- ft[ai], nodes,
                  doc["levels"][ai]["prod"]["m2"] * corr(doc["levels"][ai]["prod"]) -
-                 m2[ai]) : nothing
-    u_e = ue_curve === nothing ? NaN : maximum(abs, ue_curve)
+                 m2[ai],
+                 doc["levels"][ai]["prod"]["m4"] * corr(doc["levels"][ai]["prod"]) -
+                 m4[ai]) : nothing
+    u_e = ue === nothing ? NaN : maximum(abs, ue.val)
 
     # ---- 点ごとの上限 (f_x と同じ枠組み、単位だけ Å) ----
     floor_abs = max(floor_scale * u_e, 1e-16)
@@ -174,7 +221,8 @@ function fe_element(dir::String, doc; floor_scale::Float64=0.5)
     mask_mid = [iseven(i) for i in 1:n]
     return (z = round(Int, doc["z"]), nodes = nodes, fe = fes[end], bound = pb.bound,
             cls = pb.cls, q = pb.q, u_e = u_e, floor_abs = floor_abs,
-            join_ratio = join_ratio, m2 = m2, m4 = m4,
+            s_switch = dres[end].s_switch, ratio_at_switch = dres[end].ratio_at_switch,
+            eps_est = dres[end].eps_est, m2 = m2, m4 = m4,
             ship = summarize(pb, nodes, mask_ship),
             mid = summarize(pb, nodes, mask_mid),
             fe0 = fes[end][1], fe_max_s = maximum(abs, fes[end]))
@@ -188,16 +236,17 @@ function main(args)
     println("f_e の数値誤差 — `certify_grid.jl` の副本を後処理する (SCF は回さない)")
     println("⚠ 単位は Å。⚠ 対象は出荷候補 7681 節点上の値 (節点間・直列化後は別勘定)")
     println("⚠ 差は f_x の差から直接作る (Mott–Bethe を通してから引かない)")
-    @printf("\n%4s %10s %12s %12s %10s %12s %8s %6s\n",
-            "Z", "f_e(0) Å", "δf_e max Å", "s@max", "相対", "中点 max", "U_e Å", "未解決")
+    @printf("\n%4s %10s %12s %10s %12s %9s %8s %8s %5s\n",
+            "Z", "f_e(0) Å", "δf_e max Å", "s@max", "中点 max", "U_e Å",
+            "s_switch", "切替比", "未解決")
     rows = Any[]
     for f in files
         doc = parse_json_file(joinpath(dir, f))
         r = fe_element(dir, doc)
-        rel = r.ship["max_bound"] / max(abs(r.fe0), 1e-300)
-        @printf("%4d %10.4f %12.3e %12.4f %10.2e %12.3e %8.1e %6d\n",
-                r.z, r.fe0, r.ship["max_bound"], r.ship["s_at_max"], rel,
-                r.mid["max_bound"], r.u_e, round(Int, r.ship["n_violating"]))
+        @printf("%4d %10.4f %12.3e %10.4f %12.3e %9.2e %8.4f %8.3f %5d\n",
+                r.z, r.fe0, r.ship["max_bound"], r.ship["s_at_max"],
+                r.mid["max_bound"], r.u_e, r.s_switch, r.ratio_at_switch,
+                round(Int, r.ship["n_violating"]))
         push!(rows, r)
     end
     bs = [(r.ship["max_bound"], r.z) for r in rows]
@@ -210,10 +259,14 @@ function main(args)
     smax = [r.ship["s_at_max"] for r in rows]
     @printf("  最大の位置 s: 最小 %.4f / 中央 %.4f / 最大 %.4f\n",
             minimum(smax), sort(smax)[max(1, end ÷ 2)], maximum(smax))
-    # ⚠ 低 s の 2 経路が繋がっているか (δf_x = −K²δM₂/6 なら比が 1 に寄る)
-    jr = [maximum(abs, r.join_ratio .- 1.0) for r in rows]
-    @printf("  低 s の経路整合 |比−1| の最悪: %.3e (Z=%d)\n",
-            maximum(jr), rows[argmax(jr)].z)
+    # ⚠⚠ 切替点で 2 経路が一致していなければ、そこは重なり域ではない
+    jr = [abs(r.ratio_at_switch - 1.0) for r in rows]
+    @printf("  切替点の経路整合 |比−1| の最悪: %.3e (Z=%d)%s\n",
+            maximum(jr), rows[argmax(jr)].z,
+            maximum(jr) > 0.05 ? "  ⚠ 5 % 超 — 重なり域を外している" : "")
+    @printf("  δf_x の丸め床 ε の実測: 中央 %.2e / 最大 %.2e 電子\n",
+            sort([r.eps_est for r in rows])[max(1, end ÷ 2)],
+            maximum(r.eps_est for r in rows))
     println("\n⚠ これは**数値 (格子) 誤差**であって、モデル誤差でも表現誤差でもない")
     println("⚠ 3 水準に共通するバイアスは水準差に現れない (codex)")
     return rows
