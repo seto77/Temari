@@ -150,47 +150,108 @@ function sweep(a::SCFAtom; smax::Float64=40.0, ds::Float64=0.5)
     return (s = s, rel = rel, phase = phase, reff = reff)
 end
 
-"""dt を 3 段 (h, h/2, h/4) 取って**収束次数**を出す。
+"""収束次数を dt の多段で測る (2026-08-11 全面改訂、codex 第 2 ラウンド指摘)。
 
-⚠ **2 段だけでは「感度」しか言えない。**Δ(h→h/2) は誤差そのものではなく、
-誤差に変換するには次数 p が要る:
+⚠⚠ **旧版には 3 つの欠陥があった:**
 
-    I(h) − I(h/2) ≈ C h^p (1 − 2^-p),   比 = [I(h)−I(h/2)] / [I(h/2)−I(h/4)] = 2^p
-    誤差(h) ≈ [I(h) − I(h/2)] / (1 − 2^-p)
+1. **SCF の `converged` を検査していなかった** — 未収束なら格子誤差と、格子ごとに
+   違う反復誤差を混ぜて測ることになる。**hard fail** にする
+2. **点ごとの比の中央値 1 個を作り、それを別の点の最大差へ流用**していた。
+   符号も潰していたので符号反転が隠れる。**点別の符号付き比と分布**を出す
+3. 3 段しか取らなかった。**4 段**にして漸近域に入っているかを見る
 
-⚠ SCF 全体の次数は Numerov の次数と一致するとは限らない (束縛解・KLI・混合が
-挟まる) ので、**仮定せずに測る**。"""
-function order_study(z::Int; relativistic::Bool, exchange::Symbol)
-    @printf("\n=== 収束次数  Z=%d  dt を 3 段取る ===\n", z)
-    mk(dt) = SCFAtom(z, ORBITALS[z]; latter_charge = 1.0, relativistic = relativistic,
-                     exchange = exchange, dt = dt)
-    f1 = fx_normalized(mk(GRID_DT))
-    f2 = fx_normalized(mk(GRID_DT / 2))
-    f4 = fx_normalized(mk(GRID_DT / 4))
-    d12 = f1 .- f2
-    d24 = f2 .- f4
-    # 差が意味を持つ点だけで比を取る (d24 が丸めに埋もれた点は除く)
-    keep = findall(i -> abs(d24[i]) > 1e-13, eachindex(d24))
-    ratios = [abs(d12[i] / d24[i]) for i in keep]
-    if isempty(ratios)
-        println("  ⚠ 差が丸めに埋もれた — 次数を測れない")
-        return nothing
+返す `p` は**最大誤差点そのものの p** (中央値ではない)。"""
+function order_study(z::Int; relativistic::Bool, exchange::Symbol, stages::Int=4,
+                     quiet::Bool=false)
+    dts = [GRID_DT / 2^(k - 1) for k in 1:stages]
+    atoms = SCFAtom[]
+    for dt in dts
+        a = SCFAtom(z, ORBITALS[z]; latter_charge = 1.0, relativistic = relativistic,
+                    exchange = exchange, dt = dt)
+        # ★ hard fail: 未収束の解で次数を測ってはいけない
+        a.converged || error("Z=$z dt=$dt が未収束 — 次数測定は成立しない")
+        push!(atoms, a)
     end
-    rmed = sort(ratios)[max(1, end ÷ 2)]
-    p = log2(rmed)
-    err = maximum(abs.(d12)) / (1.0 - 2.0^(-p))
-    @printf("  比 [I(h)−I(h/2)]/[I(h/2)−I(h/4)] の中央値 = %.2f  → 次数 p ≈ %.2f\n",
-            rmed, p)
-    @printf("  max|I(h)−I(h/2)| = %.3e  ⇒ **production 格子の誤差 ≈ %.3e**\n",
-            maximum(abs.(d12)), err)
-    @printf("  (有効点 %d / %d。残りは差が丸めに埋もれている)\n",
-            length(keep), length(d24))
-    return (p = p, err = err)
+    f = [fx_normalized(a) for a in atoms]
+    # 連続する 3 段から点別の符号付き比を作る (段が n あれば比は n−2 組)
+    out = NamedTuple[]
+    for k in 1:(stages-2)
+        d1 = f[k] .- f[k+1]
+        d2 = f[k+1] .- f[k+2]
+        keep = findall(i -> abs(d2[i]) > 1e-13, eachindex(d2))
+        isempty(keep) && continue
+        signed = [d1[i] / d2[i] for i in keep]              # ★符号付き
+        ps = [r > 0 ? log2(r) : NaN for r in signed]
+        good = filter(!isnan, ps)
+        jmax = argmax(abs.(d1))                             # 最大誤差点
+        p_at_max = abs(d2[jmax]) > 1e-13 && d1[jmax] / d2[jmax] > 0 ?
+                   log2(d1[jmax] / d2[jmax]) : NaN
+        push!(out, (k = k, dt = dts[k], n_neg = count(<(0), signed),
+                    n_keep = length(keep), n_all = length(d2),
+                    p_med = isempty(good) ? NaN : sort(good)[max(1, end ÷ 2)],
+                    p_min = isempty(good) ? NaN : minimum(good),
+                    p_max = isempty(good) ? NaN : maximum(good),
+                    p_at_max = p_at_max, e1 = maximum(abs.(d1))))
+    end
+    if !quiet
+        @printf("\n=== 収束次数  Z=%d  %s + %s  (dt を %d 段) ===\n", z,
+                relativistic ? "Dirac" : "非相対論", String(exchange), stages)
+        @printf("  %8s %10s %8s %8s %8s %10s %7s\n",
+                "dt", "max|Δ|", "p 中央", "p 最小", "p 最大", "p@最大点", "符号反転")
+        for r in out
+            @printf("  %8.1e %10.3e %8.2f %8.2f %8.2f %10.2f %4d/%d\n",
+                    r.dt, r.e1, r.p_med, r.p_min, r.p_max, r.p_at_max,
+                    r.n_neg, r.n_keep)
+        end
+    end
+    return out
+end
+
+"""四象限 (相対論 × 交換) で次数を測り、**どの段が 2 次律速か**を切り分ける。
+
+解釈 (codex 第 2 ラウンド):
+  - Dirac だけ 2 次        → **M** = 束縛 Dirac RK4 の中点 V を端点平均で代用
+                              (`_dirac_rk4_step` の `vm=(va+vb)/2`。連続状態側は
+                               真の中点を使っており、コード自身がそう書いている)
+  - KLI だけ 2 次          → **X** = `ykr_rho` の累積台形と KLI 定数の trapz
+  - 全象限で 2 次          → **H/N** = `hartree` の累積台形 / 軌道の trapz 規格化
+  - Dirac+Xα でも 2 次     → KLI 固有の積分だけでは説明できない
+
+⚠ F v5 の既定は **Dirac + Xα** なので、KLI 固有 (X) だけが律速なら
+  **F のビット同一性を保ったまま直せる**。M/H/N の共有箇所なら v6 が要る。"""
+function quadrant_study(zs::Vector{Int}; stages::Int=4)
+    println("\n=== 四象限 × $(stages) 段 — 2 次律速の切り分け ===")
+    println("⚠ SCF が未収束なら hard fail する (未収束の解で次数は測れない)")
+    @printf("\n%4s %-22s %10s %8s %10s %7s\n",
+            "Z", "象限", "max|Δ|", "p 中央", "p@最大点", "符号反転")
+    for z in zs
+        for rel in (false, true), ex in (:xalpha, :kli)
+            label = (rel ? "Dirac" : "非相対論") * " + " * String(ex)
+            try
+                out = order_study(z; relativistic = rel, exchange = ex,
+                                  stages = stages, quiet = true)
+                isempty(out) && (println("  Z=$z $label: 差が丸めに埋もれた"); continue)
+                r = out[end]        # 最も細かい 3 段 (漸近域に最も近い)
+                @printf("%4d %-22s %10.3e %8.2f %10.2f %4d/%d\n",
+                        z, label, r.e1, r.p_med, r.p_at_max, r.n_neg, r.n_keep)
+            catch err
+                @printf("%4d %-22s  ✗ %s\n", z, label,
+                        first(split(string(err), '\n')))
+            end
+        end
+    end
+    println("\n⚠ 読み方: Dirac だけ 2 次 → M (束縛 RK4 の中点 V) /")
+    println("  KLI だけ 2 次 → X (KLI 固有の累積台形) / 全象限 2 次 → H・N (共有)")
 end
 
 function main(args)
     zs = Int[]
+    # ⚠ 値を取るオプション (`--stages 4`) の値を Z として拾わないこと。
+    #   2026-08-11 まで `--stages 3` の 3 を Z=3 (Li) と誤読していた
+    skip = false
     for x in args
+        skip && (skip = false; continue)
+        x == "--stages" && (skip = true; continue)
         startswith(x, "--") && continue
         push!(zs, parse(Int, x))
     end
@@ -204,9 +265,16 @@ function main(args)
             rel ? "Dirac SCF" : "非相対論 SCF", String(exch))
     println("⚠ 変種は格子が違うので ρ を点ごとに比較できない。f_x(K) で比べている")
 
+    stages = 4
+    let i = findfirst(==("--stages"), args)
+        i !== nothing && i < length(args) && (stages = parse(Int, args[i+1]))
+    end
+    if "--quadrant" in args
+        return quadrant_study(zs; stages = stages)
+    end
     if "--order" in args
         for z in zs
-            order_study(z; relativistic = rel, exchange = exch)
+            order_study(z; relativistic = rel, exchange = exch, stages = stages)
         end
         return
     end
