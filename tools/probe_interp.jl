@@ -28,7 +28,7 @@ using Printf
 
 include(joinpath(@__DIR__, "..", "src", "ionization.jl"))
 
-const DS_LIST = [0.5, 0.25, 0.1, 0.05]     # 候補の刻み [Å⁻¹]
+const DS_LIST = [0.05, 0.025, 0.0125, 0.00625, 0.003125]   # 候補の刻み [Å⁻¹]
 
 # X12 (§4.8) と**同じ混合ゲート**。補間誤差はこの帯の十分下に居なければならない
 # — model validation の帯と同じ大きさの補間誤差を足すのは無意味だから。
@@ -187,7 +187,7 @@ function main(args)
     # 候補格子: 均一 4 種 + (あれば) IUCr の非均一格子
     cands = Tuple{String,Vector{Float64}}[]
     for ds in DS_LIST
-        push!(cands, (@sprintf("均一 Δs=%.2f", ds), collect(0.0:ds:smax)))
+        push!(cands, (@sprintf("均一 Δs=%.5f", ds), collect(0.0:ds:smax)))
     end
     if "--iucr" in args
         g = filter(<=(smax + 1e-9), iucr_grid())
@@ -218,12 +218,12 @@ function main(args)
     for z in zs
         a = get_neutral(z; relativistic = rel, exchange = exch)
         @printf("=== Z=%d ===\n", z)
-        @printf("  %-16s %6s %22s %22s %22s\n", "格子", "節点",
+        @printf("  %-17s %6s %22s %22s %22s\n", "格子", "節点",
                 "線形 (絶対/ゲート比)", "3次スプライン", "PCHIP")
         for (name, nodes) in cands
             p = probe(a, nodes)
             l, s3, pc = p.err["線形"], p.err["3次スプライン"], p.err["PCHIP"]
-            @printf("  %-16s %6d  %9.2e %9.2e  %9.2e %9.2e  %9.2e %9.2e\n",
+            @printf("  %-17s %6d  %9.2e %9.2e  %9.2e %9.2e  %9.2e %9.2e\n",
                     name, p.n_nodes, l[1], l[2], s3[1], s3[2], pc[1], pc[2])
             best[name] = max(get(best, name, 0.0), s3[2])
         end
@@ -231,7 +231,7 @@ function main(args)
     end
     println("全元素での 3 次スプラインの最悪 ゲート比 (1 以下なら X12 の帯の内側):")
     for (name, nodes) in cands
-        @printf("  %-16s (%3d 点) → %.3e\n", name, length(nodes), best[name])
+        @printf("  %-17s (%4d 点) → %.3e\n", name, length(nodes), best[name])
     end
     println("⚠ ゲート比 = max |Δ| / (1e-4 + 2e-3·|f_x|)。素の相対誤差で並べると")
     println("  **絶対誤差で最良の格子が最悪に見える** (高 s で f_x が小さいため)")
