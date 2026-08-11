@@ -29,9 +29,25 @@ Kirkland) は全てこれ相当の DHF 計算への**フィット**なので、�
 
 ---
 
-## 手元にある PDF
+## PDF — ★**2026-08-11 に外部の文献ライブラリへ移動した**
 
-| ファイル | 書誌 | DOI / 入手 |
+⚠⚠ **`refs/` に PDF はもう 1 件も無い**。作者が全リポジトリ共通の文献ライブラリ
+
+```text
+C:\Users\seto\source\repos\references\        (索引 = そこの README.md)
+```
+
+を作り、`ReciPro/references` と `Temari/refs` の PDF をそこへ集約した
+(2026-08-11)。**命名規約は `著者_年_雑誌_省略タイトル.pdf`** で内容別の 8 分類。
+Temari が使うのは主に `01_原子構造・弾性散乱因子` と `02_内殻イオン化・非弾性断面積`。
+
+⚠ **データ (`data/` 配下の数値表) は移動していない** — 移したのは論文 PDF だけで、
+`OFFV1_…txt` と `Dirac_GOS_database.zip` はここに残っている。`tools/compare_offv1.jl`
+と `tools/small_component_check.jl` のパスは**そのまま有効**。
+
+⚠ 下表は**旧ファイル名**なので、探すときは新ライブラリの命名で引くこと。
+
+| 旧 `refs/` のファイル名 | 書誌 | DOI / 入手 |
 |---|---|---|
 | `Olukayode_2022_PhD-thesis-MTSU_DHF-xray-scattering-factors.pdf` | Olukayode Shiroye, PhD thesis, Middle Tennessee State Univ. (2022)。OFFV の計算手法の詳細 | 公開: MTSU JEWLScholar |
 | `Thorkildsen_2023_ActaA79_318_new-benchmarks-form-factors.pdf` | G. Thorkildsen, *New benchmarks in the modelling of X-ray atomic form factors*, Acta Cryst. A79, 318–330 (2023) | 10.1107/S2053273323003996 (open access) |
@@ -76,9 +92,9 @@ DOI 10.5281/zenodo.7729585、CC-BY。**格子の実測**
 - HDF5 属性 `file_format = "GOS5"`、`<元素>/<辺>/{data (128×256), free_energy (128), q (256)}`
 - **q = 0.05 → 50 Å⁻¹ の等比 256 点** (比 1.0275)、**ΔE = 0.01 → 4000 eV の等比 128 点** (比 1.107)
 - **q_max = 50 Å⁻¹ は我々の s で 3.98 Å⁻¹ 相当** ⇒ **その外に物差しは無い**。
-  ⚠ **単位は HDF5 に書かれていない。**Bethe ridge 位置で物理から決めた
+  ⚠ **単位は HDF5 に書かれていない**。Bethe ridge 位置で物理から決めた
 - ⚠⚠ **論文 §5 の「サンプリングは辺ごとに適応させる (q_max = 2q_r)」は、公開データでは
-  実施されていない。**H / C / Si / Fe / Au / Ac / U を実際に開いて確認したが、
+  実施されていない**。H / C / Si / Fe / Au / Ac / U を実際に開いて確認したが、
   **全元素・全辺で格子は 1 ビットも変わらない**。効いているのは「対数格子である」ことだけ。
   ([[transcribed-formula-check]] — 論文本文と公開データは食い違うことがある)
 
