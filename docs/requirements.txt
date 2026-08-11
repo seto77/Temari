@@ -6,7 +6,13 @@
 # which breaks on non-UTF-8 Windows consoles (cp932).
 mkdocs>=1.6,<2
 mkdocs-material>=9.5,<10
-pymdown-extensions>=10.8,<11
+# Floor raised to 11.0.1 for GHSA-gm37-52c6-37mw (CVE-2026-67422): exponential
+# backtracking (ReDoS) in the caret/tilde/betterem/magiclink inline processors.
+# Only trusted authored Markdown is rendered here, at build time, so the practical
+# exposure is nil; the floor is raised anyway. The single breaking change in 11.0
+# is in pymdownx.b64, which is not used. Verified: --strict build output is
+# byte-identical to 10.21.3.
+pymdown-extensions>=11.0.1,<12
 # Localization: folder mode, English as the default locale served at the site
 # root, Japanese under /ja/, untranslated pages fall back to English.
 # The plugin is in maintenance mode, so pin an exact patch version.
