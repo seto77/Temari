@@ -6,6 +6,8 @@ authors:
   - family-names: Seto
     given-names: Yusuke
     email: seto77@gmail.com
+    # 260811Cl: 統合前の .github/CITATION.cff にだけ入っていた所属を引き継いだ
+    affiliation: "Osaka Metropolitan University, Japan"
 repository-code: "https://github.com/seto77/Temari"
 url: "https://seto77.github.io/Temari/"
 license: MIT
@@ -37,7 +39,10 @@ abstract: >-
   verified by the author; the bulk of the implementation was written by an AI
   assistant (Anthropic Claude) under that direction.
 references:
-  - type: dataset
+  # 260811Cl: CFF 1.2.0 の reference type に "dataset" は無い (正しくは "data")。
+  # 誤った型名だとファイル全体が schema 検証に落ち、GitHub の "Cite this repository" が出ない。
+  # ⚠ Zenodo 側の resource type は "Dataset" が正しい — 語彙が別なので合わせないこと。
+  - type: data
     title: >-
       Inner-shell ionization form factors F(s, E0) for STEM-EDX: 525 channels
       (K, L1-L3, M1-M5) computed with Temari
@@ -56,9 +61,13 @@ references:
       version instead. A byte-identical mirror is attached to the GitHub release
       dataset-v5.0.0; the archive is built deterministically so the two copies
       can be compared rather than merely trusted.
+  # ⚠ 260811Cl 訂正: 題名・巻号・DOI がまとめて誤っていた。
+  #   正しくは ADNDT **95**(6), 871-909 (2009), doi 10.1016/j.adt.2009.08.001 (出版社の書誌で照合)。
+  #   旧記載の doi 10.1016/j.adt.2010.06.001 は**バリウム同位体の発見**という無関係な論文を指す。
   - type: article
     title: >-
-      Cross sections for ionization of inner shells of atoms by electron impact
+      Cross sections for ionization of K, L and M shells of atoms by impact of
+      electrons and positrons with energies up to 1 GeV: Analytical formulas
     authors:
       - family-names: Bote
         given-names: David
@@ -69,10 +78,11 @@ references:
       - family-names: Powell
         given-names: Cedric J.
     journal: "Atomic Data and Nuclear Data Tables"
-    volume: 96
+    volume: 95
     start: 871
+    end: 909
     year: 2009
-    doi: "10.1016/j.adt.2010.06.001"
+    doi: "10.1016/j.adt.2009.08.001"
     notes: >-
       Source of the bundled absolute ionization cross-section parameterization
       (src/bote_salvat.json). See also the Erratum, At. Data Nucl. Data Tables

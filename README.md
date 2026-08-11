@@ -165,9 +165,11 @@ restrictively licensed codes into issues.
 
 ## Citing
 
-See [CITATION.cff](.github/CITATION.cff), or use GitHub's "Cite this
+See [CITATION.cff](CITATION.cff), or use GitHub's "Cite this
 repository". If you publish cross sections obtained through Temari, cite the
-Bote–Salvat papers below as well.
+Bote–Salvat papers below as well. If you publish numbers taken from a generated
+dataset, cite that dataset by its own version DOI — it is CC-BY-4.0 and is not
+covered by the MIT licence of this code.
 
 ## Credits and licensing
 
