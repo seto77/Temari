@@ -43,9 +43,10 @@ end
 fail!(f::Failures, msg) = (f.n += 1; push!(f.msgs, msg))
 
 "1 元素を計算して検査する"
-function check_one(z::Int, f::Failures; relativistic::Bool, exchange::Symbol)
+function check_one(z::Int, f::Failures; relativistic::Bool, exchange::Symbol,
+                   cfg::NumericsConfig = NumericsConfig())
     o = compute_fx(z; s_nodes = collect(0.0:0.1:6.0), relativistic = relativistic,
-                   exchange = exchange, verbose = false)
+                   exchange = exchange, verbose = false, cfg = cfg)
     return run_checks(o, z, f)
 end
 
@@ -117,9 +118,10 @@ end
 ⚠ これが無いと「全 PASS」は「検査が効いている」ことの証拠にならない。
 特に X10 は同じ Mott–Bethe 式で再構成するので、素の実行では厳密に 0 が出る。
 落とせることを見せて初めて配線検査として意味を持つ。"""
-function negative_test(z::Int; relativistic::Bool, exchange::Symbol)
+function negative_test(z::Int; relativistic::Bool, exchange::Symbol,
+                       cfg::NumericsConfig = NumericsConfig())
     base = compute_fx(z; s_nodes = collect(0.0:0.1:6.0), relativistic = relativistic,
-                      exchange = exchange, verbose = false)
+                      exchange = exchange, verbose = false, cfg = cfg)
     corrupt = Pair{String,Function}[
         "X4 (規格化補正を出力へ適用し忘れる)" =>
             d -> (d["f_x"] = Vector{Float64}(d["f_x"]) .* (1.0 + 1e-6); d),
@@ -163,27 +165,37 @@ end
 
 function main(args)
     zs = Int[]
+    skip = false
     for x in args
+        skip && (skip = false; continue)
+        # ⚠ 値を取るオプションの値を Z として拾わないこと (実際にやった事故)
+        x in ("--numerics", "--dt") && (skip = true; continue)
         startswith(x, "--") && continue
         push!(zs, parse(Int, x))
     end
     isempty(zs) && (zs = [6, 8, 14, 26, 29, 47, 74, 79])
     rel = !("--nonrel" in args)
     exch = "--xalpha" in args ? :xalpha : :kli
+    optval(n, d) = (i = findfirst(==(n), args);
+                    i !== nothing && i < length(args) ? args[i+1] : d)
+    # ⚠ 未知 ID は numerics_id が hard fail する。既定へ黙って落とさない
+    cfg = NumericsConfig(id = numerics_id(Symbol(optval("--numerics", "legacy_v5"))),
+                         dt = parse(Float64, optval("--dt", string(GRID_DT))))
 
     if "--negative" in args
-        return negative_test(zs[1]; relativistic = rel, exchange = exch)
+        return negative_test(zs[1]; relativistic = rel, exchange = exch, cfg = cfg)
     end
 
     println("f_x / f_e の QC — X3・X4・X8・X10・X15")
-    @printf("処方: %s + %s / s = 0..6 Å⁻¹ 61 点 / %d 元素\n\n",
+    @printf("処方: %s + %s / s = 0..6 Å⁻¹ 61 点 / %d 元素\n",
             rel ? "Dirac SCF" : "非相対論 SCF", String(exch), length(zs))
+    println("数値: ", cache_tag(cfg), "\n")
     f = Failures(0, String[])
     @printf("%4s %6s  %10s %10s %10s %10s %10s %6s\n",
             "Z", "N", "X3 raw", "X4 wire", "X10 MB", "X15c unit", "f_e(0) Å", "非単調")
     rows = []
     for z in zs
-        r = check_one(z, f; relativistic = rel, exchange = exch)
+        r = check_one(z, f; relativistic = rel, exchange = exch, cfg = cfg)
         push!(rows, r)
         @printf("%4d %6.1f  %10.2e %10.2e %10.2e %10.2e %10.4f %6d\n",
                 r.z, r.N, r.x3, r.x4, r.x10, r.x15c, r.fe0, r.nonmono)

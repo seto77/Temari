@@ -43,9 +43,13 @@ const S_NODES = Ref(collect(0.0:0.25:6.0))
 K_NODES() = 4.0 * pi .* S_NODES[] .* BOHR_ANG
 
 """f_x の総計算誤差契約 (計画書 §4.17、作者決定)。単位は**電子**。
-⚠ B_num は空間離散化だけの予算ではない — SCF 停止・参照・丸めと分け合う (§4.19)。"""
+
+⚠⚠ **格子の判定に B_num を当ててはいけない。**B_num は数値誤差の総額で、
+§4.19 の内訳では**空間離散化 ≤6e-08 / SCF 停止 ≤1e-08 / 参照 ≤1e-08 / 残りは丸め**
+と配分されている。B_num で判定すると 1.5 倍甘く、他の成分の分を先に使ってしまう。"""
 const T_COMP = 1.0e-7
-const B_NUM = T_COMP / 1.1                      # 9.09e-08 電子
+const B_NUM = T_COMP / 1.1                      # 9.09e-08 電子 (数値誤差の総額)
+const B_GRID = 6.0e-8                           # そのうち空間離散化への配分
 
 """採用格子の**封印判定に使う** s 節点 (dyadic 7681 点、計画書 §4.17)。
 
@@ -278,7 +282,10 @@ end
 
 1. **点ごとの符号付き比**から次数 p を測り、最後の 2 組で安定しているか見る
 2. **漸近域と確認できたときだけ** 同一 backend・同一方式の Richardson を当てる
-3. 最細格子との直接差は**補助指標**として併記する (真値扱いしない)
+3. 主判定は**三角不等式の上界** — 最細との差 + 最細段の残差推定。
+   ⚠ Richardson を全段に当てるのは「p が全段・全点で成り立つ」という強い仮定で、
+   Fe の最終 3 段では**符号反転が 21 % の点**に出ている (最大点は健全だが)。
+   上界形なら**外挿の仮定が最細段の 1 個だけ**に閉じる。実測では両者は 3 桁一致した
 
 ⚠⚠ **Richardson の帰属先を 1 段間違えた (260811Cl に実際にやった)。**
 `D = |f(h) − f(h/2)|` に対して
@@ -357,28 +364,38 @@ function grid_study(z::Int; relativistic::Bool=true, exchange::Symbol=:kli,
     D = [maximum(abs.(f[k] .- f[k+1])) for k in 1:(stages-1)]
     coarse(d) = isfinite(p_use) ? d / (1.0 - 2.0^(-p_use)) : NaN
     finer(d)  = isfinite(p_use) ? d / (2.0^p_use - 1.0) : NaN
-    @printf("\n  %-14s %13s %-11s %13s %8s %s\n",
-            "採用候補 dt", "Richardson", "式", "最細との差", "予算比", "判定")
+    # ⚠⚠ **主判定はこちら。**三角不等式から、点ごとに
+    #     |f(h) − f(∞)| ≤ |f(h) − f(h_min)| + |f(h_min) − f(∞)|
+    #   なので、**外挿の仮定は最細段の 1 個だけ**に閉じ込められる。
+    #   Richardson を全段に当てるのは「p が全段・全点で成り立つ」という強い仮定で、
+    #   Fe では最終 3 段で符号反転が 21 % の点に出ている (最大点は健全だが)。
+    e_fine = finer(D[end])
+    @printf("\n  %-14s %12s %12s %-11s %12s %8s %s\n",
+            "採用候補 dt", "上界", "Richardson", "式", "最細との差", "予算比", "判定")
     verdicts = NamedTuple[]
     for k in 1:stages
         rich, how = k < stages ? (coarse(D[k]), "D/(1−2⁻ᵖ)") : (finer(D[end]), "D/(2ᵖ−1)")
-        direct = maximum(abs.(f[k] .- f[end]))  # ⚠ 最細自身の誤差を含まない補助指標
-        # 主判定は Richardson。次数が不安定なら直接差 (保守側) へ落とす
-        est = p_stable && isfinite(rich) ? rich : max(rich, direct)
-        @printf("  dt=%-11.3e %13.3e %-11s %13.3e %8.2f %s\n",
-                dts[k], rich, how, direct, est / B_NUM, est <= B_NUM ? "✅" : "❌")
-        push!(verdicts, (dt=dts[k], rich=rich, direct=direct, est=est,
-                         ok=est <= B_NUM))
+        direct = maximum(abs.(f[k] .- f[end]))
+        bound = direct + e_fine             # 最細段の誤差だけが外挿由来
+        est = isfinite(bound) ? bound : rich
+        @printf("  dt=%-11.3e %12.3e %12.3e %-11s %12.3e %8.2f %s\n",
+                dts[k], bound, rich, how, direct, est / B_GRID,
+                est <= B_GRID ? "✅" : "❌")
+        push!(verdicts, (dt=dts[k], bound=bound, rich=rich, direct=direct, est=est,
+                         ok=est <= B_GRID))
     end
-    # 隣り合う 2 通りの推定が一致するかは p の妥当性の自己検査になる
+    println("  ⚠ 「上界」= 最細との差 + 最細段の残差推定。外挿の仮定は最細段だけ")
+    # ⚠ これは「独立な検算」ではない。**逐次差が全段で 1 本の冪則に乗るか**を
+    #   見ているだけで、p をその同じ対から取れば恒等的に 0 になる (3 段のときは
+    #   まさにそれが起きる)。4 段以上で、離れた段どうしを比べたときだけ意味を持つ
     if stages >= 3 && isfinite(p_use)
         agree = maximum(abs(finer(D[k]) / coarse(D[k+1]) - 1.0) for k in 1:(stages-2))
-        @printf("\n  自己検査: 同じ段の 2 通りの推定が一致するか — 最悪 |比−1| = %.2e\n",
-                agree)
+        @printf("\n  冪則の整合: 逐次差が 1 本の p に乗るか — 最悪 |比−1| = %.2e%s\n",
+                agree, stages == 3 ? "  ⚠ 3 段では同語反復 (p を同じ対から取っている)" : "")
     end
     @printf("  ⚠ 最細 dt=%.3e の行は p が正しいことを**その段では確認できていない**\n",
             dts[end])
-    println("  ⚠ B_num は空間離散化の専用予算ではない — SCF 停止・参照・丸めと分け合う")
+    println("  ⚠ 判定は B_grid = 6e-08 に対して。B_num 9.09e-08 で見ると 1.5 倍甘くなる")
     return (z=z, dts=dts, p=p_use, p_stable=p_stable, verdicts=verdicts, secs=secs)
 end
 

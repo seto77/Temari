@@ -104,6 +104,7 @@ const USAGE = """
                                    [--epsmax Ha] [--qmax a0inv] [--nqout n] [--json path]  # GOS 出口
                                    # E0 を取らない (GOS は E0 非依存)
   julia -t auto ionization.jl fx   Z [--s ...] [--nonrel] [--xalpha] [--json path]
+                                     [--numerics legacy_v5|dirac_true_midpoint_v1]
                                    # 既定は Dirac+KLI。--xalpha は旧処方の比較用
 
 opts: [--quick|--high] [--rel|--no-kdirac] [--nodscf] [--kli] [--frozen]
@@ -178,6 +179,11 @@ function main_fx(args)
     z = parse(Int, args[1])
     s_nodes = nothing
     json_path = nothing
+    # 260811Cl: 数値 backend。⚠ 既定は `legacy_v5` のまま — f_x の予算を満たすには
+    # `dirac_true_midpoint_v1` が要るが、**既定を動かすのは処方の変更**なので
+    # 採用を決めてから (計画書 §4.21)。fx 出口は get_neutral しか使わないので、
+    # EDX 出口と違って backend をそのまま通してよい
+    numerics = :legacy_v5
     i = 2
     while i <= length(args)
         if args[i] == "--s"
@@ -187,12 +193,15 @@ function main_fx(args)
             end
         elseif args[i] == "--json"
             json_path = args[i+1]; i += 1
+        elseif args[i] == "--numerics"
+            numerics = Symbol(args[i+1]); i += 1
         end
         i += 1
     end
     println("初回はこの元素の SCF を解くため時間がかかります...")
     o = compute_fx(z; s_nodes=s_nodes, relativistic=!("--nonrel" in args),
-                   exchange=parse_fx_exchange(args))
+                   exchange=parse_fx_exchange(args),
+                   cfg=NumericsConfig(id=numerics_id(numerics)))
     s = o["s_A_inv"]; fx = o["f_x"]; fe = o["f_e_A"]
     @printf("\n%10s  %14s  %14s\n", "s [1/Å]", "f_x [e]", "f_e [Å]")
     for i in 1:max(1, length(s) ÷ 15):length(s)

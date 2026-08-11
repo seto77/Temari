@@ -123,17 +123,26 @@ fe_zero_limit_a0(m2::Float64) = m2 / 3.0
   "m4_a0four"        M₄ = 4π∫r⁶ρ dr [a₀⁴]。小 K 展開の 2 次項
   "n_electrons_raw"  規格化補正**前**の ∫4πr²ρ dr。Z との差が格子品質の指標
   "norm_correction"  掛けた一様補正 −1 (期待値 +Z×1.67e-7 / Z ≈ 1.67e-7)
+
+## `cfg` — 数値 backend と格子 (260811Cl 追加)
+
+f_x/f_e の出口は **`get_neutral` の ρ しか使わない**ので、EDX 出口と違って
+束縛始状態の穴 (`prepare_channel` の docstring) を踏まない。したがって
+**`dirac_true_midpoint_v1` をそのまま通してよい**。
+⚠ 誤差予算 T_comp = 1e-7 電子を満たすには legacy では届かず、この経路が要る
+(計画書 §4.17・§4.21)。⚠ 解決済み設定は出力の `settings.numerics_config` に残す。
 """
 function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
                     relativistic::Bool=true, x_alpha::Float64=X_ALPHA,
-                    exchange::Symbol=:xalpha, verbose::Bool=true)
+                    exchange::Symbol=:xalpha, verbose::Bool=true,
+                    cfg::NumericsConfig=NumericsConfig())
     s_nodes === nothing && (s_nodes = collect(0.0:0.1:6.0))
     isempty(s_nodes) && error("s_nodes は 1 点以上")
     all(isfinite, s_nodes) || error("s_nodes は有限値")
     all(>=(0.0), s_nodes) || error("s_nodes は 0 以上")
     issorted(s_nodes) || error("s_nodes は昇順で")
     a = get_neutral(z; relativistic=relativistic, x_alpha=x_alpha,
-                    exchange=exchange)
+                    exchange=exchange, cfg=cfg)
     a.converged || error("Z=$z の中性 SCF が未収束")
     K = 4.0 * pi .* s_nodes .* BOHR_ANG            # s [Å⁻¹] → K [a₀⁻¹] (F(s) と同規約)
     # 台形則規格化のバイアスを除く (上のコメント参照)。一様スケールなので形は不変
@@ -159,7 +168,11 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
         "exit" => "scattering-factor", "z" => z,
         "settings" => Dict{String,Any}(
             "relativistic" => relativistic, "x_alpha" => x_alpha,
-            "scf_exchange" => String(exchange)),
+            "scf_exchange" => String(exchange),
+            # ⚠ ID だけでは provenance が不完全。**実際に解いた原子の cfg** を書く
+            # (引数の cfg ではない — キャッシュから来た原子と食い違えばそれが事故)
+            "numerics_id" => String(Symbol(a.cfg.id)),
+            "numerics_config" => cache_tag(a.cfg)),
         "n_electrons_raw" => nel_raw,      # 補正前の Simpson 積分 (格子品質の指標)
         "n_electrons_scf" => a.nel, "norm_correction" => corr - 1.0,
         "s_A_inv" => s_nodes, "q_a0inv" => K,

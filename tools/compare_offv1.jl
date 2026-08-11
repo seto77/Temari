@@ -73,10 +73,11 @@ function read_offv1(path::String)
 end
 
 "1 元素を比較する。⚠ 参照値は返さず、差と判定だけを返す"
-function compare_one(z::Int, ref, ; relativistic::Bool, exchange::Symbol)
+function compare_one(z::Int, ref, ; relativistic::Bool, exchange::Symbol,
+                     cfg::NumericsConfig = NumericsConfig())
     stl, fref = ref
     o = compute_fx(z; s_nodes = copy(stl), relativistic = relativistic,
-                   exchange = exchange, verbose = false)   # ★同じ格子で直接評価
+                   exchange = exchange, verbose = false, cfg = cfg)  # ★同じ格子で直接評価
     fx = Vector{Float64}(o["f_x"])
     d = abs.(fx .- fref)
     gate = GATE_ABS .+ GATE_REL .* abs.(fref)
@@ -104,6 +105,8 @@ function main(args)
         if a == "--z" && i < length(args)
             r = split(args[i+1], ':'); i += 1
             append!(zs, parse(Int, r[1]):parse(Int, r[end]))
+        elseif a in ("--numerics", "--dt")
+            i += 1                       # ⚠ 値を Z として拾わない
         elseif !startswith(a, "--")
             push!(zs, parse(Int, a))
         end
@@ -112,6 +115,10 @@ function main(args)
     isempty(zs) && (zs = [6, 8, 14, 26, 29, 47, 74, 79])
     rel = !("--nonrel" in args)
     exch = "--xalpha" in args ? :xalpha : :kli
+    optval(n, d) = (j = findfirst(==(n), args);
+                    j !== nothing && j < length(args) ? args[j+1] : d)
+    cfg = NumericsConfig(id = numerics_id(Symbol(optval("--numerics", "legacy_v5"))),
+                         dt = parse(Float64, optval("--dt", string(GRID_DT))))
 
     ref = read_offv1(OFFV1_PATH)
     sha = bytes2hex(open(sha256, OFFV1_PATH))
@@ -120,6 +127,7 @@ function main(args)
     println("参照: Olukayode, Froese Fischer & Volkov, Acta Cryst. A79, 59-79 (2023) sup4 Table S3")
     println("参照ファイル SHA-256: ", sha)
     @printf("我々の処方: %s + %s\n", rel ? "Dirac SCF" : "非相対論 SCF", String(exch))
+    println("数値: ", cache_tag(cfg))
     @printf("★事前固定のゲート: |Δf_x| ≤ %.0e + %.0e·|f_x|  (結果を見る前に決めた)\n\n",
             GATE_ABS, GATE_REL)
 
@@ -128,7 +136,7 @@ function main(args)
     rows = []
     for z in zs
         haskey(ref, z) || (println("  Z=$z は参照に無い"); continue)
-        r = compare_one(z, ref[z]; relativistic = rel, exchange = exch)
+        r = compare_one(z, ref[z]; relativistic = rel, exchange = exch, cfg = cfg)
         push!(rows, r)
         bandstr = r.n_fail == 0 ? "—" :
                   @sprintf("%.2f–%.2f", r.band[1], r.band[2])
