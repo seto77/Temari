@@ -56,10 +56,19 @@ function tolerance_study(z::Int; relativistic::Bool=true, exchange::Symbol=:kli,
                                  dt = dt, numerics = numerics, max_iter = max_iter,
                                  tol_rho = SCF_TOL_RHO * fac,
                                  tol_e = SCF_TOL_E * fac)
-        # ★ hard fail: 未収束を「締めても動かない」の証拠にしてはいけない
-        a.converged ||
-            error("Z=$z dt=$dt tol×$(fac) が max_iter=$max_iter 以内に収束しない " *
-                  "— この水準は判定に使えない")
+        # ⚠⚠ **未収束の水準は捨てる。ただし走を止めない** (260811Cl 修正)。
+        #   最初は error にしていたが、それだと**最も厳しい水準が届かないだけで、
+        #   収束した水準どうしの比較まで巻き添えで失われる** — 反復上限に当たるのは
+        #   いちばん締めた所なので、実質いつも全損になる。
+        #   ⚠ 「未収束を収束の証拠にしない」規律は、比較から外すことで守る
+        if !a.converged
+            # ⚠ @printf の書式文字列は**リテラルでなければならない** (`*` で連結すると
+            #   マクロ展開時に落ちる)。同じ誤りを 2 回踏んだので 1 行に収める
+            @printf("  [Z=%d] tol×%-6.0e  SCF %6.1f s  ⚠ max_iter=%d 以内に未収束 — 判定から外す\n",
+                    z, fac, t, max_iter)
+            flush(stdout)
+            continue
+        end
         fx = xray_form_factor(a.r, a.dt, a.rho, K)
         fx .*= a.nel / fx[1]
         res = fixed_point_residual(a)           # ⚠ unmixed。反復差ではない
@@ -70,15 +79,19 @@ function tolerance_study(z::Int; relativistic::Bool=true, exchange::Symbol=:kli,
                 z, fac, t, res.d_rho, imp.dfx_abs)
         flush(stdout)
     end
+    length(rows) >= 2 ||
+        error("Z=$z: 収束した水準が $(length(rows)) 個しかない — 比較が成立しない")
 
     @printf("\n=== SCF 停止閾値  Z=%d  %s + %s  numerics=%s  dt=%.3e ===\n", z,
             relativistic ? "Dirac" : "非相対論", String(exchange), String(numerics), dt)
     @printf("評価点 %d 節点 / ゲート = %.3e 電子 (B_num の 10 %%)\n",
             length(nodes), B_SCF)
+    length(rows) < levels &&
+        @printf("⚠ 収束したのは %d / %d 水準 (未収束は除外済み)\n", length(rows), levels)
     @printf("\n  %-12s %14s %14s %10s %s\n",
             "tol", "次水準との差", "R1 (unmixed)", "予算比", "判定")
     verdicts = NamedTuple[]
-    for j in 1:(levels-1)
+    for j in 1:(length(rows)-1)
         d = maximum(abs.(rows[j].fx .- rows[j+1].fx))
         @printf("  %-12.2e %14.3e %14.3e %10.2f %s\n",
                 rows[j].tol_rho, d, rows[j].r1, d / B_SCF, d <= B_SCF ? "✅" : "❌")
