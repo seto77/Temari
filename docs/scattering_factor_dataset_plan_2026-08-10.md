@@ -956,8 +956,12 @@ scale されるだけで、`f_x(0)=N` への規格化補正が丸ごと打ち消
 
 | ファイル | SHA-256 |
 |---|---|
-| `bitident_before_v3.txt` (v3 処方 5ch) | `89fc1f6749a1c2b3f1373f10ca8a759e4b06868e245dc647c98dcf0167d03039` |
-| `bitident_before_v4.txt` (v4 処方 7ch) | `2d0aeb0c12339025f1fea00ae1d430f0baf256dc57e8772498bafa941f5f137c` |
+| `bitident_before_v3.txt` (v3 処方 5ch、4761 B / 138 行) | `89fc1f6749a1c2b3f1373f10ca8a759e4b06868e245dc647c98dcf0167d03039` |
+| `bitident_before_v4.txt` (v4 処方 7ch、6720 B / 204 行) | `5c884abf22b8b25b026594a27859f320396f3bc1230a577b06bd7f1193a72d1c` |
+
+⚠⚠ **v4 のハッシュは一度誤って記録した** (`2d0aeb0c…`)。**背景タスクの完了通知を
+待たずに `sha256sum` を走らせ、書き込み途中の 4788 バイトの状態をハッシュしていた**。
+完全なファイルは 6720 バイト。⇒ **背景タスクの生成物は、完了通知の前に読まない。**
 
 ### 4.19 go/no-go 実験 — M 単独では届かない。方針が確定した (2026-08-11)
 
@@ -1109,6 +1113,70 @@ H/N を高次化しても **f_x 自身が 2 次求積なら要因差に Q の誤
 4. SCF tolerance を observable 安定性で $B_{num}$ の 10 % 以下に制限する
 5. 全 production Z, s で採用格子を認証する
 6. **H/N は全要因実験で寄与を測るが、予算に必要と分かるまで出荷経路へ入れない**
+
+### 4.20 `dirac_true_midpoint_v1` を実装した (2026-08-11)
+
+#### 入れたもの
+
+| 箇所 | 内容 |
+|---|---|
+| `l1_atomic.jl` | `@enum NumericsID legacy_v5 dirac_true_midpoint_v1` |
+| 同 | **`NumericsConfig`** (id / dt / r0 / rmax / tol_rho / tol_e) |
+| 同 | `cache_tag(cfg)` — ⚠ float は **round-trip `repr`**、enum は**序数でなく名前** |
+| 同 | **10 引数版 `_dirac_rk4_step`** (中点 V を引数で受け取る) |
+| 同 | `_dirac_shoot` / `_dirac_seg` / `_dirac_gf` に `vm` を追加 |
+| 同 | `SCFAtom` に `cfg::NumericsConfig` |
+| `l5_channel.jl` | `get_neutral` / `get_ion` / `build_ion` が `cfg` を受け、キーに `cache_tag(cfg)` |
+
+⚠ **既存の 9 引数 `_dirac_rk4_step` は 1 文字も触っていない** — 共通化のために
+legacy を新しい stencil へ載せ替えると「式は同じだがビット列が変わる」事故が起きる。
+legacy 経路は今までどおり 9 引数版へ落ちる。
+
+⚠ **分岐は型パラメータ `VM` でコンパイル時に畳む** (`VM === Nothing`)。
+セルループ内に実行時分岐が残らない。
+
+⚠ **中点配列は固有値反復の外で 1 回だけ**作る。⚠ `r2` (切り詰めた格子) 用は
+**別に作り直す** — `vm` を先頭から流用すると `n2 < n` のとき末尾の区間がずれる。
+
+⚠⚠ **キャッシュキーは resolved config からのみ作る。**「キーは既定値を参照、
+計算は kwargs」という二重経路は黙って乖離する (codex blocking 指摘)。
+`build_ion` は**種の中性原子も同じ cfg で引く**。
+
+#### 検証 (全部通過)
+
+| 検証 | 結果 |
+|---|---|
+| **ビット同一性 v3 5ch** | ✅ 変更前後で同一 `89fc1f67…` |
+| **ビット同一性 v4 7ch** | ✅ 同一 `5c884abf…` |
+| 単体試験 | ✅ production 2.00 / 真の中点 **3.99** |
+| **production 経路が shadow 実験を再現** | ✅ legacy 6.9957e-07 / 真の中点 **4.2192e-08** |
+| **キャッシュ隔離 (両順序)** | ✅ legacy→true と true→legacy で一致 |
+| SCFAtom serialize round-trip | ✅ cfg・rho とも保存 |
+| 異なる dt / numerics が別タグ | ✅ |
+| 未知 ID は hard fail | ✅ |
+| **selftest** | ✅ ALL PASS (188 s) |
+| **refcheck** | ✅ WORST 9.044e-08 = **基準値のまま** |
+
+⚠ キャッシュキーが変わったので既存の SCF キャッシュは全 miss するが、
+上のビット同一性が**再計算結果が同一であること**を保証している。
+
+#### ⚠ この作業で見つけた自分の欠陥 2 つ
+
+1. **記録したハッシュが不完全ファイルのものだった** — 背景タスクの**完了通知を
+   待たずに** `sha256sum` を実行し、書き込み途中 (4788 B) をハッシュしていた。
+   ⇒ **背景タスクの生成物は完了通知の前に読まない。**
+2. **`Meta.parseall` は構文エラーを投げずに `Expr(:error, …)` として返す** ので、
+   docstring 内の `$…$` (Julia の文字列補間と解釈される) を「parse OK」と
+   報告していた。⇒ **構文確認は `include` で行う。**
+
+#### 次の作業 (未実施)
+
+- **`gen_production.jl` に `numerics=:legacy_v5` を明示する。**
+  ⚠ `compute_channel` → `ensure_converged` / `get_neutral` / `get_ion` の 4 箇所への
+  配線が要る。**将来の既定変更に対する防御であって現在の正しさの問題ではない**ので、
+  検証済みの変更と混ぜず独立に行う
+- C/Ne/Fe/Au で dt0, dt0/2, dt0/4, dt0/8 を測る (§4.19 の手順 2)
+- SCF tolerance を observable 安定性で決める (同 4)
 
 ## 5. 収録範囲
 

@@ -551,15 +551,19 @@ end
 
 "内殻 (n,l) から電子を 1 個抜いた配置の SCF (relaxed core-hole。j は区別しない)"
 function build_ion(z::Int, shell::Tuple{Int,Int}; relativistic::Bool=false,
-                   x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha, kw...)
+                   x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
+                   cfg::NumericsConfig=NumericsConfig(), kw...)
     t0 = time()
+    # ⚠ 種にする中性原子も**同じ config** で引く。ここで既定に落とすと、
+    #   別の格子・別の数値で解いた密度を種にしてしまう
     neutral = get_neutral(z; relativistic=relativistic, x_alpha=x_alpha,
-                          exchange=exchange)
+                          exchange=exchange, cfg=cfg)
     occ = [(n, l, q - ((n, l) == shell ? 1.0 : 0.0)) for (n, l, q) in ORBITALS[z]]
     nel = sum(q for (_, _, q) in occ)
     # latter_charge=2 は :xalpha 用。:kli では使われず、尾は Z−N+1 = 2 が物理から出る
     a = SCFAtom(z, occ; latter_charge=2.0, relativistic=relativistic, x_alpha=x_alpha,
-                exchange=exchange,
+                exchange=exchange, numerics=Symbol(cfg.id), dt=cfg.dt, r0=cfg.r0,
+                rmax=cfg.rmax, tol_rho=cfg.tol_rho, tol_e=cfg.tol_e,
                 rho_init=neutral.rho .* (nel / neutral.nel), kw...)
     @printf("[SCF%s] ion Z=%d hole@%s: %.0fs converged=%s\n",
             _scf_tag(a), z, shell, time() - t0, a.converged)
@@ -573,16 +577,19 @@ end
 同じ鍵にすると、片方で作った密度をもう片方が黙って読んで結果だけが狂う。
 交換処方も同じ理由で鍵に入れる (`xc_tag`)。"""
 get_neutral(z::Int; relativistic::Bool=false, x_alpha::Float64=X_ALPHA,
-            exchange::Symbol=:xalpha) =
+            exchange::Symbol=:xalpha, cfg::NumericsConfig=NumericsConfig()) =
     disk_cached(() -> build_neutral(z; relativistic=relativistic, x_alpha=x_alpha,
-                                    exchange=exchange),
-                (relativistic ? "nrel" : "n", z, xc_tag(x_alpha, exchange)))
+                                    exchange=exchange, numerics=Symbol(cfg.id),
+                                    dt=cfg.dt, r0=cfg.r0, rmax=cfg.rmax,
+                                    tol_rho=cfg.tol_rho, tol_e=cfg.tol_e),
+                (relativistic ? "nrel" : "n", z, xc_tag(x_alpha, exchange),
+                 cache_tag(cfg)))
 get_ion(z::Int, shell; relativistic::Bool=false, x_alpha::Float64=X_ALPHA,
-        exchange::Symbol=:xalpha) =
+        exchange::Symbol=:xalpha, cfg::NumericsConfig=NumericsConfig()) =
     disk_cached(() -> build_ion(z, shell; relativistic=relativistic, x_alpha=x_alpha,
-                                exchange=exchange),
+                                exchange=exchange, cfg=cfg),
                 (relativistic ? "irel" : "i", z, shell[1], shell[2],
-                 xc_tag(x_alpha, exchange)))
+                 xc_tag(x_alpha, exchange), cache_tag(cfg)))
 
 """SCF の収束を保証 (未収束なら混合を弱めて再試行、それでも駄目なら停止)。
 

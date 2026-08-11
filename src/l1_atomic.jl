@@ -490,6 +490,62 @@ xa_tag(a::Float64) = "xa" * string(round(Int, a * 100))
 別処方で作った原子を黙って読む (260807Cl に SCF 種別で実際にやった)。"""
 xc_tag(a::Float64, exchange::Symbol) = exchange === :kli ? "kli" : xa_tag(a)
 
+# ==== 260811Cl 追加: 数値 backend の版付けと resolved config ================
+# 出荷済み F v5 は **legacy_v5** で凍結する。新しい数値方式は別 ID を名乗り、
+# v5 の名前で出さない (codex 助言 2026-08-11)。
+#
+# ⚠⚠ **`high_order_v1` と呼ばない。**中点を真値にしても full SCF は実測で
+#   **2 次のまま**である (H の累積台形と N の trapz 規格化が残るため)。
+#   名前と保証を一致させる ⇒ `dirac_true_midpoint_v1`。
+#   詳細と実測は `docs/scattering_factor_dataset_plan_2026-08-10.md` §4.18–4.19。
+
+"""数値 backend の版。**意味は公開後に変更しない** (別 ID を作る)。
+
+`legacy_v5`                出荷済み F v5 の数値。束縛 Dirac RK4 は中点 V を
+                           端点平均 `(va+vb)/2` で代用する
+`dirac_true_midpoint_v1`   束縛 Dirac RK4 の中点 V を `pot_V(r_m)` の真値にする。
+                           ⚠ **これだけでは 4 次にならない** — 実測で p=2.00 のまま
+                           (誤差係数が 9.5〜16.6 倍下がるだけ)"""
+@enum NumericsID legacy_v5 dirac_true_midpoint_v1
+
+"""SCF を実際に解いた設定。**provenance とキャッシュキーの唯一の出所**。
+
+⚠⚠ **キャッシュキーを既定値から作ってはいけない** (codex 指摘 2026-08-11)。
+「キーは default を参照し、計算は kwargs を使う」という二重経路は、
+どちらかが変わった瞬間に**黙って乖離する**。両方をこの 1 つの object から作る。
+
+⚠ 数値 ID だけでは provenance が不完全である — dt を変える運用に入る以上、
+格子と収束閾値も同じ object が持つ。"""
+struct NumericsConfig
+    id::NumericsID
+    dt::Float64
+    r0::Float64
+    rmax::Float64
+    tol_rho::Float64
+    tol_e::Float64
+end
+
+NumericsConfig(; id::NumericsID=legacy_v5, dt::Float64=GRID_DT, r0::Float64=GRID_R0,
+               rmax::Float64=SCF_RMAX, tol_rho::Float64=SCF_TOL_RHO,
+               tol_e::Float64=SCF_TOL_E) =
+    NumericsConfig(id, dt, r0, rmax, tol_rho, tol_e)
+
+"Symbol を受け取る境界用 (未知の ID は hard fail。黙って既定へ落とさない)"
+function numerics_id(s::Symbol)
+    s === :legacy_v5 && return legacy_v5
+    s === :dirac_true_midpoint_v1 && return dirac_true_midpoint_v1
+    error("未知の numerics ID: $s (legacy_v5 | dirac_true_midpoint_v1)")
+end
+
+"""キャッシュキー用の canonical string。
+
+⚠ **float は round-trip `repr` で書く** — 丸めた表示にすると、異なる dt が
+同じタグに潰れて別設定の原子を黙って読むことになる (xc_tag と同じ事故)。
+⚠ enum の**序数ではなく名前**を使う (将来 enum の順序を変えてもキーが動かない)。"""
+cache_tag(c::NumericsConfig) =
+    string("num=", c.id, ";dt=", repr(c.dt), ";r0=", repr(c.r0), ";rmax=", repr(c.rmax),
+           ";trho=", repr(c.tol_rho), ";te=", repr(c.tol_e))
+
 """r·V(r) を ln r でスプラインし、グリッド外は漸近値 asym に落とす callable
 (Python 版 _rv_spline)。V でなく r·V を補間するのは原点発散を避けるため。"""
 struct RvSpline
@@ -534,6 +590,8 @@ mutable struct SCFAtom
                              # (:xalpha は ρ の汎関数なので必要時に組み直せる)
     z_asym::Float64          # V_eff の尾 −z_asym/r。:xalpha は Latter 電荷、
                              # :kli は物理が出す Z−N+1 (中性 1、core-hole 2)
+    cfg::NumericsConfig      # 260811Cl: **実際に解いた数値設定**。provenance と
+                             # キャッシュキーの唯一の出所 (§4.19)
 end
 
 """(n, l, q) の占有を Dirac の (n, l, κ, q) へ分ける。
@@ -564,8 +622,13 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                  tol_e::Float64=SCF_TOL_E, max_iter::Int=SCF_MAX_ITER,
                  rho_init::Union{Nothing,Vector{Float64}}=nothing,
                  relativistic::Bool=false, c::Float64=C_LIGHT,
-                 x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha)
+                 x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
+                 numerics::Symbol=:legacy_v5)
     exchange in (:xalpha, :kli) || error("unknown exchange $exchange (:xalpha|:kli)")
+    # ⚠⚠ **解決済みの kwargs から config を 1 つ作り、計算にもキー生成にも
+    #   これだけを使う。**「キーは既定値を参照、計算は kwargs」の二重経路は
+    #   どちらかが変わった瞬間に黙って乖離する (codex 助言 2026-08-11)
+    cfg = NumericsConfig(numerics_id(numerics), dt, r0, rmax, tol_rho, tol_e)
     n = ceil(Int, (log(rmax) - log(r0)) / dt)          # numpy.arange と同じ点数
     t = log(r0) .+ dt .* (0:n-1)
     r = exp.(t)
@@ -638,7 +701,8 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                         E, G, F = dirac_orbital_on_grid(pot, z, r, dt;
                                                         kappa=kap,
                                                         n_nodes=nq - lq - 1,
-                                                        e_lo=lo, e_hi=hi, c=c)
+                                                        e_lo=lo, e_hi=hi, c=c,
+                                                        numerics=cfg.id)
                         abs(E - hi) < 1e-5 * max(1.0, abs(hi)) &&
                             error("hint bracket too low")
                         solved = true
@@ -648,7 +712,8 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                 end
                 if !solved
                     E, G, F = dirac_orbital_on_grid(pot, z, r, dt; kappa=kap,
-                                                    n_nodes=nq - lq - 1, c=c)
+                                                    n_nodes=nq - lq - 1, c=c,
+                                                    numerics=cfg.id)
                 end
                 eps_now_k[kkey] = E
                 acc_e[key] = get(acc_e, key, 0.0) + q * E
@@ -735,7 +800,7 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                 z, drho, de)
     end
     return SCFAtom(z, occ, r, dt, rho, orbs, eps_now, converged, nel, relativistic,
-                   x_alpha, exchange, vx_kli, z_asym)
+                   x_alpha, exchange, vx_kli, z_asym, cfg)
 end
 
 """収束密度から束縛軌道用ポテンシャル V_eff を作る。
@@ -909,15 +974,51 @@ end
             F0 + h / 6.0 * (k1F + 2k2F + 2k3F + k4F))
 end
 
-"外向き RK4 で大成分の節数を数える (節定理は Dirac でも大成分に成立)"
+"""同じ 1 ステップだが、**中点 V を引数で受け取る** (260811Cl 追加)。
+
+`dirac_true_midpoint_v1` 用。連続状態側の `_dirac_rk4_c` が既にこの形なので揃えた。
+
+⚠ **上の 9 引数版は 1 文字も変えていない。**共通化のために legacy をこちらへ
+載せ替えると「式は同じだがビット列が変わる」事故が起きる (codex 助言)。
+legacy 経路は今までどおり 9 引数版へ落ちる。
+
+⚠ 端点平均 `(va+vb)/2` は真の中点 V(r_m) に対して h²V''/8 の誤差を持つので、
+式が RK4 でも**大域 2 次に落ちる**。実測は
+`docs/scattering_factor_dataset_plan_2026-08-10.md` §4.18 (単体で 2.00 → 3.99)。"""
+@inline function _dirac_rk4_step(ra::Float64, rb::Float64, va::Float64, vm::Float64,
+                                 vb::Float64, E::Float64, G0::Float64, F0::Float64,
+                                 kap::Float64, c::Float64)
+    rhsG(rr, vv, G, F) = -(kap / rr) * G + (2.0 * c + (E - vv) / c) * F
+    rhsF(rr, vv, G, F) = (kap / rr) * F - ((E - vv) / c) * G
+    h = rb - ra
+    rm = (ra + rb) / 2.0
+    k1G = rhsG(ra, va, G0, F0);              k1F = rhsF(ra, va, G0, F0)
+    g2 = G0 + h / 2.0 * k1G;  f2 = F0 + h / 2.0 * k1F
+    k2G = rhsG(rm, vm, g2, f2);              k2F = rhsF(rm, vm, g2, f2)
+    g3 = G0 + h / 2.0 * k2G;  f3 = F0 + h / 2.0 * k2F
+    k3G = rhsG(rm, vm, g3, f3);              k3F = rhsF(rm, vm, g3, f3)
+    g4 = G0 + h * k3G;        f4 = F0 + h * k3F
+    k4G = rhsG(rb, vb, g4, f4);              k4F = rhsF(rb, vb, g4, f4)
+    return (G0 + h / 6.0 * (k1G + 2k2G + 2k3G + k4G),
+            F0 + h / 6.0 * (k1F + 2k2F + 2k3F + k4F))
+end
+
+"""外向き RK4 で大成分の節数を数える (節定理は Dirac でも大成分に成立)。
+
+`vm` は中点 V の配列 (`dirac_true_midpoint_v1` 用)。⚠ **`nothing` なら legacy と
+完全に同じ 9 引数版へ落ちる。**型パラメータ `VM` で分岐させているので、
+`VM === Nothing` はコンパイル時に畳まれ**セルループ内に分岐は残らない**。"""
 function _dirac_shoot(E::Float64, r::Vector{Float64}, v::Vector{Float64},
-                      kap::Float64, c::Float64, gam::Float64, z::Int)
+                      kap::Float64, c::Float64, gam::Float64, z::Int,
+                      vm::VM=nothing) where {VM}
     # 節数だけが要るので波動関数の配列は持たず、現在値のスカラー対で進める
     g = r[1]^gam
     f = g * c * (gam + kap) / z                # 点核極限の比 F/G = c(γ+κ)/Z
     nodes = 0
     @inbounds for i in 1:length(r)-1
-        gn, fn = _dirac_rk4_step(r[i], r[i+1], v[i], v[i+1], E, g, f, kap, c)
+        gn, fn = VM === Nothing ?
+            _dirac_rk4_step(r[i], r[i+1], v[i], v[i+1], E, g, f, kap, c) :
+            _dirac_rk4_step(r[i], r[i+1], v[i], vm[i], v[i+1], E, g, f, kap, c)
         if g != 0.0 && gn != 0.0 && (g < 0.0) != (gn < 0.0)   # 符号は直接比較
             nodes += 1
         end
@@ -930,10 +1031,15 @@ function _dirac_shoot(E::Float64, r::Vector{Float64}, v::Vector{Float64},
     return nodes
 end
 
-"(G, F) を格子 idx0 → idx1 へ積分 (direction: 外向き +1 / 内向き −1)"
+"""(G, F) を格子 idx0 → idx1 へ積分 (direction: 外向き +1 / 内向き −1)。
+
+`vm2` は**区間 i と i+1 の間**の中点 V (`vm2[min(i,j)]` で引く)。⚠ 内向きでも
+中点の位置は同じなので、区間番号で引けば向きに依らず正しい値になる。
+⚠ `nothing` なら legacy と完全に同じ 9 引数版へ落ちる (分岐はコンパイル時に畳まれる)。"""
 function _dirac_seg(r2::Vector{Float64}, v2::Vector{Float64}, E::Float64,
                     kap::Float64, c::Float64, idx0::Int, idx1::Int,
-                    G0::Float64, F0::Float64, direction::Int)
+                    G0::Float64, F0::Float64, direction::Int,
+                    vm2::VM=nothing) where {VM}
     n2 = length(r2)
     G = zeros(n2)
     F = zeros(n2)
@@ -941,8 +1047,10 @@ function _dirac_seg(r2::Vector{Float64}, v2::Vector{Float64}, E::Float64,
     rng = direction > 0 ? (idx0:idx1-1) : (idx0:-1:idx1+1)
     @inbounds for i in rng
         j = i + direction
-        G[j], F[j] = _dirac_rk4_step(r2[i], r2[j], v2[i], v2[j], E,
-                                     G[i], F[i], kap, c)
+        G[j], F[j] = VM === Nothing ?
+            _dirac_rk4_step(r2[i], r2[j], v2[i], v2[j], E, G[i], F[i], kap, c) :
+            _dirac_rk4_step(r2[i], r2[j], v2[i], vm2[min(i, j)], v2[j], E,
+                            G[i], F[i], kap, c)
     end
     return G, F
 end
@@ -955,15 +1063,20 @@ end
 Dirac SCF が Schrödinger SCF へ落ちることの検証 (selftest T13) に使う。"""
 function _dirac_gf(pot_V, z::Int, kappa::Int, n_nodes::Int, r0::Float64,
                    rmax::Float64, dt::Float64, tol::Float64,
-                   e_lo::Union{Nothing,Float64}, e_hi::Float64, c::Float64)
+                   e_lo::Union{Nothing,Float64}, e_hi::Float64, c::Float64;
+                   numerics::NumericsID=legacy_v5)
     n = ceil(Int, (log(rmax) - log(r0)) / dt)
     t = log(r0) .+ dt .* (0:n-1)
     r = exp.(t)
     v = pot_V.(r)
     kap = Float64(kappa)
     gam = sqrt(kap * kap - (z / c)^2)          # 原点冪 G ~ r^γ (点核)
+    # ⚠ 中点配列は**固有値反復の外で 1 回だけ**作る (反復ごとに spline を
+    #   呼び直すと V がエネルギー非依存なのに無駄な評価が入る)
+    vm = numerics === legacy_v5 ? nothing :
+         pot_V.((@view(r[1:end-1]) .+ @view(r[2:end])) ./ 2.0)
 
-    shoot(E) = _dirac_shoot(E, r, v, kap, c, gam, z)
+    shoot(E) = _dirac_shoot(E, r, v, kap, c, gam, z, vm)
     lo = e_lo === nothing ? -1.2 * z * z - 20.0 : e_lo
     E = bisect_nodes(shoot, lo, e_hi, n_nodes, tol)
 
@@ -974,6 +1087,10 @@ function _dirac_gf(pot_V, z::Int, kappa::Int, n_nodes::Int, r0::Float64,
     t2 = log(r0) .+ dt .* (0:n2-1)
     r2 = exp.(t2)
     v2 = pot_V.(r2)
+    # ⚠ r2 は r を切り詰めた格子なので、中点も**この格子に対して**作り直す
+    #   (vm を先頭から流用すると、n2 < n のとき末尾の区間がずれる)
+    vm2 = numerics === legacy_v5 ? nothing :
+          pot_V.((@view(r2[1:end-1]) .+ @view(r2[2:end])) ./ 2.0)
     i_t = 3
     @inbounds for i in n2:-1:1                 # 古典的許容域 V<E の右端
         if v2[i] < E
@@ -987,10 +1104,10 @@ function _dirac_gf(pot_V, z::Int, kappa::Int, n_nodes::Int, r0::Float64,
 
     G0 = r2[1]^gam
     F0 = G0 * c * (gam + kap) / z
-    Gout, Fout = _dirac_seg(r2, v2, E, kap, c, 1, i_m, G0, F0, +1)
+    Gout, Fout = _dirac_seg(r2, v2, E, kap, c, 1, i_m, G0, F0, +1, vm2)
     Ge = 1e-30                                 # 内向きの種
     Fe = -lam * Ge / (2.0 * c + E / c)         # 遠方減衰解の比 F/G = −λ/(2c+E/c)
-    Gin, Fin = _dirac_seg(r2, v2, E, kap, c, n2, i_m, Ge, Fe, -1)
+    Gin, Fin = _dirac_seg(r2, v2, E, kap, c, n2, i_m, Ge, Fe, -1, vm2)
     scale = Gin[i_m] != 0 ? Gout[i_m] / Gin[i_m] : 1.0
     G = vcat(Gout[1:i_m-1], Gin[i_m:end] .* scale)
     F = vcat(Fout[1:i_m-1], Fin[i_m:end] .* scale)
@@ -1050,9 +1167,11 @@ function dirac_orbital_on_grid(pot_V, z::Int, r_full::Vector{Float64}, dt::Float
                                kappa::Int=-1, n_nodes::Int=0,
                                tol::Float64=EIG_TOL,
                                e_lo::Union{Nothing,Float64}=nothing,
-                               e_hi::Float64=-1e-4, c::Float64=C_LIGHT)
+                               e_hi::Float64=-1e-4, c::Float64=C_LIGHT,
+                               numerics::NumericsID=legacy_v5)
     E, r2, G, F = _dirac_gf(pot_V, z, kappa, n_nodes, r_full[1],
-                            r_full[end] * (1.0 + 1e-12), dt, tol, e_lo, e_hi, c)
+                            r_full[end] * (1.0 + 1e-12), dt, tol, e_lo, e_hi, c;
+                            numerics=numerics)
     s = 1.0 / sqrt(trapz(G .* G .+ F .* F, r2))
     nf = length(r_full)
     n2 = length(r2)
