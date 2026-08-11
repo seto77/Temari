@@ -102,6 +102,66 @@ function probe(a::SCFAtom, nodes::Vector{Float64})
     return (n_nodes = length(nodes), n_probe = length(probes), err = out)
 end
 
+"""f_e の補間を検査する (`--fe`。codex 指摘 2026-08-11)。
+
+⚠⚠ **「f_x で not-a-knot が勝った」は f_e の決着ではない。**
+
+f_x(K) = N − K²M₂/6 + K⁴M₄/120 − … は **K の偶関数**なので
+**f_x′(0) = 0 が解析的に厳密**である。ところが not-a-knot スプラインはこれを
+保証しない。補間曲線に線形項 a·s が混ざると
+
+    Z − f̃_x(s) ≈ −a·s   ⇒   f_e = 2(Z−f̃_x)/K² ∝ 1/s
+
+で **f_e が偽発散する**。f_x では見えない誤差が f_e では発散として出る。
+
+そこで 3 つの経路を比べる:
+  A  f_x を not-a-knot で補間 → Mott–Bethe で f_e を作る (素朴な契約)
+  B  **f_e を直接補間する** (節点に f_e を収録。s=0 は M₂/3)
+  C  f_x を **t = s² 上で**補間 → Mott–Bethe (偶関数性を座標で担保)
+"""
+function probe_fe(a::SCFAtom, nodes::Vector{Float64})
+    z = Float64(a.z)
+    to_fe(s, fx) = s < 1e-12 ? NaN :
+                   mott_bethe_a0(z, fx, 4.0 * pi * s * BOHR_ANG) * BOHR_ANG
+    m2 = density_moment(a.r, a.dt, a.rho, 2) *
+         (a.nel / density_moment(a.r, a.dt, a.rho, 0))
+    fe0 = fe_zero_limit_a0(m2) * BOHR_ANG
+
+    yn = fx_at(a, nodes)
+    fen = [i == 1 && nodes[1] < 1e-12 ? fe0 : to_fe(nodes[i], yn[i])
+           for i in eachindex(nodes)]
+
+    probes = Float64[]
+    for i in 1:length(nodes)-1
+        lo, hi = nodes[i], nodes[i+1]
+        append!(probes, [lo + 0.25 * (hi - lo), lo + 0.5 * (hi - lo),
+                         lo + 0.75 * (hi - lo)])
+    end
+    yd = fx_at(a, probes)
+    fed = [to_fe(probes[k], yd[k]) for k in eachindex(probes)]
+
+    spx = CubicSplineNAK(nodes, yn)
+    spe = CubicSplineNAK(nodes, fen)
+    spt = CubicSplineNAK(nodes .^ 2, yn)          # t = s² 上で
+    spet = CubicSplineNAK(nodes .^ 2, fen)        # 経路 D: f_e を t 上で
+    routes = Dict{String,Float64}()
+    for (name, f) in ("A: f_x補間→MB" => (q -> to_fe(q, spx(q))),
+                      "B: f_e直接補間" => (q -> spe(q)),
+                      "C: t=s²で補間→MB" => (q -> to_fe(q, spt(q^2))),
+                      # 経路 D (codex 指摘 2026-08-11): 低 s の正則性 (t 座標) と
+                      # 桁落ち回避 (f_e を直接持つ) を両立する。C に決める前に測る
+                      "D: f_eをt上で補間" => (q -> spet(q^2)))
+        d = [abs(f(probes[k]) - fed[k]) for k in eachindex(probes)]
+        routes[name] = maximum(d ./ (GATE_ABS .+ GATE_REL .* abs.(fed)))
+    end
+    # ★スプラインが s=0 で持ってしまう傾き (厳密には 0)
+    slope0 = spline_d012(spx, nodes[1] + 1e-9)[2]
+    # ⚠ codex 指摘: t 上の not-a-knot も df_x/dt|₀ を保証しない。s=0 にモーメント値を
+    #   返しても **s→0⁺ のスプライン極限と不連続になりうる**。その段差を測る
+    jump = abs(to_fe(1e-4, spt(1e-8)) - fe0)
+    return (routes = routes, slope0 = slope0, fe0 = fe0, jump = jump)
+end
+
 function main(args)
     zs = Int[]
     smax = 6.0
@@ -132,6 +192,26 @@ function main(args)
     if "--iucr" in args
         g = filter(<=(smax + 1e-9), iucr_grid())
         push!(cands, ("IUCr 非均一", g))
+    end
+
+    if "--fe" in args
+        println("f_e の補間経路を比べる (ゲート比。1 以下なら帯の内側)")
+        println("⚠ f_x′(0) = 0 は解析的に厳密。スプラインがこれを破ると f_e が 1/s で偽発散する\n")
+        @printf("%4s %-14s %10s %10s %10s %10s %10s %10s\n", "Z", "格子",
+                "A:f_x→MB", "B:f_e直接", "C:t→MB", "D:f_e on t",
+                "s=0 傾き", "s→0 段差")
+        for z in zs
+            a = get_neutral(z; relativistic = rel, exchange = exch)
+            for (name, nodes) in cands
+                p = probe_fe(a, nodes)
+                @printf("%4d %-14s %10.3e %10.3e %10.3e %10.3e %10.3e %10.3e\n",
+                        z, name, p.routes["A: f_x補間→MB"], p.routes["B: f_e直接補間"],
+                        p.routes["C: t=s²で補間→MB"], p.routes["D: f_eをt上で補間"],
+                        p.slope0, p.jump)
+            end
+        end
+        println("\n⚠ s=0 の傾きは厳密には 0。not-a-knot はこれを保証しない")
+        return
     end
 
     best = Dict{String,Float64}()
