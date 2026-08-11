@@ -45,7 +45,14 @@ end
 """保存済みの原子について不動点残差を測る。
 
 戻り値は NamedTuple。`rho_out` は「保存済み ρ から組んだ場で軌道を解き直し、
-そこから作った密度」— SCF 写像 T の像。残差は ‖T(ρ) − ρ‖。"""
+そこから作った密度」— SCF 写像 T の像。残差は ‖T(ρ) − ρ‖。
+
+⚠⚠ **解き直しは、その原子を解いたのと同じ数値 backend で行う** (260811Cl 修正)。
+`dirac_orbital_on_grid` の `numerics` は既定 `legacy_v5` なので、
+`dirac_true_midpoint_v1` で解いた原子をそのまま渡すと**別の写像 T′ の残差**を
+測ることになる。中点処方の差は f_x で 7e-07 級、真の残差は 7e-09 級なので、
+**2 桁大きい偽の残差**が出て「収束していない」と誤診する。
+⇒ `a.cfg.id` を渡す。**残差はその原子が満たすべき不動点方程式で測る。**"""
 function fixed_point_residual(a::SCFAtom)
     r, dt = a.r, a.dt
     pot = V_bound_callable(a)                  # ★保存済み ρ から場を組む
@@ -59,7 +66,8 @@ function fixed_point_residual(a::SCFAtom)
         for (nq, lq, kap, q) in dirac_occupancy(a.occ)
             q <= 0.0 && continue
             E, G, F = dirac_orbital_on_grid(pot, a.z, r, dt; kappa = kap,
-                                            n_nodes = nq - lq - 1)
+                                            n_nodes = nq - lq - 1,
+                                            numerics = a.cfg.id)
             # 規格化残差: ∫(G²+F²)dr = 1 (2 成分規格化)
             w = simpson_weights(length(r), dt) .* r
             worst_norm = max(worst_norm, abs(sum((G .^ 2 .+ F .^ 2) .* w) - 1.0))
