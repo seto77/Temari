@@ -570,49 +570,70 @@ function build_ion(z::Int, shell::Tuple{Int,Int}; relativistic::Bool=false,
     return a
 end
 
-"""中性原子の SCF (キャッシュ付き)。`relativistic=true` で完全 Dirac SCF、
-`exchange=:kli` で厳密交換。
+"""⚠⚠ **SCF 原子のキャッシュキーはこの 2 関数だけが作る** (260811Cl)。
 
-⚠ 相対論版と非相対論版は**別のキャッシュキー** (`"nrel"` / `"n"`) に分ける。
-同じ鍵にすると、片方で作った密度をもう片方が黙って読んで結果だけが狂う。
-交換処方も同じ理由で鍵に入れる (`xc_tag`)。"""
+⚠ 相対論版と非相対論版は**別のキー** (`"nrel"` / `"n"`) に分ける。同じ鍵にすると、
+片方で作った密度をもう片方が黙って読んで結果だけが狂う。交換処方 (`xc_tag`) と
+数値設定 (`cache_tag`) も同じ理由で鍵に入れる。
+
+⚠⚠ **キーを組み立てる場所を増やしてはいけない。**`cache_tag(cfg)` を
+`get_neutral` / `get_ion` にだけ足して `ensure_converged` を取り残した結果、
+**再試行が誰も読まないキーへ書き込み、未収束の原子がそのまま使われる**という
+回帰を実際に作った (260811Cl に発見・修正)。取得・削除・再構築・保存が
+**同じ 1 つの関数からキーを引く**ようにして、その事故の形を構造的に潰す。"""
+neutral_cache_key(z::Int, relativistic::Bool, x_alpha::Float64, exchange::Symbol,
+                  cfg::NumericsConfig) =
+    (relativistic ? "nrel" : "n", z, xc_tag(x_alpha, exchange), cache_tag(cfg))
+
+"空孔イオンの SCF キャッシュキー (`neutral_cache_key` と対。上の注意書きを読むこと)"
+ion_cache_key(z::Int, shell, relativistic::Bool, x_alpha::Float64, exchange::Symbol,
+              cfg::NumericsConfig) =
+    (relativistic ? "irel" : "i", z, shell[1], shell[2],
+     xc_tag(x_alpha, exchange), cache_tag(cfg))
+
+"""中性原子の SCF (キャッシュ付き)。`relativistic=true` で完全 Dirac SCF、
+`exchange=:kli` で厳密交換。キーの規約は `neutral_cache_key` を参照。"""
 get_neutral(z::Int; relativistic::Bool=false, x_alpha::Float64=X_ALPHA,
             exchange::Symbol=:xalpha, cfg::NumericsConfig=NumericsConfig()) =
     disk_cached(() -> build_neutral(z; relativistic=relativistic, x_alpha=x_alpha,
                                     exchange=exchange, numerics=Symbol(cfg.id),
                                     dt=cfg.dt, r0=cfg.r0, rmax=cfg.rmax,
                                     tol_rho=cfg.tol_rho, tol_e=cfg.tol_e),
-                (relativistic ? "nrel" : "n", z, xc_tag(x_alpha, exchange),
-                 cache_tag(cfg)))
+                neutral_cache_key(z, relativistic, x_alpha, exchange, cfg))
 get_ion(z::Int, shell; relativistic::Bool=false, x_alpha::Float64=X_ALPHA,
         exchange::Symbol=:xalpha, cfg::NumericsConfig=NumericsConfig()) =
     disk_cached(() -> build_ion(z, shell; relativistic=relativistic, x_alpha=x_alpha,
                                 exchange=exchange, cfg=cfg),
-                (relativistic ? "irel" : "i", z, shell[1], shell[2],
-                 xc_tag(x_alpha, exchange), cache_tag(cfg)))
+                ion_cache_key(z, shell, relativistic, x_alpha, exchange, cfg))
 
 """SCF の収束を保証 (未収束なら混合を弱めて再試行、それでも駄目なら停止)。
 
 `need_ion=false` は**厳密 frozen core** 用 — 終状態を中性場で解くので空孔イオンの
-SCF がそもそも要らない (元素あたり SCF 1 回分の節約)。"""
+SCF がそもそも要らない (元素あたり SCF 1 回分の節約)。
+
+⚠ `cfg` は**取得にも再構築にも同じものを渡す**。再構築だけ既定に落ちると、
+別の格子で解いた原子を収束済みとしてキャッシュへ置くことになる。"""
 function ensure_converged(z::Int, shell; relativistic::Bool=false,
                           x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
-                          need_ion::Bool=true)
+                          need_ion::Bool=true, cfg::NumericsConfig=NumericsConfig())
     rl = relativistic
-    xt = xc_tag(x_alpha, exchange)
     for (kind, key, rebuild) in (
-            ("neutral", (rl ? "nrel" : "n", z, xt),
+            ("neutral", neutral_cache_key(z, rl, x_alpha, exchange, cfg),
              () -> build_neutral(z; relativistic=rl, x_alpha=x_alpha,
-                                 exchange=exchange,
+                                 exchange=exchange, numerics=Symbol(cfg.id),
+                                 dt=cfg.dt, r0=cfg.r0, rmax=cfg.rmax,
+                                 tol_rho=cfg.tol_rho, tol_e=cfg.tol_e,
                                  beta=SCF_RETRY.beta, max_iter=SCF_RETRY.max_iter)),
-            ("ion", (rl ? "irel" : "i", z, shell[1], shell[2], xt),
+            ("ion", ion_cache_key(z, shell, rl, x_alpha, exchange, cfg),
              () -> build_ion(z, shell; relativistic=rl, x_alpha=x_alpha,
-                             exchange=exchange,
+                             exchange=exchange, cfg=cfg,
                              beta=SCF_RETRY.beta, max_iter=SCF_RETRY.max_iter)))
         kind == "ion" && !need_ion && continue
         a = kind == "neutral" ?
-            get_neutral(z; relativistic=rl, x_alpha=x_alpha, exchange=exchange) :
-            get_ion(z, shell; relativistic=rl, x_alpha=x_alpha, exchange=exchange)
+            get_neutral(z; relativistic=rl, x_alpha=x_alpha, exchange=exchange,
+                        cfg=cfg) :
+            get_ion(z, shell; relativistic=rl, x_alpha=x_alpha, exchange=exchange,
+                    cfg=cfg)
         a.converged && continue
         println("  [scf-retry] Z=$z $kind not converged -> beta=0.08, max_iter=400")
         isfile(cache_file(key)) && rm(cache_file(key))
@@ -664,12 +685,27 @@ F(s) 出口 (`compute_channel`) も EELS 出口 (`compute_edge`) もここまで
 落ちることが実装が正しいことの証明 (selftest T21)。
 
 ⚠ 処方を切り替えると F(s) も σ も動く。出荷既定は `:relaxed` のまま。
+
+## `numerics` — 数値 backend (260811Cl 追加)
+
+`:legacy_v5` (既定・出荷 F v5 の数値) のみを受け付ける。他の ID は**エラーで弾く**。
+
+⚠⚠ **黙って混ぜないための hard fail である。**cfg が効くのは SCF 原子
+(`get_neutral` / `get_ion`) だけで、**始状態を解く `solve_dirac_bound` /
+`solve_dirac_bound_2c` は backend 引数を持たず常に `legacy_v5`** に落ちる。
+しかも束縛解のキャッシュ鍵 `bkey_base` に cfg が入らないので、通してしまうと
+「SCF 密度は真の中点 / 始状態は legacy」という**鍵で区別できない混成**になる。
+配線するなら束縛ソルバ 2 本と `BOUND_RMAX`・`EIG_TOL` まで鍵に入れる必要があり、
+**検証を伴う別の変更**として行う (計画書 §4.20)。
+⚠ この関数は EDX だけでなく **EELS と GOS 出口も共有**するので、ここで弾けば
+3 出口すべてが同時に守られる。
 """
 function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
                          rel_continuum::Bool=false, dirac_scf::Bool=true,
                          x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
                          final_state::Symbol=:relaxed,
                          dirac_continuum::Bool=false,
+                         numerics::Symbol=:legacy_v5,
                          rel_override::Union{Nothing,RelCont}=nothing)
     haskey(CHANNELS, tag) || error("unknown channel $tag (K/L1/L2/L3/M1..M5)")
     # ⚠ M 殻は元素によって Bote 表の副殻が足りない (Fe は M1-M3 まで) し、
@@ -683,6 +719,13 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
     # 立てると「どちらの連続状態か」が曖昧になるので排他にする
     !(dirac_continuum && (rel_continuum || rel_override !== nothing)) ||
         error("dirac_continuum と rel_continuum は排他 (前者が上位互換)")
+    # ⚠ 未知の ID もここで死ぬ (numerics_id が hard fail する)。既定へ黙って
+    #   落とさないことが要点 — docstring の「numerics」節を読むこと
+    cfg = NumericsConfig(id=numerics_id(numerics))
+    cfg.id === legacy_v5 ||
+        error("prepare_channel は numerics=$(numerics) をまだ計算できない — " *
+              "束縛始状態 (solve_dirac_bound / _2c) が backend 引数を持たず " *
+              "legacy_v5 に落ちるため、SCF 密度とで混成になる。:legacy_v5 のみ可")
     shell, j_lower, occ_init, subshell = CHANNELS[tag]
 
     eth_keV = bote_edge_eV(z, subshell) / 1e3   # 閾値 = Bote 表の吸収端
@@ -693,9 +736,9 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
     frozen = final_state !== :relaxed
     static_field = final_state === :frozen_static
     ensure_converged(z, shell; relativistic=dirac_scf, x_alpha=x_alpha,
-                     exchange=exchange, need_ion=!frozen)
+                     exchange=exchange, need_ion=!frozen, cfg=cfg)
     neutral = get_neutral(z; relativistic=dirac_scf, x_alpha=x_alpha,
-                          exchange=exchange)
+                          exchange=exchange, cfg=cfg)
 
     # ---- 束縛と終状態が見る場 (frozen core では同一物) ----
     # :frozen_static だけ尾を 0 に落とした静的場。Latter クリップ無し・局所交換で
@@ -730,7 +773,7 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
               IonPotential(z, static_field ? 0.0 : 1.0, neutral.r, v_bound) :
               IonPotential(z, neutral,
                            get_ion(z, shell; relativistic=dirac_scf,
-                                   x_alpha=x_alpha, exchange=exchange))
+                                   x_alpha=x_alpha, exchange=exchange, cfg=cfg))
 
     rel = rel_override !== nothing ? rel_override :
           (rel_continuum ? RelCont(z) : nothing)
@@ -755,6 +798,9 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
             T0=(e0_keV === nothing ? nothing : e0_keV * 1000.0 / HARTREE_EV),
             E_b=E_b, r_b=r_b, u_b=u_b, frac_small=frac_small,
             ion_pot=ion_pot, rel=rel, dirac=dirac_cont,
+            # ⚠ **解決済みの cfg をそのまま返す。**出口側が provenance を書くために
+            #   もう一度 NumericsConfig を組むと、それが例の「二重経路」になる
+            numerics_cfg=cfg,
             dirac_scf=dirac_scf, x_alpha=x_alpha,
             exchange=exchange, final_state=final_state,
             model_id=model_id_of(rel !== nothing, dirac_scf, x_alpha, exchange,

@@ -15,7 +15,12 @@
                     自前固有値との二重定義を避けるため)
   "diag"            本番ゲート対象: max_match_resid <1e-4 / r_tail_max <1e-4 /
                     bad_significant_l = 0
-  "model_id"        v2 (既定) / v3 (rel_continuum=true、第 3.5 章)"""
+  "model_id"        v2 (既定) / v3 (rel_continuum=true、第 3.5 章)
+
+`numerics` は数値 backend の版 (260811Cl)。**出荷世代の処方が明示的に固定する**
+値であって、ここの既定に委ねてよいものではない (`PRESC_V3` / `PRESC_V4` を参照)。
+⚠ 現状 `:legacy_v5` 以外は `prepare_channel` が hard fail する — 理由は同関数の
+docstring。"""
 function compute_channel(z::Int, tag::String, e0_keV::Float64;
                          settings=PROD_SETTINGS,
                          s_nodes::Union{Nothing,Vector{Float64}}=nothing,
@@ -24,6 +29,7 @@ function compute_channel(z::Int, tag::String, e0_keV::Float64;
                          x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
                          final_state::Symbol=:relaxed,
                          dirac_continuum::Bool=false,
+                         numerics::Symbol=:legacy_v5,
                          rel_override::Union{Nothing,RelCont}=nothing)
     # rel_continuum=true: 放出電子をスカラー相対論で解く (第 3.5 章、モデル v3)。
     # final_state=:frozen: 束縛と連続を同一 (中性) ポテンシャルで解く (l5_channel.jl)
@@ -35,7 +41,7 @@ function compute_channel(z::Int, tag::String, e0_keV::Float64;
     ch = prepare_channel(z, tag, e0_keV; rel_continuum=rel_continuum,
                          dirac_scf=dirac_scf, x_alpha=x_alpha, exchange=exchange,
                          final_state=final_state, dirac_continuum=dirac_continuum,
-                         rel_override=rel_override)
+                         numerics=numerics, rel_override=rel_override)
     K_nodes = 4.0 * pi .* s_nodes .* BOHR_ANG   # s [Å⁻¹] → K [a0⁻¹] (4π 規約!)
 
     N, diag = compute_NK(ch.ion_pot, ch.r_b, ch.u_b, ch.E_th, ch.T0, K_nodes, z;
@@ -57,7 +63,11 @@ function compute_channel(z::Int, tag::String, e0_keV::Float64;
             "continuum" => ch.dirac !== nothing ? "dirac-kappa-2c" :
                            (ch.rel !== nothing ? "scalar-relativistic" : "nonrelativistic"),
             "dirac_scf" => dirac_scf, "scf_exchange" => String(exchange),
-            "x_alpha" => x_alpha, "final_state" => String(final_state)),
+            "x_alpha" => x_alpha, "final_state" => String(final_state),
+            # 260811Cl: 数値 backend の provenance。**ID だけでは不完全**なので
+            # 解決済み設定 (dt / 定義域 / SCF 閾値) のタグも並べて書く
+            "numerics_id" => String(Symbol(ch.numerics_cfg.id)),
+            "numerics_config" => cache_tag(ch.numerics_cfg)),
         "z" => z, "channel" => tag, "e0_keV" => e0_keV,
         "shell_nl" => [ch.n_b, ch.l_b], "kappa" => ch.kappa,
         "occupancy" => ch.occ_init,

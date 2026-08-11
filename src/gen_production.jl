@@ -528,11 +528,21 @@ end
 外したままだと `--v3` が「v3 の連続状態 + v4 の原子場」という**どの世代でもない
 混成**を dataset_version 3.0.0 と名乗って出す。したがって **v4 は v3 から
 連続状態と原子場の 2 点が変わる** (引き継ぎ書 §1 の表が「SCF は同左」と
-書いているのは誤り)。"""
+書いているのは誤り)。
+
+⚠⚠ **260811Cl: `numerics` を処方に明示した。**数値 backend が版付けされ
+(`legacy_v5` / `dirac_true_midpoint_v1`)、f_x/f_e 側は予算を満たすために
+後者へ移る見込みがある。**出荷 F の数値を「その時点の既定」に委ねてはいけない** —
+既定が動いた瞬間に、同じ `--v3` / 既定実行が別の数値方式で走る。
+これは**将来の既定変更に対する防御**であって、現在の正しさの問題ではない
+(既定は今も `legacy_v5`)。⚠ 固定するのは **ID の Symbol だけ**である。
+dt・定義域・SCF 閾値はモジュール定数のままで、実際に解いた値は
+`generation_context_sha256` (ソース fingerprint 込み) と、各行の
+`physics.numerics_config` に解決済みタグとして残る。"""
 const PRESC_V3 = (rel_continuum=true, dirac_continuum=false, dirac_scf=false,
-                  exchange=:xalpha, final_state=:relaxed)
+                  exchange=:xalpha, final_state=:relaxed, numerics=:legacy_v5)
 const PRESC_V4 = (rel_continuum=false, dirac_continuum=true, dirac_scf=true,
-                  exchange=:xalpha, final_state=:relaxed)
+                  exchange=:xalpha, final_state=:relaxed, numerics=:legacy_v5)
 
 "出荷世代ごとのチャネル集合。v3 は K/L のみ、v4 は M 殻を含む"
 const TAGS_V3 = ["K", "L1", "L2", "L3"]
@@ -911,10 +921,16 @@ function presc_from_args(args)
     (v3 && norel) && error("--v3 と --norel は排他")
     (v3 && kd) && error("--v3 と --kdirac は排他 (--kdirac は v4 の既定)")
     (norel && kd) && error("--norel と --kdirac は排他")
+    # ⚠⚠ **フィールドの名前も順序も PRESC_V3 / PRESC_V4 と一致させること。**
+    #   `presc_dataset_version` は NamedTuple の等値比較で出荷版を名乗るので、
+    #   1 つでもずれると全チャネルが黙って `0.0.0-dev` になる
+    # ⚠ `numerics` に CLI の口は開けていない — 出荷 F の数値方式を
+    #   コマンドラインから変えられるようにする理由が無い
     return (rel_continuum=v3, dirac_continuum=!(v3 || norel),
             dirac_scf=!(v3 || "--nodscf" in args),
             exchange=("--kli" in args ? :kli : :xalpha),
-            final_state=("--frozen" in args ? :frozen : :relaxed))
+            final_state=("--frozen" in args ? :frozen : :relaxed),
+            numerics=:legacy_v5)
 end
 
 function main_gen(args)
