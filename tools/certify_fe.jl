@@ -60,37 +60,10 @@ using Printf, SHA
 #   (二重 include は const と struct の再定義になる)
 include(joinpath(@__DIR__, "certify_grid.jl"))     # 予算・ゲート・節点定義を共有
 
-"""点ごとの上限を**差の列から**作る (`pointwise_bound` は水準値を取る)。
-
-⚠⚠ **これは `certify_grid.jl` の `pointwise_bound` の複製である。**分岐させない。
-本来は向こうを「差を取る版 + 水準値の薄い包み」に割って共有すべきだが、
-**この関数を書いた時点で全 Z 認証のフリートが走っており**、`certify_grid.jl` を
-編集すると各 JSON に記録される `tool_sha256` が元素ごとに食い違って provenance が
-壊れる。⇒ **フリート完走後に統合する** (判定を作る場所を 2 つに増やしたままには
-しない。鍵を作る場所を増やして黙って壊した前科がある)。"""
-function pointwise_bound_diffs(d::Vector{Vector{Float64}}, floor_abs::Float64)
-    n = length(d[1])
-    nlev = length(d) + 1
-    bound = zeros(n)
-    qv = fill(NaN, n)
-    cls = fill(:low_signal, n)
-    tail = Q_TAIL / (1.0 - Q_TAIL)
-    tail5 = 1.0 / (1.0 - Q_TAIL)
-    for i in 1:n
-        dl = abs(d[end][i])
-        dp = abs(d[end-1][i])
-        bound[i] = nlev >= 4 ? dl * tail5 : dl * tail
-        if dp <= floor_abs
-            cls[i] = (dl > floor_abs && dl > dp) ? :violating : :low_signal
-            continue
-        end
-        q = dl / dp
-        qv[i] = q
-        cls[i] = (sign(d[end][i]) == sign(d[end-1][i]) && q <= Q_GATE) ?
-                 :ok : :violating
-    end
-    return (bound = bound, q = qv, cls = cls, d = d)
-end
+# 260812Cl: ここにあった `pointwise_bound_diffs` の複製は `certify_grid.jl` へ
+# 統合した (向こうを「差を取る実体 + 水準値の薄い包み」に割った)。フリート走行中は
+# 向こうを触れないため一時的に複製していたもの。統合の同一性は certify_fe の全 Z
+# 再実行で出力不変を確認済み。
 
 """水準間の δf_e [Å]。⚠⚠ **低 s は Mott–Bethe で作ってはいけない** (260811Cl 実測)。
 

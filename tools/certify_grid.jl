@@ -234,17 +234,17 @@ end
 
 # ---- 点ごとの判定 ----------------------------------------------------------
 
-"""tight 系列の逐次差から、採用格子 L4 の残差の推定上限を点ごとに作る。
+"""**差の列**から、採用格子 L4 の残差の推定上限を点ごとに作る (実体)。
 
-`fs[k]` は水準 k (粗い順) の**規格化済み** f_x。3 水準なら L2,L3,L4、
-4 水準なら L2,L3,L4,L5。返すのは点ごとの上限と分類。
+`d[k]` は隣接水準差 (δ_2, δ_3, (δ_4))。260812Cl: `certify_fe.jl` が持っていた
+複製をここへ統合した (判定を作る場所を 2 つに増やしたままにしない —
+分けていたのは全 Z フリート走行中に本ファイルを触れなかったため)。
 
 ⚠ **点ごとに外挿してから最大を取る** — ある点の比を別の点の最大差に当てるのは
 無効である (codex 指摘。`grid_study` が実際にやっていた)。"""
-function pointwise_bound(fs::Vector{Vector{Float64}}, floor_abs::Float64)
-    n = length(fs[1])
-    nlev = length(fs)
-    d = [fs[k] .- fs[k+1] for k in 1:(nlev-1)]      # d[1]=δ_2, d[2]=δ_3, (d[3]=δ_4)
+function pointwise_bound_diffs(d::Vector{Vector{Float64}}, floor_abs::Float64)
+    n = length(d[1])
+    nlev = length(d) + 1
     bound = zeros(n)
     qv = fill(NaN, n)
     cls = fill(:low_signal, n)                       # :ok | :low_signal | :violating
@@ -267,6 +267,11 @@ function pointwise_bound(fs::Vector{Vector{Float64}}, floor_abs::Float64)
     end
     return (bound = bound, q = qv, cls = cls, d = d)
 end
+
+"""tight 系列の**水準値**から点ごとの上限を作る (薄い包み)。
+`fs[k]` は水準 k (粗い順) の規格化済み f_x。3 水準なら L2,L3,L4。"""
+pointwise_bound(fs::Vector{Vector{Float64}}, floor_abs::Float64) =
+    pointwise_bound_diffs([fs[k] .- fs[k+1] for k in 1:(length(fs)-1)], floor_abs)
 
 "配列の中で条件を満たす添字のうち、値が最大のものを返す (無ければ nothing)"
 function argmax_where(v::Vector{Float64}, keep::Vector{Bool})
@@ -517,7 +522,15 @@ function aggregate(dir::String)
     println(mids[1][1] > 1.0 ? "  ⚠ 節点間の方が悪い点がある" : "  (節点間は節点以下)")
     nconv = count(d -> d["verdict"]["all_converged"] !== true, rows)
     nconv > 0 && @printf("  ⚠ SCF が全水準では収束しなかった元素が %d 個ある\n", nconv)
-    return rows
+    # ⚠ **欠落を沈黙させない** — 期待する元素集合 (Z=1…86) と突き合わせる。
+    #   260812Cl: `certify_l1.jl` と同じ検査を後追いで入れた。旧来は「あるぶんだけ
+    #   集計」で Z が欠けても静かに成功に見えた (負のテスト = l1_negative_test.jl の
+    #   同型検査が certify_l1 側で「1 元素抜くと exit 1」を実演済み)
+    have = Set(iv(d["z"]) for d in rows)
+    miss = [z for z in 1:86 if !(z in have)]
+    isempty(miss) ? println("  元素の欠落: 無し (1…86 すべて)") :
+        @printf("  ⚠⚠ 欠落 %d 元素: %s\n", length(miss), join(miss, ", "))
+    return (rows = rows, missing = miss)
 end
 
 # ---- CLI ------------------------------------------------------------------
@@ -526,7 +539,12 @@ function main(args)
     optval(name, dflt) = (i = findfirst(==(name), args);
                           i !== nothing && i < length(args) ? args[i+1] : dflt)
     ag = optval("--aggregate", nothing)
-    ag !== nothing && return aggregate(ag)
+    if ag !== nothing
+        r = aggregate(ag)
+        # 欠落があれば exit 1 (fleet の最終 aggregate を沈黙させない)
+        r === nothing || isempty(r.missing) || exit(1)
+        return r
+    end
 
     outdir = optval("--out", joinpath(@__DIR__, "..", "certify_out"))
     stages = "--dt32" in args ? [3, 4, 5, 6] : [3, 4, 5]
