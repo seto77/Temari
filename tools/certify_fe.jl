@@ -117,19 +117,42 @@ f_x は 32 万点の総和なので水準間の差には ε ≈ **1e-13 電子**
     s <= s_sw :  δf_e = a₀ (δM₂/3 − K² δM₄/60)
     s >  s_sw :  δf_e = −2 a₀ δf_x / K²
 
-切替は**解析的な規則**で決める — K_sw² = 2|δM₂/δM₄|
-(2 項目が 1 項目の 10 % になる点)。⚠ **雑音の実測から決めない** (それだと
-結果を見てから閾値を動かすことになる)。⚠ 外れ値は [0.005, 0.2] に丸める。
+切替は**解析的な規則**で決める — K_sw² = 0.2|δM₂/δM₄|
+(2 項目が 1 項目の **1 %** になる点)。⚠ **雑音の実測から決めない** (それだと
+結果を見てから閾値を動かすことになる)。⚠ 外れ値は [0.005, 0.05] に丸める。
 **切替点で 2 経路が一致することを検査する** (`ratio_at_switch`)。
 
-戻り値は `(val, s_switch, ratio_at_switch, eps_est)`。"""
+⚠⚠ **当初の「10 % 規則 + 上限 0.2」は 2 つの実測で破れた** (260812Cl):
+(i) Z=13 Al は δM₄ ≈ δM₂ (比 0.87) のため s_sw が 0.198 まで伸び、そこで展開が
+**8.5 倍過大**だった (S/N 3.7e4 で信号は健全 — 展開の収束が破れている)。
+K⁴ 項の係数比だけで上限を決めると、**次の項 (δM₆) が見えない**盲点がある。
+(ii) Z=14 Si は規則どおり s_sw=0.048 でも比 0.93 — 「2 項目 = 10 %」の点では
+打ち切り誤差 (3 項目〜) が数 % 残るのは構造的で、モーメント比 M₂ₖ₊₂/M₂ₖ は
+次数とともに増える (裾が効く) から α² では済まない。
+⇒ 1 % 規則 + 上限 0.05 (Al 型で clamp が効く水準) に締めた。
+
+⚠⚠ **整合検査には信号床の前提条件が要る** (260812Cl 実測)。H (Z=1) は
+δf_x の**全域**が丸め床 (~3e-14 電子) 以下で、MB 経路は床の増幅 −2a₀ε/K²、
+展開経路は δM₂ の丸め差 — 両者は無相関なので比が 14.7 になった。
+これは**切替規則の欠陥ではなく、検査する信号が存在しない** (He は 1.005、
+Li は 1.012 と、信号がある元素では整合する)。⚠ 当初疑った「[0.005, 0.2] への
+丸めが効いた」は**実測で否定** (H の生の s_sw = 0.0246 は clamp 域内)。
+⇒ 切替点の展開値が床雑音 2a₀ε/K_sw² の **10 倍**を超えるときだけ比を検査し
+(`switch_checkable`)、下回る元素は low signal として集計から別掲する。
+
+⚠ さらに**合格閾値は S/N 依存** — |比−1| ≤ max(0.05, 5/SN)。
+Z=65 (S/N 55) の実測 5.04 % が示すとおり、S/N ~ 50 では床の揺らぎ (eps_est は
+中央値であり裾は数倍) だけで数 % ずれる。固定 5 % は「S/N が十分」を暗黙に
+仮定していた。係数 5 = 床推定の不確かさ倍率の保守値。
+
+戻り値は `(val, s_switch, ratio_at_switch, eps_est, switch_checkable, sn_at_switch)`。"""
 function delta_fe(dfx::Vector{Float64}, nodes::Vector{Float64}, dm2::Float64,
                   dm4::Float64)
     K = 4.0 * pi .* nodes .* BOHR_ANG
     expand(i) = BOHR_ANG * (dm2 / 3.0 - K[i] * K[i] * dm4 / 60.0)
     mb(i) = -2.0 * BOHR_ANG * dfx[i] / (K[i] * K[i])
-    s_sw = dm4 == 0.0 ? 0.2 :
-           clamp(sqrt(2.0 * abs(dm2 / dm4)) / (4.0 * pi * BOHR_ANG), 0.005, 0.2)
+    s_sw = dm4 == 0.0 ? 0.02 :
+           clamp(sqrt(0.2 * abs(dm2 / dm4)) / (4.0 * pi * BOHR_ANG), 0.005, 0.02)
     out = similar(dfx)
     out[1] = BOHR_ANG * dm2 / 3.0                  # δf_e(0) = a₀ δM₂/3 (厳密)
     isw = 1
@@ -145,8 +168,13 @@ function delta_fe(dfx::Vector{Float64}, nodes::Vector{Float64}, dm2::Float64,
     #   MB − 展開 ≈ −2a₀ε/K² と読む
     est = [abs((mb(i) - expand(i)) * K[i] * K[i] / (2.0 * BOHR_ANG))
            for i in 2:min(9, length(dfx))]
+    eps_est = isempty(est) ? NaN : sort(est)[max(1, end ÷ 2)]
+    # 切替点の MB 側床雑音。信号 (展開値) がこの 10 倍未満なら比は検査不能
+    sn = isw > 1 && isfinite(eps_est) ?
+         abs(expand(isw)) / (2.0 * BOHR_ANG * eps_est / (K[isw]^2)) : NaN
+    checkable = isfinite(sn) && sn > 10.0
     return (val = out, s_switch = s_sw, ratio_at_switch = ratio,
-            eps_est = isempty(est) ? NaN : sort(est)[max(1, end ÷ 2)])
+            eps_est = eps_est, switch_checkable = checkable, sn_at_switch = sn)
 end
 
 """f_e [Å] そのもの (大きさの報告用。⚠ 差の計算にはこれを使わない)。
@@ -222,7 +250,9 @@ function fe_element(dir::String, doc; floor_scale::Float64=0.5)
     return (z = round(Int, doc["z"]), nodes = nodes, fe = fes[end], bound = pb.bound,
             cls = pb.cls, q = pb.q, u_e = u_e, floor_abs = floor_abs,
             s_switch = dres[end].s_switch, ratio_at_switch = dres[end].ratio_at_switch,
-            eps_est = dres[end].eps_est, m2 = m2, m4 = m4,
+            eps_est = dres[end].eps_est,
+            switch_checkable = dres[end].switch_checkable,
+            sn_at_switch = dres[end].sn_at_switch, m2 = m2, m4 = m4,
             ship = summarize(pb, nodes, mask_ship),
             mid = summarize(pb, nodes, mask_mid),
             fe0 = fes[end][1], fe_max_s = maximum(abs, fes[end]))
@@ -259,11 +289,25 @@ function main(args)
     smax = [r.ship["s_at_max"] for r in rows]
     @printf("  最大の位置 s: 最小 %.4f / 中央 %.4f / 最大 %.4f\n",
             minimum(smax), sort(smax)[max(1, end ÷ 2)], maximum(smax))
-    # ⚠⚠ 切替点で 2 経路が一致していなければ、そこは重なり域ではない
-    jr = [abs(r.ratio_at_switch - 1.0) for r in rows]
-    @printf("  切替点の経路整合 |比−1| の最悪: %.3e (Z=%d)%s\n",
-            maximum(jr), rows[argmax(jr)].z,
-            maximum(jr) > 0.05 ? "  ⚠ 5 % 超 — 重なり域を外している" : "")
+    # ⚠⚠ 切替点で 2 経路が一致していなければ、そこは重なり域ではない。
+    #    ⚠ ただし信号が丸め床以下の元素 (H など) では比が無意味 — 検査可能な
+    #    元素に限って最悪を出し、検査不能は数を別掲する (260812Cl)
+    chk = [r for r in rows if r.switch_checkable]
+    unchk = [r.z for r in rows if !r.switch_checkable]
+    if !isempty(chk)
+        # 許容 = max(5 %, 5/SN)。S/N が低い元素は床の揺らぎだけで数 % ずれる
+        margin = [abs(r.ratio_at_switch - 1.0) / max(0.05, 5.0 / r.sn_at_switch)
+                  for r in chk]
+        iw = argmax(margin)
+        nviol = count(>(1.0), margin)
+        @printf("  切替点の経路整合 (検査可能 %d 元素): 最悪 |比−1|=%.3e (Z=%d, S/N=%.0f, 許容比 %.2f)%s\n",
+                length(chk), abs(chk[iw].ratio_at_switch - 1.0), chk[iw].z,
+                chk[iw].sn_at_switch, margin[iw],
+                nviol > 0 ? "  ⚠ 許容超え $nviol 元素 — 重なり域を外している" : "")
+    end
+    isempty(unchk) ||
+        @printf("  ⚠ 検査不能 (切替点の信号が床雑音の 10 倍未満) %d 元素: %s\n",
+                length(unchk), join(unchk, ", "))
     @printf("  δf_x の丸め床 ε の実測: 中央 %.2e / 最大 %.2e 電子\n",
             sort([r.eps_est for r in rows])[max(1, end ÷ 2)],
             maximum(r.eps_est for r in rows))
