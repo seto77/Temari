@@ -84,5 +84,28 @@ chk("certified の数", get(sc, "certified", 0), 84)
 chk("uncertifiable の数", get(sc, "uncertifiable", 0), 1)
 chk("model_violated の数", get(sc, "model_violated", 0), 1)
 
+println("[D] v2.1: 低信号は model_violated より先に評価される (H の轍の再発防止)")
+# H 型の合成例: 収束済み・低信号 (D₃ が床の 4 桁下)・雑音の比 q₂₃ = 5.06 が
+# contraction_class で model_violated に落ちている — それでも低信号が先に拾う
+chk("低信号 + q₂₃>0.5 (H 型) → low_signal", element_status(true, true, "model_violated", true, true),
+    "uncertifiable_low_signal")
+chk("信号あり + q₂₃>0.5 → model_violated", element_status(true, false, "model_violated", true, true),
+    "model_violated")
+chk("低信号でも未収束なら scf が先", element_status(false, true, "model_violated", true, true),
+    "uncertifiable_scf")
+chk("信号あり + pass + 予算内 → certified", element_status(true, false, "pass", true, true),
+    "certified")
+chk("低信号 + pass も low_signal (床置き認証はしない)", element_status(true, true, "pass", true, true),
+    "uncertifiable_low_signal")
+# ⚠ 対比: 旧 v2 順序 (ローカル再現) は同じ H 型入力を model_violated に落とす。
+#   これが「旧検査が誤分類する実例」の実演 (実際に本走の H で起きた)
+old_v2_status(conv_ok, low_signal, contraction, bound_ok, sgn_ok) =
+    !conv_ok ? "uncertifiable_scf" :
+    contraction == "model_violated" ? "model_violated" :
+    low_signal ? "uncertifiable_low_signal" :
+    (bound_ok && contraction == "pass" && sgn_ok ? "certified" : "uncertifiable")
+chk("旧 v2 順序は同じ H 型入力を誤分類する (対比)", old_v2_status(true, true, "model_violated", true, true),
+    "model_violated")
+
 println(nfail == 0 ? "\nALL PASS" : "\n⚠ $(nfail) 件失敗")
 exit(nfail == 0 ? 0 : 1)

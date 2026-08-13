@@ -193,6 +193,28 @@ q34_class(l1_4::Float64, q34::Float64) =
     l1_4 <= Q34_SIGNAL ? "unresolvable" :
     (q34 <= Q_TAIL_L1 ? "supports" : "exceeds_tail")
 
+"""status の五値判定 (事前登録 **v2.1** の順序 —
+`docs/grid_certification_preregistration_v2.1_2026-08-14.md`)。
+
+⚠ v2 からの変更は **low_signal を model_violated より先に評価する**ことだけ。
+v2 の順序では H (D₃ = 7.4e-14 = 床の 4 桁下の明白な低信号) が**雑音の比**
+q₂₃ = 5.06 で model_violated と誤分類された (実行報告 §3。v1 の轍
+「低信号点を violating に落とす」の残滓)。設計意図 (v2 §3.2「低信号なら
+q₂₃ は検査不能」) からすれば低信号の検査不能が先である。
+
+順序で判定が変わるのは「D₃ ≤ 1e-9 かつ q₂₃ > 0.5」の元素だけで、
+本走 86 元素では H のみ (He/Li は q₂₃ ≤ 0.5 で同ラベル、残り 83 元素は
+D₃ > 1e-9 で low_signal が偽 — 集計で確認済み)。
+
+`uncertifiable_scf` が先頭のままなのは、収束していない解では D₃ も q₂₃ も
+意味を持たないから (低信号の判定にも使えない)。"""
+element_status(conv_ok::Bool, low_signal::Bool, contraction::String,
+               bound_ok::Bool, sgn_ok::Bool) =
+    !conv_ok ? "uncertifiable_scf" :
+    low_signal ? "uncertifiable_low_signal" :
+    contraction == "model_violated" ? "model_violated" :
+    (bound_ok && contraction == "pass" && sgn_ok ? "certified" : "uncertifiable")
+
 function certify_l1(z::Int; outdir::String)
     t0 = time()
     sol = solve_element(z)
@@ -223,14 +245,13 @@ function certify_l1(z::Int; outdir::String)
     # 低信号 (‖Δρ₃‖ が停止スケール以下) は q₂₃ が検査不能なので uncertifiable —
     # ⚠ 床置きで certified にしない (codex 却下。相殺の可能性を排除できない)。
     # ラダー全試行失敗は uncertifiable_scf として区別する (codex 3 巡目)。
-    status = !conv_ok ? "uncertifiable_scf" :
-             contraction == "model_violated" ? "model_violated" :
-             low_signal ? "uncertifiable_low_signal" :
-             (bound <= B_GRID && contraction == "pass" && sgn_ok ?
-              "certified" : "uncertifiable")
+    # 順序は v2.1 (`element_status` の docstring 参照)。
+    status = element_status(conv_ok, low_signal, contraction, bound <= B_GRID, sgn_ok)
 
     doc = Dict{String,Any}(
-        "tool" => "certify_l1.jl", "schema" => 3, "z" => z,
+        "tool" => "certify_l1.jl", "schema" => 4,
+        "preregistration" => "v2.1 (docs/grid_certification_preregistration_v2.1_2026-08-14.md)",
+        "z" => z,
         "n_orbitals_dirac" => length(dirac_occupancy(ORBITALS[z])),
         "stages" => L1_STAGES,
         "dt" => [GRID_DT / 2^(k - 1) for k in L1_STAGES],
