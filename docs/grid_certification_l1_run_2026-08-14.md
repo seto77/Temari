@@ -5,6 +5,28 @@
 実装 = `tools/certify_l1.jl` (同コミット)。
 生の出力 = **`c:/tmp/temari_certify_l1_2026-08-13/`** (86 JSON + `AGGREGATE_final.txt`)。
 
+> ## ★ 追記 (2026-08-14 08:00) — 規則 v2.1 で H の分類を修正し、最終状態になった
+>
+> §3 のバグは **事前登録 v2.1** (`docs/grid_certification_preregistration_v2.1_2026-08-14.md`、
+> `cddd5d0` で凍結) として修正した。変更は分類順序 1 点のみ
+> (low_signal を model_violated より先に評価)。負のテスト
+> `l1_negative_test.jl` [D] が「H 型の合成例が v2.1 で low_signal に分類され、
+> 旧 v2 順序 (ローカル再現) だと model_violated に誤分類される」対比を実演
+> (ALL PASS)。凍結後に **H/He/Li の 3 元素だけ再走**した (83 元素は
+> D₃ > 1e-9 で判定不変 — 86 JSON の集計で確認済み)。旧 v2 の 3 JSON は
+> `v2_superseded/` に退避。
+>
+> **最終集計: certified 83 / uncertifiable_low_signal 3 (H・He・Li) /
+> model_violated 0 / uncertifiable_scf 0 / 欠落なし。**
+>
+> ★ 再走の L¹ 値 (‖Δρ₂‖・‖Δρ₃‖・‖Δρ₄‖) は旧走と**ビット同一**だった —
+> 決定論的ラダー (初期値 = TF 密度固定・再利用なし) の設計どおり。
+> 変わったのは status ラベルだけである。
+>
+> ⚠ 訂正: §3 の「bound は 4.2e-14 + 1e-13 ≈ 1.4e-13 (0.000002×B_grid)」は
+> 内訳の計算を誤っていた。正しくは **1.1×7.43e-14 + 1e-13 = 1.82e-13
+> (0.000003×B_grid)**。結論 (予算超過の事実は無い) は変わらない。
+
 ---
 
 ## 0. 一行で言うと
