@@ -52,11 +52,23 @@ function endpoints_element(z::Int; stage::Int, deep::Bool,
                           tol_e = SCF_TOL_E * TIGHT_FAC, max_iter = 1200, kw...)
     fx(a) = (f = xray_form_factor(a.r, a.dt, a.rho, K); f .* (a.nel / f[1]))
     t0 = time()
+    # ★ 元素単位ラダー (260814Cl 追加。一次スクリーニング初走で Er/Tm/Yb の
+    #   計 5 解が τ/10 に届かなかったため — L¹ 認証と同じ現象)。
+    #   どれかが未収束なら base + 全変種を β0.08/2400 で解き直す。**変種ごとに
+    #   「最初に収束した試行」を混ぜない** — base との差に mixing・停止点の
+    #   手順差が混入する (certify_l1.jl のラダー設計と同じ理由)。
+    trial = 1
     base = mk()
+    solved = [(name, mk(; kw...)) for (name, kw) in endpoint_variants(deep)]
+    if !(base.converged && all(a.converged for (_, a) in solved))
+        trial = 2
+        base = mk(beta = 0.08, max_iter = 2400)
+        solved = [(name, mk(; kw..., beta = 0.08, max_iter = 2400))
+                  for (name, kw) in endpoint_variants(deep)]
+    end
     fb = fx(base)
     rows = Dict{String,Any}[]
-    for (name, kw) in endpoint_variants(deep)
-        a = mk(; kw...)
+    for (name, a) in solved
         f = fx(a)
         d = abs.(f .- fb)
         j = argmax(d)
@@ -64,8 +76,9 @@ function endpoints_element(z::Int; stage::Int, deep::Bool,
                                      "converged" => a.converged,
                                      "max_abs" => d[j], "s_at_max" => nodes[j],
                                      "budget_ratio" => d[j] / B_GRID))
-        @printf("  [Z=%d st=%d] %-9s n_r=%7d conv=%-5s max|Δf_x|=%.3e (%.4f×B_grid) @s=%.4f\n",
-                z, stage, name, length(a.r), a.converged, d[j], d[j] / B_GRID, nodes[j])
+        @printf("  [Z=%d st=%d] %-9s n_r=%7d conv=%-5s max|Δf_x|=%.3e (%.4f×B_grid) @s=%.4f (試行 %d)\n",
+                z, stage, name, length(a.r), a.converged, d[j], d[j] / B_GRID,
+                nodes[j], trial)
         flush(stdout)
     end
     # ⚠ 2 段測ったときだけ「縮んでいるか」を言える。1 段では**言えない**
@@ -78,6 +91,7 @@ function endpoints_element(z::Int; stage::Int, deep::Bool,
     return Dict{String,Any}("z" => z, "stage" => stage, "dt" => dt,
                             "n_r_base" => length(base.r),
                             "base_converged" => base.converged,
+                            "ladder_trial" => trial,
                             "variants" => rows, "shrink" => shrink,
                             "secs" => time() - t0,
                             "tool_sha256" => bytes2hex(open(sha256, @__FILE__)),
