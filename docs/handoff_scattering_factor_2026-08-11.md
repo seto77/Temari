@@ -3,8 +3,8 @@
 > ## ★★ 最新 (2026-08-14 04:09) — L¹ 認証 (事前登録 v2) が全 Z 完走した
 >
 > **正本 = `docs/grid_certification_l1_run_2026-08-14.md`**。
-> **certified 83 / 低信号 2 (He・Li) / 分類バグ 1 (H — 実質 low_signal)。
-> bound の最悪は Er 68 の 0.583×B_grid で、予算超過はゼロ。**
+> **certified 83 / 低信号 2 (He・Li) / 分類バグ 1 (H — 実質 low_signal)**。
+> **bound の最悪は Er 68 の 0.583×B_grid で、予算超過はゼロ**。
 > ラダー試行 2 が v1 で認証不能だった Tm・Yb を救済し、q₃₄ 診断は信号のある
 > 75 元素すべてで尾の仮定 (q* = 0.5) を支持した。
 > 規則 = `docs/grid_certification_preregistration_v2_2026-08-12.md` (`ebe585c` 凍結)。
