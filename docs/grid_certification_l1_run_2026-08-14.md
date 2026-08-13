@@ -16,16 +16,16 @@
 > D₃ > 1e-9 で判定不変 — 86 JSON の集計で確認済み)。旧 v2 の 3 JSON は
 > `v2_superseded/` に退避。
 >
-> **最終集計: certified 83 / uncertifiable_low_signal 3 (H・He・Li) /
-> model_violated 0 / uncertifiable_scf 0 / 欠落なし。**
+> **最終集計: certified 83 / uncertifiable_low_signal 3 (H・He・Li)**、
+> model_violated 0 / uncertifiable_scf 0 / 欠落なし。
 >
 > ★ 再走の L¹ 値 (‖Δρ₂‖・‖Δρ₃‖・‖Δρ₄‖) は旧走と**ビット同一**だった —
 > 決定論的ラダー (初期値 = TF 密度固定・再利用なし) の設計どおり。
 > 変わったのは status ラベルだけである。
 >
 > ⚠ 訂正: §3 の「bound は 4.2e-14 + 1e-13 ≈ 1.4e-13 (0.000002×B_grid)」は
-> 内訳の計算を誤っていた。正しくは **1.1×7.43e-14 + 1e-13 = 1.82e-13
-> (0.000003×B_grid)**。結論 (予算超過の事実は無い) は変わらない。
+> 内訳の計算を誤っていた。正しくは **1.1×7.43e-14 + 1e-13 = 1.82e-13** =
+> 0.000003×B_grid。結論 (予算超過の事実は無い) は変わらない。
 
 ---
 

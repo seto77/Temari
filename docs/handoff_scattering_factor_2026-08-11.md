@@ -24,9 +24,8 @@
 > ## ★★ L¹ 認証が全 Z 完走し、v2.1 で最終状態になった (2026-08-14)
 >
 > **正本 = `docs/grid_certification_l1_run_2026-08-14.md`**。
-> **最終: certified 83 / uncertifiable_low_signal 3 (H・He・Li) /
-> model_violated 0 / 欠落なし。bound の最悪は Er 68 の 0.583×B_grid で、
-> 予算超過はゼロ**。
+> **最終: certified 83 / uncertifiable_low_signal 3 (H・He・Li)**、
+> model_violated 0 / 欠落なし。**bound の最悪は Er 68 の 0.583×B_grid で予算超過はゼロ**。
 > H の分類順序バグは **事前登録 v2.1** (`cddd5d0` 凍結、負のテスト [D] つき) で
 > 修正し、H/He/Li だけ再走した — **L¹ 値は旧走とビット同一** (決定論的ラダーの
 > 設計どおり)、変わったのは status ラベルだけ。
