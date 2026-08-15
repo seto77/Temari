@@ -558,6 +558,42 @@ function selftest()
         @assert abs(ratio / 16.0 - 1.0) < 0.05 "T12b FAIL: 残差が K⁴ で落ちていない"
     end
 
+    # ---- T12c: δ 形求積と補償和 (260815Cl、作者決定 計画書 §4.23.8-(ii)) ----
+    # f_e の低 K は Z − f_x の桁落ちで Mott–Bethe 直接構成が使えない (それが
+    # δ 形採用の動機 — docs/repr_measurement_2026-08-14.md §3.3)。水素 1s では
+    # deficit = 1 − [1+(K/2)²]⁻² が閉形式 x(2+x)/(1+x)² (x = (K/2)²) で
+    # **桁落ちなく**書けるので、δ 形の低 K 精度を厳密解に対して直接検査できる。
+    let dt = GRID_DT
+        # (a) Kahan 和が逐次和の破綻例を正しく足す
+        @assert kahan_sum([1.0e16, 1.0, -1.0e16]) == 1.0 "T12c FAIL: Kahan 和"
+        # (b) 1−j₀ のテイラー ↔ 直接評価が接続点 x = 0.1 の**同一点**で一致する。
+        #     ⚠ 両側 ±1e-12 の評価を比べてはいけない — 関数自身の傾き x/3 による
+        #     真の変化 (相対 ~4e-11) を「不連続」と誤検出する (実際にやって落ちた)。
+        #     期待差 = 直接式の桁落ち ~2.4e-13 (eps/1.67e-3) + テイラー打ち切り ~1.5e-15
+        x_sw = 0.1
+        oj_taylor = x_sw^2 / 6.0 *
+                    (1.0 - x_sw^2 / 20.0 * (1.0 - x_sw^2 / 42.0 * (1.0 - x_sw^2 / 72.0)))
+        oj_direct = 1.0 - sin(x_sw) / x_sw
+        @assert abs(oj_direct / oj_taylor - 1.0) < 5e-12 "T12c FAIL: 1−j₀ の接続が不一致"
+        t = log(1e-7) .+ dt .* (0:ceil(Int, (log(60.0) - log(1e-7)) / dt))
+        r = exp.(t)
+        rho = exp.(-2 .* r) ./ pi                  # 水素 1s の厳密密度
+        Ks = [1e-4, 1e-3, 1e-2, 0.1, 1.0, 4.0]
+        defic = xray_deficit(r, dt, rho, Ks)
+        exact(K) = (x = (K / 2)^2; x * (2.0 + x) / (1.0 + x)^2)
+        worst_d = maximum(abs(defic[i] / exact(Ks[i]) - 1.0) for i in eachindex(Ks))
+        # (c) f_e(δ形) が K→0 でモーメント展開へ滑らかに繋がる — MB 直接では
+        #     丸めの 1/K² 増幅で測れない領域の検査が、δ 形なら成立する
+        m2 = density_moment(r, dt, rho, 2)
+        m4 = density_moment(r, dt, rho, 4)
+        fe_lo = 2.0 * defic[2] / Ks[2]^2           # K = 1e-3 (deficit ~5e-7)
+        dev_lo = abs(fe_lo / (m2 / 3.0 - Ks[2]^2 * m4 / 60.0) - 1.0)
+        @printf("[T12c] δ 形求積 水素 1s: 閉形式との max 相対 %.2e / K=1e-3 の f_e vs 展開 %.2e\n",
+                worst_d, dev_lo)
+        @assert worst_d < 1e-9 "T12c FAIL: δ 形が閉形式と合わない"
+        @assert dev_lo < 1e-9 "T12c FAIL: 低 K の f_e(δ形) がモーメント展開と合わない"
+    end
+
     # ---- T14: 動径 Slater 関数 Y^k と、自己相互作用の厳密な相殺 ----
     # 厳密交換 (KLI/OEP) へ進む段階 1 の検査。水素 1s (P = 2r e^{−r}) に対して
     #  (a) Y⁰(11;r)/r = その軌道の Hartree ポテンシャル。閉じた形 1/r − e^{−2r}(1+1/r)

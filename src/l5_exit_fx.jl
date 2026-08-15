@@ -45,13 +45,38 @@
 # 注: F(s) 出口はこのバイアスの影響を受けない — N(K)/N(0) の比で完全に相殺する。
 # σ_own には 2×1.67e-7 が残るが、Bote との一致 (数 %) の 5 桁下なので無害。
 
+"""補償和 — **Neumaier の改良 Kahan** (260815Cl、作者決定 §4.23.8-(ii) の上乗せ側)。
+
+逐次和の丸め蓄積 (~n·eps 級。n = 32 万点で ~1e-12 電子の床) を ~eps 級に抑える。
+f_x 自身の予算 (1e-7) には不要な精度だが、**f_e の検証測定の床** (δf_x の床 ε が
+2a₀/K² 倍に増幅される) を ~100 倍下げる。
+
+⚠ classic Kahan ではなく **Neumaier 形**にする理由 (T12c で実測):
+classic は次項が部分和より大きいときの取りこぼしを補償できず、大きな相殺
+([1e16, 1, −1e16] → 0.0) で破綻する。f_x の和は j₀ の符号で項が振動する
+(相殺がある) ので、部分和と項の大小で補償先を切り替える Neumaier が要る
+(同じ例で厳密に 1.0 を返す)。
+⚠ ビット同一の制約は無い — f_x/f_e テーブルは未生成で、この経路は
+出荷済み F v5 と非共有 (2026-08-15 に grep + bitident 差分ゼロで確認)。"""
+function kahan_sum(v::AbstractVector{Float64})
+    s = 0.0
+    c = 0.0                                        # 取りこぼしの補償 (Neumaier)
+    @inbounds for x in v
+        t = s + x
+        c += abs(s) >= abs(x) ? (s - t) + x : (x - t) + s
+        s = t
+    end
+    return s + c
+end
+
 """球対称の動径密度 ρ(r) から X 線原子散乱因子 f_x(K) を求める (純関数)。
 
 `r` は**対数等間隔**グリッド、`dt` はその刻み Δ(ln r)、`rho` は ρ(r) (電子数/体積)。
 対数グリッド上の Simpson (dr = r dt) で積分するので、L1 の SCF 密度と
 第 3 章の束縛解のどちらでもそのまま渡せる。`K` は [a₀⁻¹]。
 
-f_x(0) = ∫4πr²ρ dr = 電子数 が恒等的に成り立つので、これが求積の検査になる。"""
+f_x(0) = ∫4πr²ρ dr = 電子数 が恒等的に成り立つので、これが求積の検査になる。
+260815Cl: 総和を Kahan 補償和にした (作者決定。丸め床 ~1e-12 → ~1e-14)。"""
 function xray_form_factor(r::Vector{Float64}, dt::Float64, rho::Vector{Float64},
                           K::Vector{Float64})
     length(r) == length(rho) || error("r と rho の長さが違う")
@@ -60,21 +85,66 @@ function xray_form_factor(r::Vector{Float64}, dt::Float64, rho::Vector{Float64},
     f = zeros(length(K))
     @inbounds for (ik, k) in enumerate(K)
         if k < 1e-12                               # j₀(0) = 1 (電子数そのもの)
-            f[ik] = sum(g)
+            f[ik] = kahan_sum(g)
             continue
         end
         acc = 0.0
+        comp = 0.0
         for i in eachindex(r)
             x = k * r[i]
-            acc += g[i] * (sin(x) / x)             # j₀(x) = sin(x)/x
+            term = g[i] * (sin(x) / x)             # j₀(x) = sin(x)/x
+            t = acc + term
+            comp += abs(acc) >= abs(term) ? (acc - t) + term : (term - t) + acc
+            acc = t
         end
-        f[ik] = acc
+        f[ik] = acc + comp
     end
     return f
 end
 
 "Mott–Bethe 変換: f_e [a₀] = 2(Z_net − f_x)/K²。K=0 は発散しうるので呼ばない"
 mott_bethe_a0(z_net::Float64, fx::Float64, K::Float64) = 2.0 * (z_net - fx) / (K * K)
+
+"""1 − j₀(x) を全域で桁落ちなく評価する (260815Cl、作者決定 §4.23.8-(ii))。
+
+小 x の 1 − sin(x)/x は激しく桁落ちする (x = 1e-3 で有効 6 桁を失う) ので、
+x < 0.1 はテイラーの入れ子形 (x²/6 の因数分解) で評価する。x = 0.1 での
+打ち切りは次項比 ~1.5e-15 で直接評価の丸めと同水準 — 接続は連続。"""
+one_minus_j0(x::Float64) = x < 0.1 ?
+    x^2 / 6.0 * (1.0 - x^2 / 20.0 * (1.0 - x^2 / 42.0 * (1.0 - x^2 / 72.0))) :
+    1.0 - sin(x) / x
+
+"""δ 形求積 — N_quad − f_x(K) = ∫4πr²ρ(r)[1−j₀(Kr)]dr を**差を取らずに**直接
+求める (260815Cl、作者決定 §4.23.8-(ii) の主側)。
+
+Mott–Bethe を f_x から組むと、f_x の求積丸め床 ε が低 s で 2a₀/K² 倍に増幅され、
+最小非零節点 (s = 7.8125e-4) では Au 級で B_num,e を超える (実測 1.41×。
+正本 = docs/repr_measurement_2026-08-14.md §3.3–3.5)。補償和で ε を下げても
+**差 Z − f_x の桁落ちは残る** (相対 ~1e-11 で頭打ち)。δ 形は被積分関数が
+非負・全項同符号なので桁落ちが構造的に無く、(Z−f_x) を相対 ~1e-15 で持てる。
+
+⚠ 戻り値は「**求積の** f_x(0) との差」(K=0 で厳密に 0)。規格化補正
+(nel/n_raw) は呼び側で f_x と同じ規則で掛けること。"""
+function xray_deficit(r::Vector{Float64}, dt::Float64, rho::Vector{Float64},
+                      K::Vector{Float64})
+    length(r) == length(rho) || error("r と rho の長さが違う")
+    w = simpson_weights(length(r), dt) .* r
+    g = 4.0 * pi .* r .^ 2 .* rho .* w
+    out = zeros(length(K))
+    @inbounds for (ik, k) in enumerate(K)
+        k < 1e-12 && continue                      # 1 − j₀(0) = 0 (厳密)
+        acc = 0.0
+        comp = 0.0
+        for i in eachindex(r)
+            term = g[i] * one_minus_j0(k * r[i])
+            t = acc + term
+            comp += abs(acc) >= abs(term) ? (acc - t) + term : (term - t) + acc
+            acc = t
+        end
+        out[ik] = acc + comp
+    end
+    return out
+end
 
 """球対称密度の**動径モーメント** M_n = 4π∫ r^(2+n) ρ(r) dr (260810Cl 追加)。
 
@@ -83,10 +153,12 @@ mott_bethe_a0(z_net::Float64, fx::Float64, K::Float64) = 2.0 * (z_net - fx) / (K
 (Zhang らの ζ と同じく、記号が曖昧なままだと消費側が 4π や N の分だけ外す)。
 
 f_x と**同じ求積** (対数格子上の Simpson、dr = r dt) を使うのが要点。別の積分器で
-求めると、下の `f_e(0)` が「f_x の K→0 極限」であることが保証されなくなる。"""
+求めると、下の `f_e(0)` が「f_x の K→0 極限」であることが保証されなくなる。
+260815Cl: f_x と同じ規則で Kahan 補償和にした (f_e(0) = a₀M₂/3 と MB 側の
+整合検査が丸め層でずれないように — 作者決定 §4.23.8-(ii))。"""
 function density_moment(r::Vector{Float64}, dt::Float64, rho::Vector{Float64}, n::Int)
     w = simpson_weights(length(r), dt) .* r        # dr = r dt
-    return 4.0 * pi * sum(r .^ (2 + n) .* rho .* w)
+    return 4.0 * pi * kahan_sum(r .^ (2 + n) .* rho .* w)
 end
 
 # ---- f_e の K → 0 極限 -----------------------------------------------------
@@ -154,12 +226,30 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
     # なくなり、s=0 と s→0 で食い違う (規格化補正は一様スケールなので単純に乗る)
     m2 = density_moment(a.r, a.dt, a.rho, 2) * corr
     m4 = density_moment(a.r, a.dt, a.rho, 4) * corr
-    neutral = abs(z_net - fx[1]) < 1e-8 * max(1.0, z_net)
+    neutral = abs(z_net - a.nel) < 1e-8 * max(1.0, z_net)
+    # ---- f_e は δ 形で構成する (260815Cl、作者決定 §4.23.8-(ii)) ----
+    # f_e = 2(Z_net − corr·f_x_raw)/K² = 2(q_net + corr·deficit)/K²、
+    # q_net = Z_net − nel (中性なら厳密に 0)。差 Z − f_x を数値で踏まないので、
+    # 低 s でも丸め床の 1/K² 増幅が起きない (MB 直接構成は Au 級で 1.41×B_num,e)
+    q_net = z_net - a.nel
+    defic = xray_deficit(a.r, a.dt, a.rho, K) .* corr
     fe = Union{Nothing,Float64}[k < 1e-12 ?
                                 # K=0: 中性なら極限 M₂/3 が有限。イオンは発散するので null
                                 (neutral ? fe_zero_limit_a0(m2) * BOHR_ANG : nothing) :
-                                mott_bethe_a0(z_net, fx[i], k) * BOHR_ANG
+                                2.0 * (q_net + defic[i]) / (k * k) * BOHR_ANG
                                 for (i, k) in enumerate(K)]
+    # ---- 生成時ゲート (作者決定とセット): δ 形 ↔ MB 構成の整合 ----
+    # 増幅の無い域 (s ≥ 0.2) では両者は同じ量。相対差が閾値を超えたら
+    # どちらかの実装が壊れている (閾値 1e-10 = 補償和後の床 ~1e-13 の 1000 倍)
+    fe_mb_maxrel = 0.0
+    @inbounds for (i, k) in enumerate(K)
+        s_nodes[i] >= 0.2 || continue
+        d = abs(2.0 * (q_net + defic[i]) / (k * k) - mott_bethe_a0(z_net, fx[i], k))
+        rel = d / max(abs(2.0 * (q_net + defic[i]) / (k * k)), 1e-300)
+        rel > fe_mb_maxrel && (fe_mb_maxrel = rel)
+    end
+    fe_mb_maxrel <= 1e-10 ||
+        error("Z=$z: δ 形と Mott–Bethe 構成が s ≥ 0.2 で不整合 (相対 $fe_mb_maxrel)")
     verbose && @printf("Z=%d  電子数 %.1f  規格化補正 %.3e (台形則バイアス Z×1.67e-7)\n",
                        z, a.nel, corr - 1.0)
     return Dict{String,Any}(
@@ -182,6 +272,10 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
         "m2_a0sq" => m2, "m4_a0four" => m4,
         "f_e_zero_source" => neutral ? "M2/3 (K->0 limit of the Mott-Bethe form)" :
                              "null (ion: Z_net - f_x(0) != 0, so f_e diverges as K^-2)",
+        # δ 形構成の来歴と、MB 構成との整合ゲートの実測値 (260815Cl)
+        "f_e_construction" => "deficit quadrature (int rho*(1-j0)) + Kahan sums; " *
+                              "no Z - f_x cancellation at low s",
+        "f_e_mb_consistency_maxrel" => fe_mb_maxrel,
         "relativistic" => a.relativistic, "exchange" => String(a.exchange),
         "density" => (a.relativistic ? "DHFS (完全 Dirac SCF、小成分込み)" :
                       "HFS (非相対論)") *
