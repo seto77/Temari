@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seto77.github.io/Temari/schema/temari_factors_v1.schema.json",
+  "title": "Temari atomic scattering factor table (dataset-factors, schema_version 1)",
+  "description": "One file per neutral atom (Z = 1..86): X-ray atomic scattering factor f_x(s) [electrons] and first-Born electron scattering factor f_e(s) [A] on the fixed grid s_i = 6 i / 7680 (7681 nodes, NOT stored - reconstruct it and check s_grid.sha256_f64le). This schema is normative for schema_version 1, shipped as dataset-factors v1.x. Read the interpolation_contract: f_x is a cubic spline in s with f_x'(0) = 0 at the left end and not-a-knot at the right end; f_e is a not-a-knot cubic spline in t = s^2. Values are decimal-rounded to 11 significant digits and serialized as JSON numbers; loaders parse them as binary64 and do not re-round. gamma (incident-electron relativistic factor) is NOT included in f_e.",
+  "type": "object",
+  "required": [
+    "schema_version", "dataset", "dataset_version", "model_id", "generator", "generator_commit",
+    "source_dirty", "generator_source_sha256", "generator_source_files", "julia",
+    "z", "symbol", "charge", "n_electrons", "occupation_nlq", "prescription", "numerics_config_tag",
+    "constants", "s_grid", "rounding", "interpolation_contract", "units",
+    "f_x", "f_e_A", "moments", "n_electrons_raw", "norm_correction", "scf",
+    "gates", "gates_version", "budget", "certification_pointers", "notes"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "dataset": { "const": "temari-factors" },
+    "dataset_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-dev)?$",
+      "description": "Semantic version of the DATA (dataset-factors family), independent of the software version and of the F(s,E0) dataset. '0.0.0-dev' means a prescription or grid outside the shipping contract and MUST NOT be packed for release."
+    },
+    "model_id": { "type": "string", "description": "Physics + numerics identifier. Every file in a set carries the same value; a set with mixed model_id is not a dataset." },
+    "generator": { "const": "gen_factors.jl" },
+    "generator_commit": { "type": "string", "pattern": "^[0-9a-f]{40}$", "description": "Full git SHA of the generator source tree (pure hash; dirtiness is a separate field)." },
+    "source_dirty": { "type": "boolean", "description": "true if src/ had uncommitted (tracked or untracked) changes at generation time. Shipping files MUST have false." },
+    "generator_source_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 over the include closure of the generator (CRLF normalized to LF), the real identity of the code that ran. Uniform across a set and equal to the value frozen in manifest.json." },
+    "generator_source_files": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "julia": { "type": "string" },
+    "z": { "type": "integer", "minimum": 1, "maximum": 86 },
+    "symbol": { "type": "string", "pattern": "^[A-Z][a-z]?$" },
+    "charge": { "const": 0, "description": "Neutral atoms only in v1. Ions are NOT derivable from these tables." },
+    "n_electrons": { "type": "number", "description": "Equals z exactly (neutral)." },
+    "occupation_nlq": {
+      "type": "array", "minItems": 1,
+      "items": { "type": "array", "prefixItems": [ { "type": "integer" }, { "type": "integer" }, { "type": "number" } ], "minItems": 3, "maxItems": 3 },
+      "description": "[n, l, occupancy] of the ground configuration used by the SCF (spherically averaged; the Dirac solver splits l>0 into j = l+-1/2 in proportion to degeneracy)."
+    },
+    "prescription": {
+      "type": "object",
+      "required": ["relativistic", "exchange", "latter_charge", "numerics", "grid_stage", "dt", "r0_a0", "rmax_a0", "tol_rho", "tol_e", "scf_retry", "density", "quadrature", "f_x_normalization", "f_e_construction"],
+      "properties": {
+        "relativistic": { "const": true },
+        "exchange": { "const": "kli" },
+        "numerics": { "const": "dirac_true_midpoint_v1" },
+        "grid_stage": { "type": "integer", "minimum": 1 },
+        "dt": { "type": "number", "exclusiveMinimum": 0, "description": "Log-radial step Delta(ln r). Shipping: 6.25e-5 (= 1e-3/16)." },
+        "r0_a0": { "type": "number", "exclusiveMinimum": 0 },
+        "rmax_a0": { "type": "number", "exclusiveMinimum": 0 },
+        "tol_rho": { "type": "number", "exclusiveMinimum": 0 },
+        "tol_e": { "type": "number", "exclusiveMinimum": 0 },
+        "scf_retry": { "type": "object", "required": ["beta", "max_iter"] },
+        "density": { "type": "string" },
+        "quadrature": { "type": "string" },
+        "f_x_normalization": { "type": "string" },
+        "f_e_construction": { "type": "string" }
+      }
+    },
+    "numerics_config_tag": { "type": "string", "description": "cache_tag of the NumericsConfig the atom was actually solved with (asserted equal to the recipe by gate G0)." },
+    "constants": {
+      "type": "object", "required": ["bohr_A"],
+      "properties": { "bohr_A": { "type": "number", "description": "Bohr radius in A used for K = 4 pi s a0 and for f_e [A] = a0 * f_e [a0]. Needed to reproduce the Mott-Bethe check from the file alone." } }
+    },
+    "s_grid": {
+      "type": "object",
+      "required": ["definition", "n_intervals", "n_nodes", "s_max_A_inv", "unit", "sha256_f64le"],
+      "properties": {
+        "n_intervals": { "const": 7680 },
+        "n_nodes": { "const": 7681 },
+        "s_max_A_inv": { "const": 6.0 },
+        "sha256_f64le": { "const": "1476113c622ccb9e62d4b56973277b7e550fef44357cf42d7923a9dde84f32fb", "description": "SHA-256 of the 7681 nodes as a float64 little-endian byte stream. A loader MUST reconstruct s_i = 6*i/7680 in binary64 (Julia 6.0*i/7680, Python 6*i/7680) and check this hash before interpolating." },
+        "unit": { "type": "string" },
+        "definition": { "type": "string" }
+      }
+    },
+    "rounding": {
+      "type": "object", "required": ["significant_digits", "applies_to", "rule"],
+      "properties": {
+        "significant_digits": { "const": 11 },
+        "applies_to": { "const": ["f_x", "f_e_A"] },
+        "rule": { "type": "string" },
+        "max_abs_rounding_fx": { "type": "number", "minimum": 0 },
+        "max_abs_rounding_fe_A": { "type": "number", "minimum": 0 }
+      }
+    },
+    "interpolation_contract": {
+      "type": "object", "required": ["f_x", "f_e_A", "domain", "reference_loader"],
+      "properties": {
+        "f_x": { "type": "string", "pattern": "clamped.*not-a-knot" },
+        "f_e_A": { "type": "string", "pattern": "t = s\\^2|t_i = s_i\\^2" },
+        "domain": { "type": "string" },
+        "forbidden": { "type": "array", "items": { "type": "string" } },
+        "reference_loader": { "const": "tools/temari_factors_contract.py" }
+      }
+    },
+    "units": {
+      "type": "object", "required": ["s", "f_x", "f_e_A"],
+      "properties": { "s": { "const": "A^-1" }, "f_x": { "const": "electrons" }, "f_e_A": { "const": "A" } }
+    },
+    "f_x": {
+      "type": "array", "minItems": 7681, "maxItems": 7681, "items": { "type": "number" },
+      "description": "X-ray atomic scattering factor [electrons] at s_i. f_x[0] == Z exactly (normalization is a wiring contract, see n_electrons_raw for the pre-normalization electron count). |f_x| <= Z."
+    },
+    "f_e_A": {
+      "type": "array", "minItems": 7681, "maxItems": 7681, "items": { "type": "number", "exclusiveMinimum": 0 },
+      "description": "First-Born (Mott-Bethe) NON-relativistic electron scattering factor [A] at s_i, built by deficit quadrature (no Z - f_x cancellation at low s). f_e[0] = a0*M2/3. Positive for neutral atoms. gamma NOT included."
+    },
+    "moments": {
+      "type": "object", "required": ["m2_a0sq", "m4_a0four", "m6_a0six", "m8_a0eight"],
+      "properties": {
+        "m2_a0sq": { "type": "number", "exclusiveMinimum": 0 },
+        "m4_a0four": { "type": "number", "exclusiveMinimum": 0 },
+        "m6_a0six": { "type": "number", "exclusiveMinimum": 0 },
+        "m8_a0eight": { "type": "number", "exclusiveMinimum": 0 }
+      },
+      "description": "Radial moments M_n = 4 pi int r^(2+n) rho dr [a0^n], normalization correction applied with the same rule as f_x. NOT <r^n> (that is M_n/N). Small-s expansion: f_e = a0[M2/3 - K^2 M4/60 + K^4 M6/2520 - K^6 M8/181440 + ...]."
+    },
+    "n_electrons_raw": { "type": "number", "exclusiveMinimum": 0, "description": "Simpson integral of the SCF density BEFORE the uniform normalization (X3 quality indicator; expected Z*(1 - 6.5e-10) at dt/16)." },
+    "norm_correction": { "type": "number", "exclusiveMinimum": 0, "description": "Uniform scale minus 1 applied to f_x, the deficit and all moments." },
+    "scf": {
+      "type": "object", "required": ["converged", "retried", "n_r", "dt", "eigenvalues_hartree", "z_asym"],
+      "properties": { "converged": { "const": true }, "n_r": { "type": "integer", "minimum": 1000 } }
+    },
+    "gates": {
+      "type": "object",
+      "required": ["G0_cfg_matches_recipe", "G0_neutral", "G0_s_grid_sha256", "G1_scf_converged", "G2_deficit_vs_mott_bethe", "G3_small_s_expansion", "G4_sanity", "G5_normalization_bias"],
+      "description": "Generation-time gate ledger: every gate with value, threshold, rule and pass. A shipped file has pass == true everywhere (the generator refuses to write otherwise)."
+    },
+    "gates_version": { "const": 1 },
+    "budget": { "type": "object", "required": ["f_x", "f_e"] },
+    "certification_pointers": { "type": "array", "items": { "type": "string" } },
+    "notes": { "type": "array", "items": { "type": "string" } }
+  }
+}
