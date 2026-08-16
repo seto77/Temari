@@ -5,11 +5,15 @@
 ここで行う。1 段目 (ep_zNNN_st1.json、変種 2) と 2 段目 deep (ep_zNNN_stS_deep.json、変種 4 +
 縮み比) の両方を読む。
 
-出力: 元素ごとに 変種別の max|Δf_x| / B_grid、s@max、収束、ラダー試行、(deep なら) 縮み比
-r0_ratio = |Δ(r0/100)|/|Δ(r0/10)|、rmax_ratio = |Δ(rmax×2)|/|Δ(rmax×1.5)|。
-最後に最悪値と「縮んでいない (比 > 1)」元素の一覧。⚠ 縮み比は**両方の差が床 (~1e-11、
-tight の停止残差) より大きいときだけ意味がある** — 差が 0 か床以下なら「検査不能」と分類し、
-比を出さない (fixed-threshold-assumes-sn の流儀)。
+出力: 元素ごとに 変種別の max|Δf_x| / B_grid、s@max、収束、ラダー試行、(deep なら) 飽和比
+r0_ratio = |Δ(r0/100)|/|Δ(r0/10)|、rmax_ratio = |Δ(rmax×2)|/|Δ(rmax×1.5)| (Δ = 基準格子との差)。
+⚠ **読み方 (2026-08-16 に訂正)**: 切断誤差 E(r₀) が r₀→0 で消えるなら、基準格子との差は
+どちらも ≈ E(r₀) で **比 ≈ 1 = 飽和 (r₀/10 で効果を取り切っている)** が正常。比 ≫ 1 なら
+未飽和 (E がゆっくり減る) で、その場合の上界は大きい方の差。「比 < 1 = 縮む」を期待するのは
+誤り (2 段の差の縮みは |f(r₀/100)−f(r₀/10)| で見るものだが、ツールは基準差しか保存していない)。
+いずれにせよ**基準格子の切断誤差の上界 = max(Δ_A, Δ_B)**。
+⚠ 比は**両方の差が床 (tight 2 解の停止ゆらぎ ~5e-10) より大きいときだけ意味がある** —
+差が床以下なら「切断効果 ≤ 停止ゆらぎ」と分類し、比を出さない (fixed-threshold-assumes-sn)。
 
 使い方:
     python tools/endpoints_aggregate.py c:/tmp/temari_endpoints2_2026-08-16            # deep (2 段目)
@@ -80,7 +84,7 @@ def main(argv):
         lines.append("")
         lines.append("最悪: " + " / ".join("%s %.3e (%.4f×B_grid) @Z=%d" % (k, w[0], w[0] / B_GRID, w[1]) for k, w in worst.items()))
     else:
-        hdr = ("| Z | 元素 | stage | dt | 試行 | 収束 | r0/10 | r0/100 | 縮み比 r0 | rmax×1.5 | rmax×2 | 縮み比 rmax |")
+        hdr = ("| Z | 元素 | stage | dt | 試行 | 収束 | r0/10 | r0/100 | 飽和比 r0 | rmax×1.5 | rmax×2 | 飽和比 rmax |")
         lines += [hdr, "|---:|---|---:|---:|---:|---|---:|---:|---:|---:|---:|---:|"]
         not_shrinking = []
         untestable = []
@@ -100,14 +104,14 @@ def main(argv):
             for name, val in (("r0", r0r), ("rmax", rmr)):
                 if val is None:
                     untestable.append("%s@Z=%d/st%d" % (name, r["z"], r["stage"]))
-                elif val > 1.0:
+                elif val > 2.0:            # 未飽和 (2 段目の差が 1 段目の 2 倍超)
                     not_shrinking.append("%s@Z=%d/st%d (%.2f)" % (name, r["z"], r["stage"], val))
         lines.append("")
-        lines.append("値は max|Δf_x|/B_grid (B_grid = 6e-8)。縮み比 = |Δ(2 段目)|/|Δ(1 段目)|、両方が床 %.0e (tight 2 解の停止ゆらぎ、τ/100 診断から) 超のときだけ" % FLOOR)
-        lines.append("差が床以下の変種は「切断効果 ≤ 停止ゆらぎ」であり、上界は max|Δ| そのもの (縮み比は測れない)")
+        lines.append("値は max|Δf_x|/B_grid (B_grid = 6e-8)。飽和比 = |Δ(2 段目)|/|Δ(1 段目)| (どちらも基準格子との差)、両方が床 %.0e (tight 2 解の停止ゆらぎ、τ/100 診断から) 超のときだけ" % FLOOR)
+        lines.append("読み方: 比 ≈ 1 = 飽和 (1 段目で効果を取り切っている) / 比 ≫ 1 = 未飽和 (上界は大きい方の差)。差が床以下の変種は「切断効果 ≤ 停止ゆらぎ」で比は測れない。基準格子の切断誤差の上界 = max(Δ)")
         lines.append("最悪: " + " / ".join("%s %.3e (%.4f×B_grid) @Z=%d st%d" % (k, w[0], w[0] / B_GRID, w[1], w[2]) for k, w in worst.items()))
-        lines.append("縮んでいない (比 > 1): " + (", ".join(not_shrinking) if not_shrinking else "無し"))
-        lines.append("縮み比が検査不能 (差が床以下): " + (", ".join(untestable) if untestable else "無し"))
+        lines.append("未飽和 (比 > 2): " + (", ".join(not_shrinking) if not_shrinking else "無し"))
+        lines.append("飽和比が検査不能 (差が床以下): " + (", ".join(untestable) if untestable else "無し"))
         lines.append("未収束を含む: " + (", ".join("Z=%d/st%d" % (r["z"], r["stage"]) for r in rows if not (r["conv"] and r["base_conv"])) or "無し"))
         lines.append("ラダー試行 2: " + (", ".join("Z=%d/st%d" % (r["z"], r["stage"]) for r in rows if r["trial"] > 1) or "無し"))
     text = "\n".join(lines)
