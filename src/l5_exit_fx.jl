@@ -207,14 +207,28 @@ f_x/f_e の出口は **`get_neutral` の ρ しか使わない**ので、EDX 出
 function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
                     relativistic::Bool=true, x_alpha::Float64=X_ALPHA,
                     exchange::Symbol=:xalpha, verbose::Bool=true,
-                    cfg::NumericsConfig=NumericsConfig())
+                    cfg::NumericsConfig=NumericsConfig(),
+                    atom::Union{Nothing,SCFAtom}=nothing)
     s_nodes === nothing && (s_nodes = collect(0.0:0.1:6.0))
     isempty(s_nodes) && error("s_nodes は 1 点以上")
     all(isfinite, s_nodes) || error("s_nodes は有限値")
     all(>=(0.0), s_nodes) || error("s_nodes は 0 以上")
     issorted(s_nodes) || error("s_nodes は昇順で")
-    a = get_neutral(z; relativistic=relativistic, x_alpha=x_alpha,
-                    exchange=exchange, cfg=cfg)
+    # 260816Cl: `atom` に解済みの中性原子を渡せる (出荷生成器 `gen_factors.jl` 用)。
+    # 生成器は SCF キャッシュを介さず、認証 (`certify_grid.jl` の `solve_prod`) と
+    # **同一手順**で解いた原子をそのまま渡す — キャッシュ経由だと「別の cfg で
+    # 解いた原子を黙って読む」事故の形が残るため。渡されたら Z・処方が一致する
+    # ことだけ検査し、`relativistic`/`exchange`/`cfg` は原子側の値を正とする
+    if atom === nothing
+        a = get_neutral(z; relativistic=relativistic, x_alpha=x_alpha,
+                        exchange=exchange, cfg=cfg)
+    else
+        a = atom
+        a.z == z || error("atom.z=$(a.z) が要求 Z=$z と違う")
+        a.relativistic == relativistic ||
+            error("atom.relativistic=$(a.relativistic) が要求 $relativistic と違う")
+        a.exchange === exchange || error("atom.exchange=$(a.exchange) が要求 $exchange と違う")
+    end
     a.converged || error("Z=$z の中性 SCF が未収束")
     K = 4.0 * pi .* s_nodes .* BOHR_ANG            # s [Å⁻¹] → K [a₀⁻¹] (F(s) と同規約)
     # 台形則規格化のバイアスを除く (上のコメント参照)。一様スケールなので形は不変
@@ -226,6 +240,9 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
     # なくなり、s=0 と s→0 で食い違う (規格化補正は一様スケールなので単純に乗る)
     m2 = density_moment(a.r, a.dt, a.rho, 2) * corr
     m4 = density_moment(a.r, a.dt, a.rho, 4) * corr
+    # M₆ は小 K 展開の 3 項目 f_e = a₀[M₂/3 − K²M₄/60 + K⁴M₆/2520 − …] に使う
+    # (出荷生成器の s→0 整合ゲート。260816Cl 追加。K⁶ 項は M₈/181440)
+    m6 = density_moment(a.r, a.dt, a.rho, 6) * corr
     neutral = abs(z_net - a.nel) < 1e-8 * max(1.0, z_net)
     # ---- f_e は δ 形で構成する (260815Cl、作者決定 §4.23.8-(ii)) ----
     # f_e = 2(Z_net − corr·f_x_raw)/K² = 2(q_net + corr·deficit)/K²、
@@ -269,7 +286,7 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
         "f_x" => fx, "f_e_A" => fe,
         # 動径モーメント (規格化補正込み)。f_e(0) = M₂/3 [a₀] の出所であり、
         # 小 K での展開 f_e(K) = M₂/3 − K²M₄/60 + O(K⁴) の検算にも使える
-        "m2_a0sq" => m2, "m4_a0four" => m4,
+        "m2_a0sq" => m2, "m4_a0four" => m4, "m6_a0six" => m6,
         "f_e_zero_source" => neutral ? "M2/3 (K->0 limit of the Mott-Bethe form)" :
                              "null (ion: Z_net - f_x(0) != 0, so f_e diverges as K^-2)",
         # δ 形構成の来歴と、MB 構成との整合ゲートの実測値 (260815Cl)
