@@ -141,7 +141,8 @@ function main(args)
                                             "G2" => (0.0, 0), "G3" => (0.0, 0), "G5" => (0.0, 0),
                                             "knot" => (0.0, 0), "nak" => (0.0, 0), "cert_fx" => (0.0, 0),
                                             "cert_m2" => (0.0, 0), "golden" => (0.0, 0),
-                                            "cert_tight" => (0.0, 0), "cert_tight_e" => (0.0, 0))
+                                            "cert_tight" => (0.0, 0), "cert_tight_e" => (0.0, 0),
+                                            "f8d_switch_ratio" => (0.0, 0))
     cert_identical = Int[]; cert_other = Int[]; cert_no_tight = Int[]; cert_extra_tight = Int[]
     upd!(k, v, z) = (v > worst[k][1] && (worst[k] = (v, z)))
     n_cert = 0
@@ -289,6 +290,15 @@ function main(args)
                         end
                     end
                     ue = max(ue_mom, ue_mb)
+                    # [記録] 切替点の直上で 2 経路が同程度か (展開の値 vs MB の値。丸めで MB 側は
+                    # ±2a₀·半単位/K² ぶれるので、一致は「同じ桁」の確認に留める)
+                    i_sw = findfirst(>=(s_sw), s)
+                    if i_sw !== nothing
+                        Ksw = 4.0 * pi * s[i_sw] * a0
+                        v_mom = a0 * abs((m2 - m2t) / 3.0 - Ksw * Ksw * (m4s - m4t) / 60.0)
+                        v_mb = 2.0 * a0 * abs(fx[i_sw] - c.fx_tight[i_sw]) / (Ksw * Ksw)
+                        upd!("f8d_switch_ratio", v_mb / max(v_mom, 1e-300), z)
+                    end
                     ue_ship = ue + A_TIGHT_FRAC * B_SCF_E_QC
                     upd!("cert_tight_e", ue_ship / B_SCF_E_QC, z)
                     ue_ship <= B_SCF_E_QC || fail(@sprintf("F8d %s: 出荷 f_e の停止誤差 %.2e Å (展開 %.2e / MB %.2e, s_sw=%.3f) + allowance > B_scf,e", tag, ue, ue_mom, ue_mb, s_sw))
@@ -343,8 +353,8 @@ function main(args)
         end
         @printf("    F8b 出荷 f_x の停止誤差 (|ship−tight| + %.2f allowance) / B_scf 最悪 %.3f @Z=%d / F8d f_e 側 / B_scf,e 最悪 %.3f @Z=%d\n",
                 A_TIGHT_FRAC, worst["cert_tight"]..., worst["cert_tight_e"]...)
-        @printf("    F8c 認証 prod との差 最下位桁 %.2f 単位 @Z=%d / M₂ 相対 %.1e @Z=%d\n",
-                worst["cert_fx"]..., worst["cert_m2"]...)
+        @printf("    F8c 認証 prod との差 最下位桁 %.2f 単位 @Z=%d / M₂ 相対 %.1e @Z=%d / F8d 切替点の MB/展開 比 最大 %.2f @Z=%d [記録]\n",
+                worst["cert_fx"]..., worst["cert_m2"]..., worst["f8d_switch_ratio"]...)
     end
     golden === nothing || @printf("  golden (Python) との言語間差 %d 元素: 最悪相対 %.1e @Z=%d (許容 %.0e)\n",
                                   n_golden, worst["golden"]..., Float64(golden["tolerance_rel"]))
