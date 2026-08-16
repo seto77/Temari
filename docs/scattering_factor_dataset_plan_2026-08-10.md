@@ -118,11 +118,11 @@ $-M_4/60 = -22.5/60 = -3/8$ が一致することも同時に確認できる。
 
 ## 4. 検証スイート
 
-F dataset の C1–C15 に対応するもの。**15 件中 12 件が実装済**。
+F dataset の C1–C15 に対応するもの。**15 件すべて実装済** (X13 の golden 凍結だけ出荷生成の完走待ち。2026-08-16)。
 
 | | 検査 | 状態 |
 |---|---|---|
-| X1 | schema・単位・処方・model ID・元素と電子配置 | 未 |
+| X1 | schema・単位・処方・model ID・元素と電子配置 | ✅ `schema/temari_factors_v1.schema.json` (2026-08-16) |
 | X2 | **SCF の不動点残差** (§4.3) | ✅ `tools/scf_residuals.jl` |
 | X3 | 補正**前**の電子数誤差 | ✅ `tools/check_factors.jl` |
 | X4 | 補正**後**の f_x(0) = N | ✅ 同上 |
@@ -134,8 +134,8 @@ F dataset の C1–C15 に対応するもの。**15 件中 12 件が実装済**�
 | X10 | 全有限 s 点の Mott–Bethe 恒等式 | ✅ 同上 |
 | X11 | **s 補間の直接プローブ** (§4.9) | ✅ `tools/probe_interp.jl` |
 | X12 | **OFFV1 に対する事前固定の合否判定** (§4.8) | ✅ `tools/compare_offv1.jl` |
-| X13 | C・Fe・Au 等の公開 golden vector | 未 |
-| X14 | 決定性・manifest・archive 再検証 | 未 |
+| X13 | C・Fe・Au 等の公開 golden vector | ✅ 道具 (`temari_factors_contract.py --make-golden`、C/Fe/Cs/Au、許容 1e-12、負のミュータント 17 種)。**凍結は出荷生成完走後** |
+| X14 | 決定性・manifest・archive 再検証 | ✅ `make_factors_manifest.jl` / `make_factors_release.sh` (2 回組んで同 SHA) / `factors_regen_check.sh` (H @dt/16 byte 同一) |
 | X15 | **γ 非包含**と Å/a₀ 変換を検出する契約テスト | ✅ 同上 |
 
 ### 4.1 ゲートにしてはいけないもの
@@ -1798,8 +1798,11 @@ s→0 でモーメント展開と整合、を生成時検査に入れる。
 - $R_{MB}$・$S_{MB}$・モーメント残差・overshoot・負値・範囲外禁止・
   言語間 spline 一致を検査する
 
-8. schema・generator・QC・manifest・決定論的梱包 (X1・X13・X14)
-9. dataset release と preview の公開
+8. ~~schema・generator・QC・manifest・決定論的梱包 (X1・X13・X14)~~ — **実装済 (2026-08-16)**。
+   生成器 = `src/gen_factors.jl`、QC = `tools/check_factor_tables.jl`、契約 =
+   `tools/temari_factors_contract.py`。**出荷生成フリートは 2026-08-16 09:23 発火**
+   (正本 = `docs/next_chat_2026-08-16.md`)
+9. dataset release と preview の公開 — 完走・QC・golden 凍結の後 (`make_factors_release.sh`)
 
 ## 7. 出す形
 
