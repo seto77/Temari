@@ -38,7 +38,7 @@ count_current() {
         ok = d["dataset_version"] == factors_dataset_version(r) && d["model_id"] == factors_model_id(r) &&
              d["generator_source_sha256"] == FACTORS_SOURCE_FINGERPRINT && length(d["f_x"]) == S_N_INTERVALS + 1 &&
              length(d["f_e_A"]) == S_N_INTERVALS + 1 && d["scf"]["converged"] === true
-        ok && (n += 1)
+        ok && (global n += 1)
     end
     println(n)' "$OUT" 2>/dev/null | tail -1
 }
