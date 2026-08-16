@@ -1802,7 +1802,9 @@ s→0 でモーメント展開と整合、を生成時検査に入れる。
    生成器 = `src/gen_factors.jl`、QC = `tools/check_factor_tables.jl`、契約 =
    `tools/temari_factors_contract.py`。**出荷生成フリートは 2026-08-16 09:23 発火**
    (正本 = `docs/next_chat_2026-08-16.md`)
-9. dataset release と preview の公開 — 完走・QC・golden 凍結の後 (`make_factors_release.sh`)
+9. dataset release と preview の公開 — **生成・QC・golden・manifest・梱包は 2026-08-16 に完了**
+   (`dist/temari-factors-v1.0.0.tar.gz`、正本 = `src/prod_factors_v1/MANIFEST.md`)。
+   release タグ `dataset-factors-v1.0.0` の作成・Zenodo・mkdocs Data ページ・CITATION は作者判断
 
 ## 7. 出す形
 

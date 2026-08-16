@@ -1,4 +1,13 @@
-# 引き継ぎ — 原子散乱因子 (f_x / f_e) データセット (2026-08-16 朝に更新)
+# 引き継ぎ — 原子散乱因子 (f_x / f_e) データセット (2026-08-16 夜に更新)
+
+> ## ★★★★★★ 2026-08-16 23:30 — **dataset-factors v1.0.0 完成** (生成・QC・golden・manifest・梱包)
+>
+> 出荷 = run 2 (`src/prod_factors_v1/`、86 元素、`f27ed05`、指紋 `f8e829b7…`)。QC 86/86 ALL PASS、
+> 契約 + 負のミュータント 18/18、golden 凍結、`dist/temari-factors-v1.0.0.tar.gz` (SHA `c46b20b2…`)
+> を展開物まで検証済み。端点 2 段目 20/20。正本 = `src/prod_factors_v1/MANIFEST.md`、
+> 指示書 = `docs/next_chat_2026-08-16.md` (残り = release タグ / mkdocs / CITATION は作者判断)。
+> ⚠ 本日の発見: SCF はプロセス間で散発的に別反復で止まる (停止許容内) — QC F8 は tight 参照との
+> 差でゲートし、「byte 同一」は観測として書く。Cs の G3 副ゲート設計ミスで run 2 が要った。
 
 > ## ★★★★★ 最新 (2026-08-16 09:40) — 出荷生成フリート走行中 / 契約・QC・梱包の道具は完成
 >
