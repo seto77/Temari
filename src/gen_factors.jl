@@ -188,7 +188,12 @@ function factors_source_fingerprint()
         p = normpath(joinpath(@__DIR__, f))
         isfile(p) || error("ソースが見当たらない: $p")
         update!(ctx, codeunits(f)); update!(ctx, UInt8[0])
-        update!(ctx, read(p)); update!(ctx, UInt8[0])
+        # ⚠ CRLF → LF に正規化してから hash する。autocrlf の checkout では同じ commit
+        #   でも作業ツリーの改行が違い、指紋が checkout の設定に依存してしまう
+        #   (2026-08-16 に worktree で実際に食い違った)
+        update!(ctx, codeunits(replace(String(read(p)), "
+" => "
+"))); update!(ctx, UInt8[0])
     end
     return bytes2hex(digest!(ctx))
 end
