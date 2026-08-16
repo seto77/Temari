@@ -24,10 +24,12 @@ F(s, E0) の `gen_production.jl` に相当するもの。**別 dataset family** 
 `SCFAtom(z, ORBITALS[z]; latter_charge=1.0, relativistic=true, exchange=:kli,
 dt=GRID_DT/16, numerics=:dirac_true_midpoint_v1)` を直接呼び、未収束なら
 `SCF_RETRY` (β=0.08 / 400) で引き直す。**キャッシュ (`get_neutral`) を通さない**
-(別 cfg の原子を黙って読む事故の形を残さないため)。ソルバは決定論的
-(`-t 1`) なので、出荷密度は認証の `prod_stage5` とビット同一になるはずで、
-`tools/check_factor_tables.jl --certify-dir` がそれを f_x 値で確認する
-(差は総和順序 (補償和の有無) の丸めだけ ≲ 1e-11)。
+(別 cfg の原子を黙って読む事故の形を残さないため)。
+⚠ 260816Cl 実測: **同機・同 commit・単発プロセスなら再生成は byte 同一** (H・Au で確認、
+同一プロセスで Au を 2 回解いても ρ の hash まで同一) だが、**認証 (2026-08-11) の
+`prod_stage5` とは一部の元素で別の反復で止まっている** (Z=79 等。固有値の相対差 ~2e-10、
+停止許容内。原因未特定 = 認証プロセスの文脈依存)。だから `check_factor_tables.jl --certify-dir`
+は「同一解か」を記録するだけで、ゲートは**出荷解 − 認証 tight (τ/10) ≤ 停止予算** (F8b/F8d)。
 
 ## 生成時ゲート (作者決定とセット。落ちたら JSON を書かない。全ゲートを
 ## 値・閾値・合否つきで JSON の `gates` に記録する — codex レビュー 2026-08-16)
@@ -36,9 +38,12 @@ dt=GRID_DT/16, numerics=:dirac_true_midpoint_v1)` を直接呼び、未収束な
       中性 (a.nel == Z ちょうど) / 節点列の SHA-256 が契約値
   G1  SCF が収束している (再試行後も未収束なら失敗 = フリートの次 pass で拾う)
   G2  δ 形 ↔ Mott–Bethe 構成の整合 (s ≥ 0.2 で相対 ≤ 1e-10。`compute_fx` 内)
-  G3  s→0 でモーメント展開と整合: |f_e(s_i) − a₀[M₂/3 − K²M₄/60 + K⁴M₆/2520]|
-      ≤ 1e-9 Å (i = 1, 2)。打ち切り項 a₀K⁶M₈/181440 を **M₈ から実際に見積もり**、
-      閾値の 1/10 以下であることも要求する (級数打ち切りと数値誤差を分ける)
+  G3  s→0 でモーメント展開と整合: |f_e(s_i) − a₀[M₂/3 − K²M₄/60 + K⁴M₆/2520 − K⁶M₈/181440]|
+      ≤ 1e-11 Å (i = 1, 2)。**M₈ 項まで入れる**ので残りは K⁸M₁₀/(2·11!) 級 (Cs でも ~5e-17 Å)
+      で、残差は求積・丸めの数値誤差だけを測る (実測 ~1e-15)。
+      ⚠ 260816Cl 改訂: 初版は 3 項 + 「K⁶ 項の見積り ≤ 1e-10」の副ゲートだったが、Cs で
+      K⁶ 項が 1.29e-10 Å (残差と一致 = 打ち切りそのもの) となり副ゲートで落ちた。閾値の
+      設計ミスで、値の問題ではない。→ run 2 (86 元素すべてを再生成) で本版に置き換えた
   G4  健全性: 全値有限 (丸め前後) / 長さ 7681 / 丸め後 f_x(0) == Z ちょうど /
       |f_x| ≤ Z / f_e > 0 (中性なので Z − f_x > 0) / f_e(0) == round11(a₀M₂/3) / corr > 0
   G5  規格化補正: 0 < Z − N_raw ≤ 100 × Z×1.67e-7×(dt/dt₀)² (dt/16 の期待値は
@@ -354,16 +359,15 @@ function generate_element(z::Int, outdir::String; recipe::FactorsRecipe=FactorsR
     # ---- G3: s→0 の展開整合 (i = 1, 2)。打ち切り項を M₈ から見積もる ------------
     K = 4.0 * pi .* s .* BOHR_ANG
     m8 = density_moment(a.r, a.dt, a.rho, 8) * (1.0 + corr)
-    exp3(k) = BOHR_ANG * (m2 / 3.0 - k^2 * m4 / 60.0 + k^4 * m6 / 2520.0)
-    g3_vals = [abs(fe_raw[i] - exp3(K[i])) for i in 2:3]
+    exp4(k) = BOHR_ANG * (m2 / 3.0 - k^2 * m4 / 60.0 + k^4 * m6 / 2520.0 - k^6 * m8 / 181440.0)
+    g3_vals = [abs(fe_raw[i] - exp4(K[i])) for i in 2:3]
     g3 = maximum(g3_vals)
-    k6_term = maximum(BOHR_ANG * K[i]^6 * m8 / 181440.0 for i in 2:3)
-    g3_ok = g3 <= 1e-9 && k6_term <= 1e-10
-    gates["G3_small_s_expansion"] = gate_row(g3_ok, g3, 1e-9,
-        "max_i=1,2 |f_e(s_i) - a0[M2/3 - K^2 M4/60 + K^4 M6/2520]| <= threshold AND estimated K^6 term <= threshold/10";
-        values_A = g3_vals, estimated_K6_term_A = k6_term, K6_term_threshold_A = 1e-10,
-        s_nodes = s[2:3])
-    g3_ok || throw(GateFailure(@sprintf("Z=%d: s→0 展開との差 %.3e Å (K⁶ 項 %.2e) がゲート外", z, g3, k6_term)))
+    k6_term = maximum(BOHR_ANG * K[i]^6 * m8 / 181440.0 for i in 2:3)   # 記録 (4 項目の大きさ)
+    g3_ok = g3 <= 1e-11
+    gates["G3_small_s_expansion"] = gate_row(g3_ok, g3, 1e-11,
+        "max_i=1,2 |f_e(s_i) - a0[M2/3 - K^2 M4/60 + K^4 M6/2520 - K^6 M8/181440]| <= threshold (numerical error only; next term ~K^8 M10/(2*11!) is < 1e-16 A)";
+        values_A = g3_vals, K6_term_A = k6_term, s_nodes = s[2:3], expansion_terms = 4)
+    g3_ok || throw(GateFailure(@sprintf("Z=%d: s→0 4 項展開との差 %.3e Å (K⁶ 項 %.2e) がゲート外", z, g3, k6_term)))
     # ---- G5: 規格化補正の桁と符号 -----------------------------------------------
     g5_expect = 1.67e-7 * z * (recipe_dt(recipe) / GRID_DT)^2
     g5_thr = 100.0 * g5_expect
@@ -452,7 +456,7 @@ function generate_element(z::Int, outdir::String; recipe::FactorsRecipe=FactorsR
             "f_e is the first-Born (Mott-Bethe) NON-relativistic electron scattering factor; the incident-electron gamma is NOT included (same convention as Peng / Doyle-Turner). Multiply by gamma downstream.",
             "f_x(0) = Z exactly by construction (X4 is a wiring check, not a physics check); the pre-normalization electron count is n_electrons_raw (X3).",
             "Neutral atoms only (v1). Ions are not derivable from these tables.",
-            "This file is deterministic (byte-identical on regeneration with the same source fingerprint and Julia version); volatile run information lives in runlog/SF_Zxxx.run.json"])
+            "This file is deterministic under the tested condition (byte-identical on regeneration with the same source fingerprint and Julia version, on the same platform, in a fresh single-threaded process); volatile run information lives in runlog/SF_Zxxx.run.json"])
     mkpath(outdir)
     mkpath(joinpath(outdir, "runlog"))
     path = joinpath(outdir, factors_filename(z))
@@ -473,10 +477,14 @@ function generate_element(z::Int, outdir::String; recipe::FactorsRecipe=FactorsR
     open(joinpath(outdir, "runlog", runlog_filename(z)), "w") do io
         write_json(io, runlog); println(io)
     end
-    verbose && @printf("[Z=%d] 完了 %.0f s → %s (丸め寄与 f_x %.2e / f_e %.2e Å, G3 %.2e Å, K⁶ %.1e)\n",
+    verbose && @printf("[Z=%d] 完了 %.0f s → %s (丸め寄与 f_x %.2e / f_e %.2e Å, G3(4項) %.2e Å, K⁶項 %.1e)\n",
                        z, time() - t_start, path, rnd_fx, rnd_fe, g3, k6_term)
     return path
 end
+
+"ゲート台帳が全部 pass か (入れ子の Dict にも対応。QC と同じ規則)"
+_gates_all_pass(g) = g isa Dict ? (haskey(g, "pass") ? g["pass"] === true :
+                                   all(_gates_all_pass(v) for v in values(g))) : true
 
 """既存 JSON が**この処方・このソース**の完成品かを検査する。違えば `stale/` へ退避して
 `false` を返す (作り直す)。読めない/壊れているものも退避する。"""
@@ -489,7 +497,11 @@ function existing_is_current(path::String, recipe::FactorsRecipe)
         d["generator_source_sha256"] == FACTORS_SOURCE_FINGERPRINT &&
         d["schema_version"] == FACTORS_SCHEMA_VERSION &&
         d["s_grid"]["sha256_f64le"] == nodes_sha256(ship_s_nodes(recipe.n_intervals, recipe.s_max)) &&
-        length(d["f_x"]) == recipe.n_intervals + 1
+        length(d["f_x"]) == recipe.n_intervals + 1 &&
+        length(d["f_e_A"]) == recipe.n_intervals + 1 &&
+        Int(d["z"]) == parse(Int, match(r"SF_Z(\d{3})", basename(path)).captures[1]) &&
+        d["source_dirty"] === false && d["scf"]["converged"] === true &&
+        _gates_all_pass(d["gates"])                     # (codex 指摘 2 回目: 完成品の中身まで見る)
     catch
         false
     end
