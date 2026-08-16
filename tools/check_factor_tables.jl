@@ -17,8 +17,9 @@ F dataset の `check_tables.jl` に相当。**完走 ≠ 健全**なので、生
       not-a-knot の 3 次式延長 / 定義域の保護
   F8  --certify-dir DIR: 認証 (`certify_grid.jl` v1) の副本との突き合わせ (2 段構え。2026-08-16 に
       Au で「同じ手順・同じ commit でも SCF が別の反復で止まる」ことが判明したため):
-      F8a [記録] norm_correction が 17 桁一致 = **同一の解** (H・Hg で観測)。一致しない元素は
-          「停止許容内の別反復」として数え、その一覧を出す
+      F8a [記録] **固有値 (n,l) が全部 bit 一致** かつ norm_correction 一致 = **同一の解**。
+          一致しない元素は「停止許容内の別反復」として数え、その一覧を出す。⚠ norm_correction
+          だけでは判定できない (規格化のため反復に依らず一致しうる — In で露見)
       F8b [ゲート] 出荷 f_x の停止誤差 U_ship = **max_s|f_x,ship − f_x,tight(τ/10)| + A_tight ≤ B_scf** —
           三角不等式 (codex): tight 解自身の残差 U_tight は τ/100 診断で Z ≤ 11 の 4 元素で
           ≤ 0.030×B_scf を実測しただけなので、**A_tight = 0.10×B_scf の allowance (仮定、実測の 3 倍)**
@@ -232,7 +233,13 @@ function main(args)
                 n_cert += 1
                 length(c.fx) == FL_N_NODES || fail("F8 $tag: 認証副本の節点数 $(length(c.fx))")
                 cc = Float64(c.prod["norm_correction"]); sc = Float64(d["norm_correction"])
-                identical = abs(cc - sc) <= 1e-15 * abs(sc)
+                # 同一解の判定 = **固有値 (n,l) 全部が bit 一致** かつ norm_correction 一致。
+                # ⚠ norm_correction だけでは判定できない — 各軌道が規格化されるので N_raw は反復に
+                #   ほぼ依らず、別反復でも 17 桁一致しうる (2026-08-16 に In(49) で M₂ 8.2e-11 のずれで露見)
+                eps_ship = Dict((Int(e[1]), Int(e[2])) => Float64(e[3]) for e in d["scf"]["eigenvalues_hartree"])
+                eps_cert = Dict((Int(e[1]), Int(e[2])) => Float64(e[3]) for e in c.prod["eps"])
+                identical = abs(cc - sc) <= 1e-15 * abs(sc) && keys(eps_ship) == keys(eps_cert) &&
+                            all(eps_ship[k] == eps_cert[k] for k in keys(eps_ship))
                 push!(identical ? cert_identical : cert_other, z)
                 # F8c: 認証 prod 解との差 (記録)
                 worst_fx = 0.0; worst_i = 1
