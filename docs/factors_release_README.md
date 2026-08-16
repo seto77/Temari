@@ -16,7 +16,6 @@ independent version and DOI.
 | `schema/temari_factors_v1.schema.json` | the JSON schema every file validates against |
 | `schema/factors_golden_v1.json` | golden vectors (C, Fe, Cs, Au at off-knot s) that pin the interpolation convention |
 | `tools/temari_factors_contract.py` | **the executable contract** — a reference loader in the Python standard library only, plus the negative mutants that show the contract can fail (MIT, unlike the data) |
-| `runlog/` | per-element run information (timings, host); *not* part of the deterministic artifact |
 | `LICENSE.md`, `licenses/` | which licence applies to which part, and the full texts |
 
 ```bash
@@ -56,7 +55,8 @@ negative mutant showing that the check detects it.
 5. **Values are decimal-rounded to 11 significant digits and stored as JSON
    numbers.** Parse them as binary64 and do not re-round. Rounding contributes
    at most 0.16 × B_repr (f_x) and 0.33 × B_repr,e (f_e) to the interpolation
-   error budget.
+   error budget. A consumer that re-rounds to 10 digits moves off the golden
+   vectors by more than the conformance tolerance (there is a mutant for it).
 
 ## What this dataset claims, and what it does not
 
@@ -71,7 +71,15 @@ negative mutant showing that the check detects it.
 - **Model validation (whether the physics is right):** compared with the
   Dirac–Hartree–Fock values of OFFV1 (the ITC replacement candidate) for f_x. The
   KLI exact exchange places these tables closer to DHF than the Xα-based tables
-  they replace, but **they are not DHF**, and no external yardstick exists for
-  f_e beyond what follows from f_x through Mott–Bethe.
+  they replace, but **they are not DHF**. No independent external validation of
+  f_e was performed; its accuracy follows from f_x through Mott–Bethe and from
+  the moment expansion at small s.
+- **Reproducibility (what "deterministic" means here):** the table files are
+  byte-identical on regeneration with the same source fingerprint and Julia
+  version *on the same platform* (verified for H and Fe on the generating
+  machine); a different libm/compiler may differ in the last binary digits below
+  the 11-digit rounding. Run-specific information (timings, host) is kept out of
+  the archive; the archive itself is rebuilt twice and required to have the same
+  SHA-256.
 - **Neutral atoms only.** Ions are not derivable from these tables and will be a
   separate curated set if published.

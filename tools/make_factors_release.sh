@@ -7,7 +7,10 @@
 # ⚠ 決定論: --sort=name / --mtime 固定 / owner 0 / gzip -n。**2 回組んで同一 SHA** になることを
 #   このスクリプト自身が確認する (X14 の「梱包の決定論」)。
 # ⚠ 自己完結: schema・golden・manifest・実行可能な契約 (`temari_factors_contract.py`)・
-#   README・LICENSE を同梱する。
+#   README・LICENSE を同梱する。**runlog/ (時刻・秒・ホスト) は同梱しない** — 表本体は再生成で
+#   byte 同一だが runlog は走ごとに違うので、入れると「再生成しても同じ archive」が成り立たない
+#   (codex 指摘 2 回目)。runlog は MANIFEST.md の集計と、リポ外の運用記録として残す。
+# ⚠ tar の mode も正規化する (`--mode`)。並び・mtime・owner だけでは別ホストで再現しない。
 # ⚠ 出荷前提: prod_dir に 86 元素 + manifest.json + MANIFEST.md + schema/factors_golden_v1.json
 #   が揃っていること (無ければ止まる)。
 set -eu
@@ -29,10 +32,9 @@ stage="$outdir/$name"
 
 build_once() {
   rm -rf "$stage"
-  mkdir -p "$stage/schema" "$stage/tools" "$stage/licenses" "$stage/runlog"
+  mkdir -p "$stage/schema" "$stage/tools" "$stage/licenses"
   cp "$prod"/SF_Z???.json "$stage/"
   cp "$prod/MANIFEST.md" "$prod/manifest.json" "$stage/"
-  cp "$prod"/runlog/SF_Z???.run.json "$stage/runlog/" 2>/dev/null || true
   cp schema/temari_factors_v1.schema.json schema/factors_golden_v1.json "$stage/schema/"
   cp tools/temari_factors_contract.py "$stage/tools/"
   cp licenses/CC-BY-4.0.txt licenses/MIT.txt "$stage/licenses/"
@@ -44,7 +46,7 @@ m=open('$prod/MANIFEST.md',encoding='utf-8').read()
 d=re.search(r'20\d\d-\d\d-\d\d', m)
 print(d.group(0) if d else '2026-01-01')")
   ( cd "$outdir" && tar --sort=name --mtime="$mt UTC00:00" --owner=0 --group=0 \
-        --numeric-owner --format=gnu -cf - "$name" | gzip -n -9 > "$name.tar.gz" )
+        --numeric-owner --mode='u=rw,go=r,a+X' --format=gnu -cf - "$name" | gzip -n -9 > "$name.tar.gz" )
   echo "$mt"
 }
 
@@ -82,6 +84,13 @@ PYTHONUTF8=1 python "$tmp/$name/tools/temari_factors_contract.py" "$tmp/$name" \
     --golden "$tmp/$name/schema/factors_golden_v1.json" --negative     $( [ "${FACTORS_RELEASE_DRYRUN:-0}" = "1" ] && echo --allow-dev ) > "$tmp/contract.log" || {
   echo "契約テストに失敗"; tail -20 "$tmp/contract.log"; rm -rf "$tmp"; exit 1; }
 tail -3 "$tmp/contract.log"
-echo "  ✅ 展開物で manifest 照合・schema・契約テスト (golden + 負のミュータント) が通った"
+# ---- 展開物に Julia QC (F1–F10) も掛ける。指紋は manifest に凍結した値を期待値にする ----------
+fp=$(python -c "import json; print(json.load(open('$prod/manifest.json',encoding='utf-8'))['generator_source_sha256'])")
+julia --startup-file=no tools/check_factor_tables.jl "$tmp/$name" --expect-fingerprint "$fp" \
+      --golden "$tmp/$name/schema/factors_golden_v1.json" \
+      $( [ "${FACTORS_RELEASE_DRYRUN:-0}" = "1" ] && echo --allow-dev ) > "$tmp/qc.log" || {
+  echo "Julia QC に失敗"; tail -20 "$tmp/qc.log"; rm -rf "$tmp"; exit 1; }
+tail -1 "$tmp/qc.log"
+echo "  ✅ 展開物で manifest 照合・schema・契約テスト (golden + 負のミュータント + scipy) ・Julia QC が通った"
 rm -rf "$tmp"
 rm -rf "$stage"

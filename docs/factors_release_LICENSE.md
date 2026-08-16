@@ -5,7 +5,7 @@ amount of code so that it stays readable on its own.
 
 | What | Licence | Text |
 |---|---|---|
-| **The data** — `SF_*.json`, `MANIFEST.md`, `manifest.json`, `runlog/`, `schema/` | **CC-BY-4.0** | `licenses/CC-BY-4.0.txt` |
+| **The data** — `SF_*.json`, `MANIFEST.md`, `manifest.json`, `schema/` | **CC-BY-4.0** | `licenses/CC-BY-4.0.txt` |
 | **The bundled loader** — `tools/temari_factors_contract.py` | **MIT** | `licenses/MIT.txt` |
 | This README and the accompanying notes | CC-BY-4.0 | `licenses/CC-BY-4.0.txt` |
 

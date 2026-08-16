@@ -13,7 +13,7 @@ Python の `tools/temari_factors_contract.py` と**同じ算法** (Hermite 形 +
 
 依存: SHA (標準ライブラリ) と `src/l0_json.jl` (parse_json_file)。SCF コードは要らない。
 =====================================================================#
-using SHA
+using SHA, Printf
 
 const FL_S_MAX = 6.0
 const FL_N_INTERVALS = 7680
@@ -120,14 +120,25 @@ struct FactorsElement
     fe_spline::CubicSplineBC
 end
 
-function FactorsElement(doc::Dict{String,Any}; check::Bool=true)
+"""loader が**通常の読み込みでも**検査する最小限 (codex 指摘 2026-08-16): dataset / schema_version /
+charge 0 / 内部 z (期待値があれば一致) / 節点 SHA / 配列長 / 有限値。ファイル名だけを信じない。"""
+function FactorsElement(doc::Dict{String,Any}; check::Bool=true, expect_z::Union{Nothing,Int}=nothing)
     s = fl_s_nodes()
     if check
+        get(doc, "dataset", nothing) == "temari-factors" || error("dataset が temari-factors でない")
+        get(doc, "schema_version", nothing) == 1 || error("schema_version が 1 でない")
+        get(doc, "charge", nothing) == 0 || error("charge が 0 でない (中性のみ)")
+        expect_z === nothing || Int(doc["z"]) == expect_z || error("内部の z=$(doc["z"]) が期待 $expect_z と違う")
+        Float64(doc["n_electrons"]) == Float64(Int(doc["z"])) || error("n_electrons ≠ Z")
+        (doc["s_grid"]["n_nodes"] == FL_N_NODES && Float64(doc["s_grid"]["s_max_A_inv"]) == FL_S_MAX) ||
+            error("s 格子の定義が契約と違う")
+        doc["s_grid"]["sha256_f64le"] == FL_S_GRID_SHA256 || error("収録の s 格子 SHA が契約値でない")
         fl_nodes_sha256(s) == doc["s_grid"]["sha256_f64le"] || error("s 節点の再構成が sha256 と合わない")
     end
     fx = Float64[Float64(v) for v in doc["f_x"]]
     fe = Float64[Float64(v) for v in doc["f_e_A"]]
     (length(fx) == FL_N_NODES && length(fe) == FL_N_NODES) || error("配列長が 7681 ではない")
+    check && (all(isfinite, fx) && all(isfinite, fe) || error("非有限値がある"))
     t = s .* s
     FactorsElement(doc, Int(doc["z"]), s, t, fx, fe,
                    CubicSplineBC(s, fx, :clamped, :not_a_knot; left_value = 0.0),
@@ -145,4 +156,5 @@ fx_at(el::FactorsElement, s::Real) = el.fx_spline(fl_guard(s))
 fe_at(el::FactorsElement, s::Real) = (sf = fl_guard(s); el.fe_spline(sf * sf))
 
 fl_load_element(pdir::AbstractString, z::Int; check::Bool=true) =
-    FactorsElement(parse_json_file(joinpath(pdir, @sprintf("SF_Z%03d.json", z))); check = check)
+    FactorsElement(parse_json_file(joinpath(pdir, @sprintf("SF_Z%03d.json", z))); check = check,
+                   expect_z = z)

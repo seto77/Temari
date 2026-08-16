@@ -85,6 +85,12 @@ function build(pdir::String)
         "digest_rule" => "sha256 over concat of sorted 'file:sha256\\n' lines")
 end
 
+"JSON 往復後の等価 (1 と 1.0、Dict/Vector の再帰)"
+json_equal(a, b) = (a isa Number && b isa Number) ? Float64(a) == Float64(b) :
+                   (a isa Dict && b isa Dict) ? (keys(a) == keys(b) && all(json_equal(a[k], b[k]) for k in keys(a))) :
+                   (a isa AbstractVector && b isa AbstractVector) ? (length(a) == length(b) && all(json_equal(x, y) for (x, y) in zip(a, b))) :
+                   a == b
+
 function verify(pdir::String)
     mp = joinpath(pdir, "manifest.json")
     isfile(mp) || (println("[NG] manifest.json が無い"); return 1)
@@ -99,8 +105,19 @@ function verify(pdir::String)
         have[f]["sha256"] == now[f]["sha256"] || (println("[NG] SHA-256 不一致: $f"); ng += 1)
     end
     m["overall_digest"] == fresh["overall_digest"] || (println("[NG] overall_digest 不一致"); ng += 1)
-    for k in ("dataset", "dataset_version", "model_id", "generator_source_sha256", "n_elements")
-        m[k] == fresh[k] || (println("[NG] $k 不一致: $(m[k]) vs $(fresh[k])"); ng += 1)
+    # build() は決定論的なので、**全キーを深く比較**する (codex 指摘: 5 項目だけでは bytes / z /
+    # symbol / commits / julia / s_grid / gates_summary / loader_contract の改竄が通る)
+    for k in union(keys(m), keys(fresh))
+        if !haskey(m, k) || !haskey(fresh, k)
+            println("[NG] manifest のキー集合が違う: $k"); ng += 1; continue
+        end
+        k == "entries" && continue                 # 上で個別に見た (bytes は下で)
+        json_equal(m[k], fresh[k]) || (println("[NG] $k 不一致: $(m[k]) vs $(fresh[k])"); ng += 1)
+    end
+    for f in intersect(keys(have), keys(now))
+        for k in ("bytes", "z", "symbol")
+            json_equal(have[f][k], now[f][k]) || (println("[NG] $f の $k 不一致"); ng += 1)
+        end
     end
     println(ng == 0 ? "manifest 照合 OK ($(fresh["n_elements"]) 元素, digest $(fresh["overall_digest"][1:16])…)" :
                       "manifest 照合 FAILED ($ng)")

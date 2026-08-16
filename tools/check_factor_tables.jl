@@ -16,8 +16,10 @@ F dataset の `check_tables.jl` に相当。**完走 ≠ 健全**なので、生
   F7  Julia 参照 loader (factors_loader.jl) の解析条件: 節点再現 / f_x′(0) = 0 /
       not-a-knot の 3 次式延長 / 定義域の保護
   F8  --certify-dir DIR: 認証 (`certify_grid.jl` v1) の prod_stage5 副本との突き合わせ。
-      **norm_correction が 17 桁で一致** (= ρ がビット同一) / round11(認証 f_x) と収録 f_x の差が
-      最下位桁 1.5 単位以内 (補償和の有無の丸めだけ) / M₂ が相対 1e-12
+      副本のバイナリ SHA-256 と収束を検査してから、**規格化積分 (norm_correction) が 17 桁で
+      一致** / round11(認証 f_x) と収録 f_x の差が最下位桁 1.5 単位以内 (補償和の有無の丸めだけ) /
+      M₂ が相対 1e-12。⚠ これは「同じ認証済み解の経路を通った」ことの検査で、
+      **ρ の 32 万点がビット同一であることの証明ではない** (ρ の hash は認証で取っていない。codex)
   F9  --golden schema/factors_golden_v1.json: Python 参照 loader が作った golden と Julia loader が
       相対 1e-12 で一致 (**言語間検査** X13)
   F10 [記録] 丸め寄与・G2/G3/G5 の最悪値・SCF 秒 (runlog) の合計
@@ -57,7 +59,11 @@ function load_certified(cdir::String, z::Int)
     isfile(p) || return nothing
     d = parse_json_file(p)
     b = d["binary"]
-    raw = reinterpret(Float64, read(joinpath(cdir, b["file"])))
+    bytes = read(joinpath(cdir, b["file"]))
+    bytes2hex(sha256(bytes)) == b["sha256"] || error("認証副本 $(b["file"]) の SHA-256 が JSON と合わない")
+    d["prescription"]["numerics"] == "dirac_true_midpoint_v1" && d["prescription"]["exchange"] == "kli" ||
+        error("認証副本の処方が違う")
+    raw = reinterpret(Float64, bytes)
     n = Int(b["n_per_array"])
     k = findfirst(==("prod_stage5"), b["layout"])
     k === nothing && return nothing
@@ -66,6 +72,9 @@ function load_certified(cdir::String, z::Int)
     for lv in d["levels"]
         haskey(lv, "prod") && (prod = lv["prod"])
     end
+    prod === nothing && return nothing
+    prod["converged"] === true || error("認証副本の prod_stage5 が未収束")
+    Int(prod["n_r"]) == 323400 || error("認証副本の n_r が dt/16 でない")
     return (fx = fx_all[1:2:end], prod = prod)
 end
 
@@ -127,7 +136,7 @@ function main(args)
         d["s_grid"]["sha256_f64le"] == FL_S_GRID_SHA256 || fail("F3 $tag: s 格子 SHA")
         # F4 + loader
         el = try
-            FactorsElement(d)
+            FactorsElement(d; expect_z = z)
         catch e
             fail("F4 $tag: loader が組めない: $e"); continue
         end
@@ -139,8 +148,8 @@ function main(args)
         a0 = Float64(d["constants"]["bohr_A"])
         m2 = Float64(d["moments"]["m2_a0sq"])
         fe[1] == fl_round_sig(a0 * m2 / 3.0) || fail("F4 $tag: f_e(0) ≠ round11(a₀M₂/3)")
-        (all(fl_round_sig(v) == v for v in fx[1:97:end]) && all(fl_round_sig(v) == v for v in fe[1:97:end])) ||
-            fail("F4 $tag: 収録値が 11 桁で閉じていない")
+        (all(fl_round_sig(v) == v for v in fx) && all(fl_round_sig(v) == v for v in fe)) ||
+            fail("F4 $tag: 収録値が 11 桁で閉じていない")           # 全数 (7681×2)。安い
         upd!("rnd_fx", Float64(d["rounding"]["max_abs_rounding_fx"]), z)
         upd!("rnd_fe", Float64(d["rounding"]["max_abs_rounding_fe_A"]), z)
         # F5
@@ -188,14 +197,14 @@ function main(args)
                 n_cert += 1
                 length(c.fx) == FL_N_NODES || fail("F8 $tag: 認証副本の節点数 $(length(c.fx))")
                 cc = Float64(c.prod["norm_correction"]); sc = Float64(d["norm_correction"])
-                abs(cc - sc) <= 1e-15 * abs(sc) || fail(@sprintf("F8 %s: norm_correction が違う (認証 %.17g / 出荷 %.17g) → ρ が同一でない", tag, cc, sc))
-                worst_fx = 0.0
+                abs(cc - sc) <= 1e-15 * abs(sc) || fail(@sprintf("F8 %s: norm_correction が違う (認証 %.17g / 出荷 %.17g) → 同じ解ではない", tag, cc, sc))
+                worst_fx = 0.0; worst_i = 1
                 for i in 1:FL_N_NODES
                     r = abs(fl_round_sig(c.fx[i]) - fx[i]) / max(unit_last_digit(fx[i]), 1e-300)
-                    worst_fx = max(worst_fx, r)
+                    r > worst_fx && (worst_fx = r; worst_i = i)
                 end
                 upd!("cert_fx", worst_fx, z)
-                worst_fx <= 1.5 || fail(@sprintf("F8 %s: 認証 f_x との差が最下位桁 %.2f 単位", tag, worst_fx))
+                worst_fx <= 1.5 || fail(@sprintf("F8 %s: 認証 f_x との差が最下位桁 %.2f 単位 @s=%.5f", tag, worst_fx, s[worst_i]))
                 m2c = Float64(c.prod["m2"]) * (1.0 + cc)
                 r2 = abs(m2c - m2) / m2
                 upd!("cert_m2", r2, z)
@@ -235,7 +244,7 @@ function main(args)
     @printf("  G2 最悪 %.2e @Z=%d / G3 最悪 %.2e Å @Z=%d / G5 (閾値比) 最悪 %.3f @Z=%d\n",
             worst["G2"]..., worst["G3"]..., worst["G5"]...)
     @printf("  loader: 節点再現 %.1e @Z=%d / NAK %.1e @Z=%d\n", worst["knot"]..., worst["nak"]...)
-    cdir === nothing || @printf("  認証副本との突き合わせ %d 元素: f_x 最下位桁 %.3f 単位 @Z=%d / M₂ 相対 %.1e @Z=%d\n",
+    cdir === nothing || @printf("  認証副本との突き合わせ %d 元素 (同じ解の経路の検査。ρ ビット同一の証明ではない): f_x 最下位桁 %.3f 単位 @Z=%d / M₂ 相対 %.1e @Z=%d\n",
                                 n_cert, worst["cert_fx"]..., worst["cert_m2"]...)
     golden === nothing || @printf("  golden (Python) との言語間差 %d 元素: 最悪相対 %.1e @Z=%d (許容 %.0e)\n",
                                   n_golden, worst["golden"]..., Float64(golden["tolerance_rel"]))

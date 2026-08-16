@@ -186,16 +186,31 @@ def _round_sig(x, d=DIGITS):
 class Element:
     """1 元素の表 + 契約どおりの補間。fx(s) [electrons] / fe(s) [Å]。"""
 
-    def __init__(self, doc, check=True):
+    def __init__(self, doc, check=True, expect_z=None):
+        """loader は**通常の読み込みでも**最小限を検査する (codex 指摘 2026-08-16): dataset /
+        schema_version / charge 0 / 内部 z (期待値があれば一致) / 節点 SHA / 配列長 / 有限値。
+        ファイル名だけを信じない。"""
         self.doc = doc
         self.z = int(doc["z"])
         self.s = s_nodes()
-        if check and nodes_sha256(self.s) != doc["s_grid"]["sha256_f64le"]:
-            raise ValueError("s 節点の再構成が sha256 と合わない")
+        if check:
+            if doc.get("dataset") != "temari-factors" or doc.get("schema_version") != 1:
+                raise ValueError("dataset/schema_version が契約と違う")
+            if doc.get("charge") != 0 or float(doc.get("n_electrons")) != float(self.z):
+                raise ValueError("中性原子の表ではない")
+            if expect_z is not None and self.z != expect_z:
+                raise ValueError("内部の z=%d が期待 %d と違う (ファイル名を信じない)" % (self.z, expect_z))
+            g = doc["s_grid"]
+            if g["n_nodes"] != N_NODES or float(g["s_max_A_inv"]) != S_MAX or g["sha256_f64le"] != S_GRID_SHA256:
+                raise ValueError("s 格子の定義/SHA が契約と違う")
+            if nodes_sha256(self.s) != g["sha256_f64le"]:
+                raise ValueError("s 節点の再構成が sha256 と合わない")
         self.fx_nodes = [float(v) for v in doc["f_x"]]
         self.fe_nodes = [float(v) for v in doc["f_e_A"]]
         if len(self.fx_nodes) != N_NODES or len(self.fe_nodes) != N_NODES:
             raise ValueError("配列長が 7681 ではない")
+        if check and not all(math.isfinite(v) for v in self.fx_nodes + self.fe_nodes):
+            raise ValueError("非有限値がある")
         # 契約の補間 (loader が唯一持ってよい規約)
         self._fx = CubicSpline(self.s, self.fx_nodes, "clamped", "not-a-knot", left_value=0.0)
         self._t = [v * v for v in self.s]
@@ -222,7 +237,7 @@ class Element:
 
 def load_element(pdir, z, check=True):
     with open(os.path.join(pdir, "SF_Z%03d.json" % z), encoding="utf-8") as f:
-        return Element(json.load(f), check=check)
+        return Element(json.load(f), check=check, expect_z=z)
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +312,7 @@ def contract(pdir, allow_dev=False, verbose=True):
             ng += _fail("C3 %s: s 格子の定義" % tag)
         # ---- C4: 値の構造 -----------------------------------------------------------
         try:
-            el = Element(d)
+            el = Element(d, expect_z=z)
         except Exception as e:                       # noqa: BLE001
             ng += _fail("C4 %s: loader が組めない: %s" % (tag, e)); continue
         fx, fe = el.fx_nodes, el.fe_nodes
@@ -313,8 +328,8 @@ def contract(pdir, allow_dev=False, verbose=True):
         m2 = float(d["moments"]["m2_a0sq"])
         if fe[0] != _round_sig(a0 * m2 / 3.0):
             ng += _fail("C4 %s: f_e(0)=%r ≠ round11(a0 M2/3)=%r" % (tag, fe[0], _round_sig(a0 * m2 / 3.0)))
-        # 再丸め不変: 収録値は 11 桁で閉じている (再丸めしても同じ double)
-        if any(_round_sig(v) != v for v in fx[::97]) or any(_round_sig(v) != v for v in fe[::97]):
+        # 再丸め不変: 収録値は 11 桁で閉じている (再丸めしても同じ double)。全数 (7681×2、安い)
+        if any(_round_sig(v) != v for v in fx) or any(_round_sig(v) != v for v in fe):
             ng += _fail("C4 %s: 収録値が 11 桁の丸めで閉じていない" % tag)
         # ---- C5: Mott–Bethe 恒等式 (s ≥ 0.2、丸めの包絡内) ------------------------------
         s = el.s
@@ -364,16 +379,30 @@ def contract(pdir, allow_dev=False, verbose=True):
             ng += _fail("C7 %s: C² 連続が破れている (相対 %.1e)" % (tag, worst_c2))
         # not-a-knot: 区間 0 の 3 次式を x₂ へ延ばすと y₂ (f_e, t 上)、区間 n−2 の式を
         # x_{n−3} へ延ばすと y_{n−3} (f_x・f_e) を再現する (3 階微分の一致と同値で、良条件)
+        # ⚠ 「区間 0 の 3 次式を x₂ へ延ばして y₂ を再現」だけでは、C² が別途立っていない
+        # 場合に NAK と同値にならない (差が c(x−x₁)³ になるのは C² のとき)。そこで **値と傾き
+        # の両方**を x₂ で要求する (区間 0 と 1 は x₁ で値・傾きを共有するので、x₂ でも値・傾きが
+        # 一致すれば 2 つの 3 次式は同一。2・3 階微分の数値微分に依らず良条件。codex 助言)
         def nak_ratio(sp, x, y, first):
             if first:
-                got = sp.eval_piece(0, x[2]); want = y[2]
+                i, j = 0, 2
             else:
-                got = sp.eval_piece(N_NODES - 2, x[N_NODES - 3]); want = y[N_NODES - 3]
-            return abs(got - want) / max(abs(want), 1e-300)
+                i, j = N_NODES - 2, N_NODES - 3
+            got = sp.eval_piece(i, x[j]); want = y[j]
+            rv = abs(got - want) / max(abs(want), 1e-300)
+            # 傾き: 区間 i の式の x[j] での 1 階微分 vs 節点傾き m[j]。スケールは |m_j| と |y_j|/h の大きい方
+            h = x[i + 1] - x[i]
+            t = (x[j] - x[i]) / h
+            d00 = 6 * t * t - 6 * t; d10 = 3 * t * t - 4 * t + 1
+            d01 = -6 * t * t + 6 * t; d11 = 3 * t * t - 2 * t
+            s1 = (d00 * sp.y[i] + d01 * sp.y[i + 1]) / h + d10 * sp.m[i] + d11 * sp.m[i + 1]
+            scale = max(abs(sp.m[j]), abs(y[j]) / h)
+            rm = abs(s1 - sp.m[j]) / max(scale, 1e-300)
+            return max(rv, rm)
         nk = max(nak_ratio(el._fe, el._t, fe, True), nak_ratio(el._fe, el._t, fe, False),
                  nak_ratio(el._fx, s, fx, False))
         worst_nak = max(worst_nak, nk)
-        if nk > 1e-10:
+        if nk > 1e-11:
             ng += _fail("C7 %s: not-a-knot 条件が破れている (相対 %.1e)" % (tag, nk))
         # 逆に、左端 clamped は NAK ではない: f_x の区間 0 を s₂ へ延ばしても y₂ を再現しない
         # ことは要求しない (偶関数で低 s が s² なら 3 次式が偶然合うことがありうる)
@@ -425,11 +454,26 @@ def make_golden(pdir):
     return out
 
 
-def check_golden(pdir, golden, verbose=True):
+def check_golden(pdir, golden, verbose=True, strict=True):
+    """strict=True (出荷): 元素集合・s 点列・許容・格子 SHA・model_id/版/指紋の一致まで要求する
+    (codex 指摘: 空の/弱めた golden が通ってはいけない)。"""
     ng = 0
     worst = 0.0
+    if strict:
+        if sorted(int(k) for k in golden["elements"]) != sorted(GOLDEN_Z):
+            ng += _fail("X13: golden の元素集合 %s が %s でない" % (sorted(int(k) for k in golden["elements"]), sorted(GOLDEN_Z)))
+        if golden.get("tolerance_rel") != GOLDEN_TOL_REL:
+            ng += _fail("X13: golden の許容 %r が %r でない (緩めてはいけない)" % (golden.get("tolerance_rel"), GOLDEN_TOL_REL))
+        if golden.get("s_grid_sha256") != S_GRID_SHA256 or golden.get("digits") != DIGITS:
+            ng += _fail("X13: golden の格子 SHA / 桁数が契約と違う")
     for zs, g in golden["elements"].items():
         el = load_element(pdir, int(zs))
+        if strict:
+            if [p["s"] for p in g["points"]] != list(GOLDEN_S):
+                ng += _fail("X13 Z=%s: golden の s 点列が規定と違う" % zs)
+            for key in ("model_id", "dataset_version", "generator_source_sha256"):
+                if g.get(key) != el.doc.get(key):
+                    ng += _fail("X13 Z=%s: golden の %s (%r) が表 (%r) と違う" % (zs, key, g.get(key), el.doc.get(key)))
         for p in g["points"]:
             for key, fn in (("f_x", el.fx), ("f_e_A", el.fe)):
                 got = fn(p["s"]); want = p[key]
@@ -447,9 +491,41 @@ def check_golden(pdir, golden, verbose=True):
 # 負のミュータント (契約が乖離を検知できることの実演)
 # ---------------------------------------------------------------------------
 
+def scipy_crosscheck(pdir, verbose=True):
+    """**独立実装**との突き合わせ (codex 助言): SciPy の CubicSpline (2 階微分ベースの定式化、
+    別の消去順) を同じ端条件で組み、golden 点で参照 loader と相対 1e-12 以内か。Julia/Python の
+    一致は同じ算法どうしの相関した証拠なので、これが第三者 loader への許容の根拠になる。
+    scipy が無ければ skip (NG にはしない)。"""
+    try:
+        import numpy as np
+        from scipy.interpolate import CubicSpline as SciCS
+    except Exception:                                # noqa: BLE001
+        print("scipy 無し — 独立実装との突き合わせは skip")
+        return 0
+    ng = 0
+    worst = 0.0
+    zs = [z for z in GOLDEN_Z if os.path.exists(os.path.join(pdir, "SF_Z%03d.json" % z))] or \
+         sorted(int(re.search(r"SF_Z(\d{3})", f).group(1)) for f in glob.glob(os.path.join(pdir, "SF_Z???.json")))
+    for z in zs:
+        el = load_element(pdir, z)
+        sx = SciCS(np.array(el.s), np.array(el.fx_nodes), bc_type=((1, 0.0), "not-a-knot"))
+        se = SciCS(np.array(el._t), np.array(el.fe_nodes), bc_type="not-a-knot")
+        for p in GOLDEN_S:
+            for got, want, key in ((float(sx(p)), el.fx(p), "f_x"), (float(se(p * p)), el.fe(p), "f_e")):
+                r = abs(got - want) / max(abs(want), 1e-300)
+                worst = max(worst, r)
+                if r > GOLDEN_TOL_REL:
+                    ng += _fail("scipy Z=%d %s(s=%g): %r vs %r (相対 %.1e)" % (z, key, p, got, want, r))
+    if verbose:
+        print("scipy CubicSpline (独立実装) との差: %d 元素 × %d 点 / 最悪相対 %.1e (許容 %.0e)"
+              % (len(zs), len(GOLDEN_S), worst, GOLDEN_TOL_REL))
+    return ng
+
+
 def negative_tests(pdir, verbose=True):
     """規約から 1 つだけ外した loader が、golden 点で参照 loader と**検知できる差**を出すこと。
-    検知閾値 = golden の許容 (1e-11) の 100 倍。全ミュータントがこれを超えなければ NG。"""
+    検知閾値 = golden の適合許容 (1e-12) の 10 倍 = 1e-11 (適合と検知を別の数にする)。
+    全ミュータントがこれを超えなければ NG。"""
     ng = 0
     z = None
     for cand in (55, 79):                        # Cs (端条件が最も効く) → Au → 手元の最大 Z
@@ -488,6 +564,7 @@ def negative_tests(pdir, verbose=True):
         ("input q=4πs instead of s", lambda: (lambda q: el.fx(min(4 * math.pi * q, S_MAX))), "fx"),
         ("input in nm^-1 (s×10)", lambda: (lambda q: el.fx(min(10 * q, S_MAX))), "fx"),
         ("f_e × γ(200 kV)", lambda: (lambda q: el.fe(q) * gamma_200kV), "fe"),
+        ("consumer re-rounds nodes to 10 digits", lambda: (lambda q, sp=CubicSpline(s, [_round_sig(v, 10) for v in fx], "clamped", "not-a-knot"): sp(q)), "fx"),
         ("Float32 node reconstruction", None, "nodes"),
         ("wrong node count (7680)", None, "count"),
         ("permuted f_x array", None, "perm"),
@@ -568,11 +645,12 @@ def main(argv):
             golden_path = cand
     if golden_path:
         with open(golden_path, encoding="utf-8") as f:
-            ng += check_golden(pdir, json.load(f))
+            ng += check_golden(pdir, json.load(f), strict=not allow_dev)
     else:
         print("golden vector 無し (schema/factors_golden_v1.json が凍結されるまでは X13 は未実施)")
     if "--negative" in argv:
         ng += negative_tests(pdir)
+        ng += scipy_crosscheck(pdir)
     print("契約テスト %s (%d 件 NG)" % ("ALL PASS" if ng == 0 else "FAILED", ng))
     return 0 if ng == 0 else 1
 
