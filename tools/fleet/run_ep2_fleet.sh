@@ -14,6 +14,7 @@ set -u
 REPO="c:/tmp/temari_factors_2026-08-16/repo"
 TOOL="$REPO/tools/certify_endpoints.jl"
 OUT="c:/tmp/temari_endpoints2_2026-08-16"
+BASE="c:/tmp/temari_factors_2026-08-16"
 LANES="${LANES:-8}"
 mkdir -p "$OUT/logs" "$OUT/stale"
 TOOL_SHA=$(sha256sum "$TOOL" | cut -c1-64)
@@ -25,21 +26,9 @@ ITEMS="86:5 79:5 55:5 11:5 3:5 1:5 86:1 79:1 64:1 55:1 54:1 36:1 29:1 24:1 20:1 
 is_current() {
   local f=$1 z=$2 st=$3
   [ -f "$f" ] || return 1
-  if python - "$f" "$z" "$st" "$TOOL_SHA" <<'PY'
-import json, sys
-f, z, st, sha = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
-try:
-    d = json.load(open(f, encoding="utf-8"))
-    ok = (d["z"] == z and d["stage"] == st and d["tool_sha256"] == sha
-          and d["base_converged"] is True
-          and len(d["variants"]) == 4
-          and all(v["converged"] is True for v in d["variants"])
-          and set(v["variant"] for v in d["variants"]) == {"r0/10", "r0/100", "rmax*1.5", "rmax*2"})
-except Exception:
-    ok = False
-sys.exit(0 if ok else 1)
-PY
-  then return 0; fi
+  # ⚠ ヒアドキュメントを export -f した関数の中に置くと子シェルで再パースできない
+  #   (2026-08-16 12:53 に "syntax error near fi" で判明 → 別ファイルの python に出した)
+  if python "$BASE/ep2_is_current.py" "$f" "$z" "$st" "$TOOL_SHA"; then return 0; fi
   mv "$f" "$OUT/stale/$(basename "$f").$(date +%Y%m%dT%H%M%S).stale"
   echo "⚠ 既存 $(basename "$f") が現行の走の完成品でない → stale/ へ退避して作り直す"
   return 1
@@ -55,7 +44,7 @@ run_one() {
         > "$OUT/logs/$tag.log" 2>&1
 }
 export -f run_one
-export OUT TOOL REPO TOOL_SHA
+export OUT TOOL REPO TOOL_SHA BASE
 
 count_current() {
   local n=0
