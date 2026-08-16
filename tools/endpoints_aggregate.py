@@ -23,7 +23,12 @@ import re
 import sys
 
 B_GRID = 6.0e-8
-FLOOR = 1e-11          # tight (τ/10) の停止残差の目安。これ以下の差の比は意味を持たない
+# 縮み比が意味を持つ床 = tight (τ/10) 解 2 本の停止ゆらぎ。標本 14 の τ/100 診断で
+# |τ/10 − τ/100| ≤ 0.030×B_scf = 2.7e-10 (Z ≤ 11 で実測。重元素は届かず未測) なので、
+# 2 解の差の床を 2 × 2.7e-10 ≈ 5e-10 とする。⚠ 2026-08-16 の 2 段目では r0 の差が
+# 1e-10〜5e-10 で縮み比が 0.7〜4.2 とばらつき、これが停止ゆらぎであることの実証になった
+# (床を 1e-11 に置いた初版はそれを「縮んでいない」と誤読した)。
+FLOOR = 5e-10
 SYMBOLS = ("H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn "
            "Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd "
            "Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn").split()
@@ -98,7 +103,8 @@ def main(argv):
                 elif val > 1.0:
                     not_shrinking.append("%s@Z=%d/st%d (%.2f)" % (name, r["z"], r["stage"], val))
         lines.append("")
-        lines.append("値は max|Δf_x|/B_grid (B_grid = 6e-8)。縮み比 = |Δ(2 段目)|/|Δ(1 段目)|、両方が床 %.0e 超のときだけ" % FLOOR)
+        lines.append("値は max|Δf_x|/B_grid (B_grid = 6e-8)。縮み比 = |Δ(2 段目)|/|Δ(1 段目)|、両方が床 %.0e (tight 2 解の停止ゆらぎ、τ/100 診断から) 超のときだけ" % FLOOR)
+        lines.append("差が床以下の変種は「切断効果 ≤ 停止ゆらぎ」であり、上界は max|Δ| そのもの (縮み比は測れない)")
         lines.append("最悪: " + " / ".join("%s %.3e (%.4f×B_grid) @Z=%d st%d" % (k, w[0], w[0] / B_GRID, w[1], w[2]) for k, w in worst.items()))
         lines.append("縮んでいない (比 > 1): " + (", ".join(not_shrinking) if not_shrinking else "無し"))
         lines.append("縮み比が検査不能 (差が床以下): " + (", ".join(untestable) if untestable else "無し"))
