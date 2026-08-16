@@ -15,11 +15,15 @@ F dataset の `check_tables.jl` に相当。**完走 ≠ 健全**なので、生
   F6  ゲート台帳 (G0–G5) が全部 pass、scf.converged、retried の一覧 [記録]
   F7  Julia 参照 loader (factors_loader.jl) の解析条件: 節点再現 / f_x′(0) = 0 /
       not-a-knot の 3 次式延長 / 定義域の保護
-  F8  --certify-dir DIR: 認証 (`certify_grid.jl` v1) の prod_stage5 副本との突き合わせ。
-      副本のバイナリ SHA-256 と収束を検査してから、**規格化積分 (norm_correction) が 17 桁で
-      一致** / round11(認証 f_x) と収録 f_x の差が最下位桁 1.5 単位以内 (補償和の有無の丸めだけ) /
-      M₂ が相対 1e-12。⚠ これは「同じ認証済み解の経路を通った」ことの検査で、
-      **ρ の 32 万点がビット同一であることの証明ではない** (ρ の hash は認証で取っていない。codex)
+  F8  --certify-dir DIR: 認証 (`certify_grid.jl` v1) の副本との突き合わせ (2 段構え。2026-08-16 に
+      Au で「同じ手順・同じ commit でも SCF が別の反復で止まる」ことが判明したため):
+      F8a [記録] norm_correction が 17 桁一致 = **同一の解** (H・Hg で観測)。一致しない元素は
+          「停止許容内の別反復」として数え、その一覧を出す
+      F8b [ゲート] **出荷 f_x と認証 tight (τ/10) 解の差 max|Δf_x| ≤ B_scf = 9.09e-9** —
+          出荷表の SCF 停止誤差の直接の上界 (認証の U と同じ定義。認証時の U は別の反復の値なので
+          出荷解にはそのまま使えない → ここで測り直す)。M₂ は相対 1e-8 以内
+      F8c [記録] 出荷 f_x と認証 prod 解の差 (最下位桁の単位)
+      ⚠ ρ の 32 万点がビット同一であることの証明ではない (ρ の hash は認証で取っていない。codex)
   F9  --golden schema/factors_golden_v1.json: Python 参照 loader が作った golden と Julia loader が
       相対 1e-12 で一致 (**言語間検査** X13)
   F10 [記録] 丸め寄与・G2/G3/G5 の最悪値・SCF 秒 (runlog) の合計
@@ -36,6 +40,7 @@ include(joinpath(@__DIR__, "..", "src", "l0_json.jl"))
 include(joinpath(@__DIR__, "factors_loader.jl"))
 
 const QC_Z_RANGE = 1:86
+const B_SCF_QC = 9.09e-9          # SCF 停止への配分 (計画書 §4.17。gen_factors の budget と同じ)
 const QC_SYMBOLS = split("H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn " *
     "Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd " *
     "Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn")
@@ -68,6 +73,8 @@ function load_certified(cdir::String, z::Int)
     k = findfirst(==("prod_stage5"), b["layout"])
     k === nothing && return nothing
     fx_all = collect(raw[(k-1)*n+1:k*n])
+    kt = findfirst(==("tight_stage5"), b["layout"])
+    tight_all = kt === nothing ? nothing : collect(raw[(kt-1)*n+1:kt*n])
     prod = nothing
     for lv in d["levels"]
         haskey(lv, "prod") && (prod = lv["prod"])
@@ -75,7 +82,13 @@ function load_certified(cdir::String, z::Int)
     prod === nothing && return nothing
     prod["converged"] === true || error("認証副本の prod_stage5 が未収束")
     Int(prod["n_r"]) == 323400 || error("認証副本の n_r が dt/16 でない")
-    return (fx = fx_all[1:2:end], prod = prod)
+    tight_lv = nothing
+    for lv in d["levels"]
+        (haskey(lv, "tight") && Int(lv["stage"]) == 5) && (tight_lv = lv["tight"])
+    end
+    tight_conv = tight_lv !== nothing && tight_lv["converged"] === true
+    return (fx = fx_all[1:2:end], prod = prod,
+            fx_tight = (tight_all === nothing || !tight_conv) ? nothing : tight_all[1:2:end])
 end
 
 function main(args)
@@ -108,7 +121,9 @@ function main(args)
     worst = Dict{String,Tuple{Float64,Int}}("mb" => (0.0, 0), "rnd_fx" => (0.0, 0), "rnd_fe" => (0.0, 0),
                                             "G2" => (0.0, 0), "G3" => (0.0, 0), "G5" => (0.0, 0),
                                             "knot" => (0.0, 0), "nak" => (0.0, 0), "cert_fx" => (0.0, 0),
-                                            "cert_m2" => (0.0, 0), "golden" => (0.0, 0))
+                                            "cert_m2" => (0.0, 0), "golden" => (0.0, 0),
+                                            "cert_tight" => (0.0, 0))
+    cert_identical = Int[]; cert_other = Int[]
     upd!(k, v, z) = (v > worst[k][1] && (worst[k] = (v, z)))
     n_cert = 0
     golden = golden_path === nothing ? nothing : parse_json_file(golden_path)
@@ -197,18 +212,33 @@ function main(args)
                 n_cert += 1
                 length(c.fx) == FL_N_NODES || fail("F8 $tag: 認証副本の節点数 $(length(c.fx))")
                 cc = Float64(c.prod["norm_correction"]); sc = Float64(d["norm_correction"])
-                abs(cc - sc) <= 1e-15 * abs(sc) || fail(@sprintf("F8 %s: norm_correction が違う (認証 %.17g / 出荷 %.17g) → 同じ解ではない", tag, cc, sc))
+                identical = abs(cc - sc) <= 1e-15 * abs(sc)
+                push!(identical ? cert_identical : cert_other, z)
+                # F8c: 認証 prod 解との差 (記録)
                 worst_fx = 0.0; worst_i = 1
                 for i in 1:FL_N_NODES
                     r = abs(fl_round_sig(c.fx[i]) - fx[i]) / max(unit_last_digit(fx[i]), 1e-300)
                     r > worst_fx && (worst_fx = r; worst_i = i)
                 end
                 upd!("cert_fx", worst_fx, z)
-                worst_fx <= 1.5 || fail(@sprintf("F8 %s: 認証 f_x との差が最下位桁 %.2f 単位 @s=%.5f", tag, worst_fx, s[worst_i]))
+                identical && worst_fx > 1.5 &&
+                    fail(@sprintf("F8 %s: 同一解なのに認証 f_x との差が最下位桁 %.2f 単位 @s=%.5f", tag, worst_fx, s[worst_i]))
+                # F8b: 出荷解の停止誤差 = 認証 tight 解との差 ≤ B_scf (ゲート)
+                if c.fx_tight === nothing
+                    fail("F8 $tag: 認証副本に収束した tight_stage5 が無い (停止誤差を測れない)")
+                else
+                    ut = 0.0; ui = 1
+                    for i in 1:FL_N_NODES
+                        r = abs(fx[i] - c.fx_tight[i])
+                        r > ut && (ut = r; ui = i)
+                    end
+                    upd!("cert_tight", ut / B_SCF_QC, z)
+                    ut <= B_SCF_QC || fail(@sprintf("F8 %s: 出荷 f_x と認証 tight 解の差 %.2e > B_scf @s=%.4f", tag, ut, s[ui]))
+                end
                 m2c = Float64(c.prod["m2"]) * (1.0 + cc)
                 r2 = abs(m2c - m2) / m2
                 upd!("cert_m2", r2, z)
-                r2 <= 1e-12 || fail(@sprintf("F8 %s: M₂ が認証と相対 %.1e 違う", tag, r2))
+                r2 <= (identical ? 1e-12 : 1e-8) || fail(@sprintf("F8 %s: M₂ が認証と相対 %.1e 違う", tag, r2))
             end
         end
         # F9
@@ -244,8 +274,13 @@ function main(args)
     @printf("  G2 最悪 %.2e @Z=%d / G3 最悪 %.2e Å @Z=%d / G5 (閾値比) 最悪 %.3f @Z=%d\n",
             worst["G2"]..., worst["G3"]..., worst["G5"]...)
     @printf("  loader: 節点再現 %.1e @Z=%d / NAK %.1e @Z=%d\n", worst["knot"]..., worst["nak"]...)
-    cdir === nothing || @printf("  認証副本との突き合わせ %d 元素 (同じ解の経路の検査。ρ ビット同一の証明ではない): f_x 最下位桁 %.3f 単位 @Z=%d / M₂ 相対 %.1e @Z=%d\n",
-                                n_cert, worst["cert_fx"]..., worst["cert_m2"]...)
+    if cdir !== nothing
+        @printf("  認証副本との突き合わせ %d 元素: 同一解 %d / 停止許容内の別反復 %d %s\n",
+                n_cert, length(cert_identical), length(cert_other),
+                isempty(cert_other) ? "" : string(cert_other))
+        @printf("    F8b 出荷 f_x − 認証 tight (停止誤差 / B_scf) 最悪 %.3f @Z=%d / F8c 認証 prod との差 最下位桁 %.2f 単位 @Z=%d / M₂ 相対 %.1e @Z=%d\n",
+                worst["cert_tight"]..., worst["cert_fx"]..., worst["cert_m2"]...)
+    end
     golden === nothing || @printf("  golden (Python) との言語間差 %d 元素: 最悪相対 %.1e @Z=%d (許容 %.0e)\n",
                                   n_golden, worst["golden"]..., Float64(golden["tolerance_rel"]))
     @printf("  SCF 秒の合計 (runlog): %.0f s = %.1f h\n", scf_secs, scf_secs / 3600)
