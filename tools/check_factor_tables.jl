@@ -43,7 +43,8 @@ F dataset の `check_tables.jl` に相当。**完走 ≠ 健全**なので、生
 
 使い方:
     julia tools/check_factor_tables.jl src/prod_factors_v1
-    julia tools/check_factor_tables.jl src/prod_factors_v1 --certify-dir c:/tmp/temari_certify_2026-08-11
+    julia tools/check_factor_tables.jl src/prod_factors_v1 --certify-dir c:/tmp/temari_certify_2026-08-11 \
+          --tight-extra c:/tmp/temari_tight_extra_2026-08-16    # v1 に収束 tight が無い元素 (Yb) の補完参照
     julia tools/check_factor_tables.jl src/prod_factors_v1 --golden schema/factors_golden_v1.json
     julia tools/check_factor_tables.jl DIR --allow-dev            # 開発出力 (0.0.0-dev、部分集合)
 =====================================================================#
@@ -114,6 +115,7 @@ function main(args)
     pdir = args[1]
     allow_dev = "--allow-dev" in args
     cdir = optval("--certify-dir", nothing)
+    tdir = optval("--tight-extra", nothing)      # 補完 tight 参照 (tight_zNNN.json。tight_extra.jl の出力)
     golden_path = optval("--golden", nothing)
     expect_fp = optval("--expect-fingerprint", nothing)
     files = sort(filter(f -> occursin(r"^SF_Z\d{3}\.json$", f), readdir(pdir)))
@@ -140,7 +142,7 @@ function main(args)
                                             "knot" => (0.0, 0), "nak" => (0.0, 0), "cert_fx" => (0.0, 0),
                                             "cert_m2" => (0.0, 0), "golden" => (0.0, 0),
                                             "cert_tight" => (0.0, 0), "cert_tight_e" => (0.0, 0))
-    cert_identical = Int[]; cert_other = Int[]
+    cert_identical = Int[]; cert_other = Int[]; cert_no_tight = Int[]; cert_extra_tight = Int[]
     upd!(k, v, z) = (v > worst[k][1] && (worst[k] = (v, z)))
     n_cert = 0
     golden = golden_path === nothing ? nothing : parse_json_file(golden_path)
@@ -240,10 +242,26 @@ function main(args)
                 upd!("cert_fx", worst_fx, z)
                 identical && worst_fx > 1.5 &&
                     fail(@sprintf("F8 %s: 同一解なのに認証 f_x との差が最下位桁 %.2f 単位 @s=%.5f", tag, worst_fx, s[worst_i]))
-                # F8b: 出荷解の停止誤差 = 認証 tight 解との差 ≤ B_scf (ゲート)
-                if c.fx_tight === nothing
-                    fail("F8 $tag: 認証副本に収束した tight_stage5 が無い (停止誤差を測れない)")
+                # F8b: 出荷解の停止誤差 = 認証 tight 解との差 ≤ B_scf (ゲート)。v1 に収束 tight が
+                # 無い元素は --tight-extra の補完参照 (同じ設定・ラダー) を使う。どちらも無ければ
+                # **検査不能** として数え、一覧を出す (黙って通さない・不合格とも別分類)
+                fx_tight = c.fx_tight; tight_meta = c.tight
+                if fx_tight === nothing && tdir !== nothing
+                    tp = joinpath(tdir, @sprintf("tight_z%03d.json", z))
+                    if isfile(tp)
+                        te = parse_json_file(tp)
+                        if te["converged"] === true && Int(te["n_r"]) == 323400 && Float64(te["tol_factor"]) == 0.1
+                            fx_tight = Float64[Float64(v) for v in te["fx_ship_nodes"]]
+                            tight_meta = Dict{String,Any}("m2" => te["m2"], "m4" => te["m4"], "norm_correction" => 0.0)  # m2/m4 は補正込み
+                            push!(cert_extra_tight, z)
+                        end
+                    end
+                end
+                if fx_tight === nothing
+                    push!(cert_no_tight, z)
+                    println("  [検査不能] F8b/F8d $tag: 収束した tight (τ/10) 参照が無い (v1 未収束、--tight-extra にも無い)")
                 else
+                    c = (fx = c.fx, prod = c.prod, tight = tight_meta, fx_tight = fx_tight)
                     ut = 0.0; ui = 1
                     for i in 1:FL_N_NODES
                         r = abs(fx[i] - c.fx_tight[i])
@@ -318,6 +336,11 @@ function main(args)
         @printf("  認証副本との突き合わせ %d 元素: 同一解 %d / 停止許容内の別反復 %d %s\n",
                 n_cert, length(cert_identical), length(cert_other),
                 isempty(cert_other) ? "" : string(cert_other))
+        isempty(cert_extra_tight) || println("    tight 参照を --tight-extra で補完した元素: ", cert_extra_tight)
+        if !isempty(cert_no_tight)
+            println("    ⚠ F8b/F8d 検査不能 (収束 tight 参照無し): ", cert_no_tight)
+            allow_dev || fail("F8: 停止誤差の検査不能な元素がある $(cert_no_tight) — tight_extra.jl で参照を補うこと")
+        end
         @printf("    F8b 出荷 f_x の停止誤差 (|ship−tight| + %.2f allowance) / B_scf 最悪 %.3f @Z=%d / F8d f_e 側 / B_scf,e 最悪 %.3f @Z=%d\n",
                 A_TIGHT_FRAC, worst["cert_tight"]..., worst["cert_tight_e"]...)
         @printf("    F8c 認証 prod との差 最下位桁 %.2f 単位 @Z=%d / M₂ 相対 %.1e @Z=%d\n",
