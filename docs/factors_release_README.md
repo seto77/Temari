@@ -11,8 +11,8 @@ independent version and DOI.
 | | |
 |---|---|
 | `SF_Z<zzz>.json` | 86 neutral atoms (Z = 1..86), one file each: f_x [electrons] and f_e [Å] on 7681 nodes |
-| `MANIFEST.md` | the authoritative record: prescription, certification, QC results, operational log |
-| `manifest.json` | SHA-256 per file plus an order-independent digest over all of them; the frozen source fingerprint |
+| `MANIFEST.md` | the authoritative record (in Japanese): prescription, certification pointers, QC results, operational log of the generating run |
+| `manifest.json` | SHA-256 and byte count of each of the 86 data files plus an order-independent digest over them; the frozen source fingerprint. (The archive's own `.sha256` sidecar covers everything else — README, schema, contract, licences.) |
 | `schema/temari_factors_v1.schema.json` | the JSON schema every file validates against |
 | `schema/factors_golden_v1.json` | golden vectors (C, Fe, Cs, Au at off-knot s) that pin the interpolation convention |
 | `tools/temari_factors_contract.py` | **the executable contract** — a reference loader in the Python standard library only, plus the negative mutants that show the contract can fail (MIT, unlike the data) |
@@ -21,6 +21,9 @@ independent version and DOI.
 ```bash
 python tools/temari_factors_contract.py . --negative     # verify the contract; exits non-zero on failure
 ```
+
+(Python ≥ 3.7, standard library only; SciPy is used for an extra independent
+cross-check when present. Output is UTF-8.)
 
 ## The physics in one paragraph
 
@@ -53,33 +56,45 @@ negative mutant showing that the check detects it.
    clamping to the nearest valid s. s is sinθ/λ in Å⁻¹ (q = 4πs); feeding q, or s
    in nm⁻¹, is wrong by 4π or 10.
 5. **Values are decimal-rounded to 11 significant digits and stored as JSON
-   numbers.** Parse them as binary64 and do not re-round. Rounding contributes
-   at most 0.16 × B_repr (f_x) and 0.33 × B_repr,e (f_e) to the interpolation
-   error budget. A consumer that re-rounds to 10 digits moves off the golden
-   vectors by more than the conformance tolerance (there is a mutant for it).
+   numbers.** Parse them as binary64 and do not re-round. Interpolation plus this
+   rounding stays within 0.16 × B_repr (f_x) and 0.34 × B_repr,e (f_e) on sealed
+   midpoints; rounding alone contributes at most 5.0e-10 (0.055 ×). A consumer that
+   re-rounds to 10 digits moves off the golden vectors by more than the
+   conformance tolerance (there is a mutant for it).
 
 ## What this dataset claims, and what it does not
 
-- **Numerical certification (what the numbers are worth):** total computational
-  error contract T_comp = 1e-7 electrons for f_x and T_comp,e = 1e-7 Å for f_e,
-  split as B_num (grid + SCF stopping) : B_repr (interpolation + rounding) = 10 : 1.
-  The radial grid dt/16 was certified element by element (density L¹ bound,
-  worst 0.58 × B_grid), endpoint truncation screened for all Z (≤ 1.2 % of B_grid),
-  SCF stopping measured on a 14-element sample, and the representation error
-  measured on sealed midpoints for all 86 elements. Pointers are in every file
-  under `certification_pointers`.
+- **Numerical certification (what the numbers are worth):** T_comp = 1e-7
+  electrons for f_x and T_comp,e = 1e-7 Å for f_e are **release acceptance
+  budgets**, split as B_num (grid + SCF stopping) : B_repr (interpolation +
+  rounding) = 10 : 1. They are supported by measured differences and
+  conservative triangle allocations, not by an a-priori or infinite-domain error
+  theorem. Concretely: the radial grid dt/16 was certified element by element
+  (density L¹ bound, worst 0.58 × B_grid); the SCF stopping error of every
+  shipped solve was measured against a τ/10 reference (worst 0.39 × B_scf for
+  f_x, 0.67 × of the f_e allowance), with an assumed 0.10 allowance for the
+  residual of that reference (τ/10 sufficiency was verified at τ/100 on the light
+  elements where τ/100 converges); the representation error was measured on
+  sealed midpoints for all 86 elements; and the sensitivity to the tested
+  endpoint extensions of the radial grid (r₀/10, r₀/100, r_max×1.5, r_max×2) was
+  ≤ 0.9 % of B_grid — an observed sensitivity, not a bound on the unknown
+  infinite-domain truncation error. Pointers are in every file under
+  `certification_pointers`.
 - **Model validation (whether the physics is right):** compared with the
   Dirac–Hartree–Fock values of OFFV1 (the ITC replacement candidate) for f_x. The
   KLI exact exchange places these tables closer to DHF than the Xα-based tables
   they replace, but **they are not DHF**. No independent external validation of
   f_e was performed; its accuracy follows from f_x through Mott–Bethe and from
   the moment expansion at small s.
-- **Reproducibility (what "deterministic" means here):** the table files are
-  byte-identical on regeneration with the same source fingerprint and Julia
-  version *on the same platform* (verified for H and Fe on the generating
-  machine); a different libm/compiler may differ in the last binary digits below
-  the 11-digit rounding. Run-specific information (timings, host) is kept out of
-  the archive; the archive itself is rebuilt twice and required to have the same
-  SHA-256.
+- **Reproducibility (what "deterministic" means here):** *packing* is
+  deterministic — the archive is built twice and required to have the same
+  SHA-256, and the JSON serialization carries no volatile information (per-run
+  logs are kept out; `MANIFEST.md` keeps a summary of the run). *Regeneration of
+  the table bytes is not guaranteed*: the SCF can stop at a different iterate
+  from one process to the next (observed sporadically — 6 of 85 elements differed
+  between two full runs of the same generator, all within the stopping tolerance
+  and inside the F8 gates above; single-element regenerations of H, Fe and Au
+  were byte-identical). **The released archive bytes and their SHA-256 are
+  canonical.**
 - **Neutral atoms only.** Ions are not derivable from these tables and will be a
   separate curated set if published.

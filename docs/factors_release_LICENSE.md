@@ -15,8 +15,9 @@ Copyright (c) 2026 Yusuke SETO.
 
 CC-BY-4.0 asks for the creator, a copyright notice, a licence notice, a
 disclaimer, a link to the licence, and an indication of whether changes were
-made. For scientific use, citing the dataset by its version and DOI satisfies
-that; `CITATION.cff` in the repository gives the form.
+made. For scientific use, citing the dataset by its version — and, once one is
+minted, its DOI — satisfies that; `CITATION.cff` in the repository lists this
+dataset (by versioned release tag until a DOI exists).
 
 ⚠ Attribution may be given in any manner reasonable to the medium, **including
 by link** — which is what makes it workable when these tables are embedded in a
