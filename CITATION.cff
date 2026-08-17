@@ -12,8 +12,8 @@ repository-code: "https://github.com/seto77/Temari"
 url: "https://seto77.github.io/Temari/"
 license: MIT
 license-url: "https://github.com/seto77/Temari/blob/main/licenses/README.md"
-version: "1.0.1"
-date-released: "2026-08-10"
+version: "1.1.0"
+date-released: "2026-08-17"
 keywords:
   - electron microscopy
   - EELS
@@ -61,6 +61,26 @@ references:
       version instead. A byte-identical mirror is attached to the GitHub release
       dataset-v5.0.0; the archive is built deterministically so the two copies
       can be compared rather than merely trusted.
+  # 260817Cl: 原子散乱因子データセット (別 family、CC-BY-4.0)。DOI は未発行 (Zenodo は作者判断) —
+  #   空の doi や仮の DOI を書かない (CFF 1.2.0 では doi は任意)。発行後にここへ追記する。
+  - type: data
+    title: >-
+      Atomic X-ray and first-Born electron scattering factors f_x(s), f_e(s) for
+      86 neutral atoms (Z = 1-86), computed with Temari
+    authors:
+      - family-names: Seto
+        given-names: Yusuke
+    version: "1.0.0"
+    year: 2026
+    url: "https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0"
+    license: CC-BY-4.0
+    notes: >-
+      dataset-factors v1.0.0, released separately from this software and from the
+      F(s, E0) dataset, under CC-BY-4.0. No DOI has been assigned yet; cite this
+      versioned GitHub release and identify the archive by its published SHA-256
+      when exact byte-level reproducibility matters. The archive is
+      self-contained (schema, manifest, golden vectors and an executable
+      reference loader).
   # ⚠ 260811Cl 訂正: 題名・巻号・DOI がまとめて誤っていた。
   #   正しくは ADNDT **95**(6), 871-909 (2009), doi 10.1016/j.adt.2009.08.001 (出版社の書誌で照合)。
   #   旧記載の doi 10.1016/j.adt.2010.06.001 は**バリウム同位体の発見**という無関係な論文を指す。
