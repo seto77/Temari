@@ -196,8 +196,12 @@ $$f_x(s) = \int 4\pi r^2 \rho(r)\, j_0(Kr)\, \mathrm{d}r, \qquad K = 4\pi s a_0$
 
 with s = sinθ/λ in Å⁻¹ — the same s and the same K the F(s) exit uses. The
 electron factor follows by Mott–Bethe, f_e = 2(Z − f_x)/K² in a₀, reported in Å.
-`f_e` is `null` at s = 0, where it needs a limit for a neutral atom and diverges
-for an ion.
+At s = 0 the Mott–Bethe form needs a limit: for a neutral atom `f_e(0) = a₀M₂/3`
+(M₂ = 4π∫r⁴ρ dr) is finite and is reported; for an ion it diverges and `f_e` is
+`null`. The shipped dataset (`dataset-factors`, see [Data](data.md)) uses the
+`dirac_true_midpoint_v1` numerics and a dt/16 grid; the CLI default is
+`legacy_v5` on the standard grid, so a plain `fx` run does not reproduce the
+dataset bytes — pass `--numerics dirac_true_midpoint_v1` for the same backend.
 
 **f_x(0) = Z exactly.** Getting there took removing a bias worth writing down:
 the SCF normalizes its orbitals with the trapezoid rule, which on the standard

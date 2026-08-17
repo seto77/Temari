@@ -144,8 +144,9 @@ accident.
 
 ### Which Julia
 
-The gate is **Julia 1.11.9**, the interpreter pinned by the current dataset
-generation. Newer versions are tested in CI, but a result that only passes on a
+The gate is **Julia 1.11.9**, the interpreter pinned by the current F(s, E₀)
+dataset generation (dataset-factors v1.0.0 is pinned to 1.12.6 in its own
+manifest). Newer versions are tested in CI, but a result that only passes on a
 newer version is not accepted. If you use `juliaup`, `julia +1.11` selects it.
 
 ## Style

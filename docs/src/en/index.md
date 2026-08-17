@@ -10,8 +10,10 @@ beyond the Julia standard library.
 
 !!! tip "Just want the numbers?"
     The inner-shell ionization form factors are already computed and published
-    as a dataset with its own DOI — 525 channels, K through M5. You do not need
-    to run anything. See **[Data](data.md)**.
+    as a dataset with its own DOI — 525 channels, K through M5 — and so are the
+    X-ray and electron atomic scattering factors for Z = 1–86
+    (dataset-factors v1.0.0). You do not need to run anything. See
+    **[Data](data.md)**.
 
 !!! quote "The name"
     *Temari* (手毬) is a traditional Japanese craft: a sphere divided

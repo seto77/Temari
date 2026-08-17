@@ -3,7 +3,7 @@
 [![Documentation](https://img.shields.io/badge/%F0%9F%93%96_Documentation-blue)](https://seto77.github.io/Temari/)
 [![CI](https://github.com/seto77/Temari/actions/workflows/ci.yml/badge.svg)](https://github.com/seto77/Temari/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Julia 1.11.9](https://img.shields.io/badge/Julia-1.11.9-9558B2)](https://julialang.org/)
+[![Julia 1.11.9 / 1.12.6](https://img.shields.io/badge/Julia-1.11.9%20%2F%201.12.6-9558B2)](https://julialang.org/)
 [![Dependencies: none](https://img.shields.io/badge/dependencies-none-lightgrey)](#design-commitments)
 [![Dataset DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21872050.svg)](https://doi.org/10.5281/zenodo.21872050)
 
@@ -46,6 +46,16 @@ mirrored byte-identically at
 - **What do the numbers mean, and what will bite me?** —
   **<https://seto77.github.io/Temari/data/>**. Read it before use: F is signed,
   q = 4πs, and values past each row's `s_cert` are padding rather than physics.
+
+The **atomic scattering factors f_x(s), f_e(s)** are published too — 86 neutral
+atoms (Z = 1–86), s ≤ 6 Å⁻¹ on 7681 nodes, full-Dirac SCF with KLI exact
+exchange — as a separate dataset family, **dataset-factors v1.0.0** (CC-BY-4.0),
+at [release `dataset-factors-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0)
+(no DOI yet). Two things will bite you: the s grid is not stored (reconstruct
+s_i = 6i/7680 and check its SHA-256), and the interpolation convention is part
+of the contract (f_x: cubic in s, clamped left / not-a-knot right; f_e: cubic in
+t = s²). The archive ships an executable contract that checks both. Details on
+the [Data page](https://seto77.github.io/Temari/data/#atomic-scattering-factors-f_xs-f_es--dataset-factors-v100).
 
 The dataset and the software carry independent version lines and are never
 mixed in the same release.
@@ -168,8 +178,9 @@ restrictively licensed codes into issues.
 See [CITATION.cff](CITATION.cff), or use GitHub's "Cite this
 repository". If you publish cross sections obtained through Temari, cite the
 Bote–Salvat papers below as well. If you publish numbers taken from a generated
-dataset, cite that dataset by its own version DOI — it is CC-BY-4.0 and is not
-covered by the MIT licence of this code.
+dataset, cite that dataset by its own version DOI (or, for a dataset that has
+no DOI yet, by its versioned release tag and archive SHA-256) — it is CC-BY-4.0
+and is not covered by the MIT licence of this code.
 
 ## Credits and licensing
 
