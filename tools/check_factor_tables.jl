@@ -149,6 +149,18 @@ function main(args)
     n_cert = 0
     golden = golden_path === nothing ? nothing : parse_json_file(golden_path)
     n_golden = 0
+    # F9 の厳格化 (2026-08-17 レビュー): golden の許容・元素集合・s 点列・格子 SHA・桁数を
+    # ファイルの言い値で受け取らない (Python の check_golden strict と同じ規則)。--allow-dev では緩める
+    if golden !== nothing && !allow_dev
+        Float64(golden["tolerance_rel"]) == 1e-12 || fail("F9: golden の許容 $(golden["tolerance_rel"]) が 1e-12 でない")
+        sort([parse(Int, k) for k in keys(golden["elements"])]) == [6, 26, 55, 79] ||
+            fail("F9: golden の元素集合が {C, Fe, Cs, Au} でない")
+        golden["s_grid_sha256"] == FL_S_GRID_SHA256 || fail("F9: golden の格子 SHA が契約値でない")
+        Int(golden["digits"]) == FL_DIGITS || fail("F9: golden の桁数が $(FL_DIGITS) でない")
+        for (zs, g) in golden["elements"]
+            length(g["points"]) == 16 || fail("F9: golden Z=$zs の点数が 16 でない")
+        end
+    end
     scf_secs = 0.0
     for f in files
         d = parse_json_file(joinpath(pdir, f))
@@ -320,6 +332,10 @@ function main(args)
         if golden !== nothing && haskey(golden["elements"], string(z))
             n_golden += 1
             tol = Float64(golden["tolerance_rel"])
+            gz = golden["elements"][string(z)]
+            for k in ("model_id", "dataset_version", "generator_source_sha256")
+                allow_dev || get(gz, k, nothing) == d[k] || fail("F9 $tag: golden の $k が表と違う")
+            end
             for p in golden["elements"][string(z)]["points"]
                 sq = Float64(p["s"])
                 for (key, fn) in (("f_x", fx_at), ("f_e_A", fe_at))
@@ -363,8 +379,11 @@ function main(args)
         @printf("    F8c 認証 prod との差 最下位桁 %.2f 単位 @Z=%d / M₂ 相対 %.1e @Z=%d / F8d 切替点の MB/展開 比 最大 %.2f @Z=%d [記録]\n",
                 worst["cert_fx"]..., worst["cert_m2"]..., worst["f8d_switch_ratio"]...)
     end
-    golden === nothing || @printf("  golden (Python) との言語間差 %d 元素: 最悪相対 %.1e @Z=%d (許容 %.0e)\n",
-                                  n_golden, worst["golden"]..., Float64(golden["tolerance_rel"]))
+    if golden !== nothing
+        @printf("  golden (Python) との言語間差 %d 元素: 最悪相対 %.1e @Z=%d (許容 %.0e)\n",
+                n_golden, worst["golden"]..., Float64(golden["tolerance_rel"]))
+        allow_dev || n_golden == 4 || fail("F9: golden で検査した元素が $n_golden (4 のはず)")
+    end
     @printf("  SCF 秒の合計 (runlog): %.0f s = %.1f h\n", scf_secs, scf_secs / 3600)
     println(ng == 0 ? "check_factor_tables: ALL PASS ($(length(files)) ファイル)" :
                       "check_factor_tables: FAILED ($ng 件 NG)")

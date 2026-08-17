@@ -31,10 +31,20 @@ import glob
 import hashlib
 import json
 import math
+import numbers
 import os
 import re
 import struct
 import sys
+
+# ⚠ 出力に非 ASCII (², ×, ⚠ など) を含むので、stdout がパイプ/ファイルで legacy コードページ
+#   (Windows の cp932 等) のときに UnicodeEncodeError で落ちないよう UTF-8 に固定する
+#   (2026-08-17 のレビューで「全検査 PASS 後に落ちて FAILED を装う」ことが分かった)
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:                                # noqa: BLE001
+        pass
 
 S_MAX = 6.0
 N_INTERVALS = 7680
@@ -42,6 +52,8 @@ N_NODES = N_INTERVALS + 1
 S_GRID_SHA256 = "1476113c622ccb9e62d4b56973277b7e550fef44357cf42d7923a9dde84f32fb"
 Z_RANGE = range(1, 87)
 DIGITS = 11
+# 出荷版の受理: 契約 (schema_version 1) は 1.x.y の全 patch/minor で不変。ハードコード 1.0.0 にしない
+SHIP_VERSION_RE = re.compile(r"^1\.\d+\.\d+$")
 SYMBOLS = ("H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn "
            "Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd "
            "Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn").split()
@@ -218,8 +230,8 @@ class Element:
 
     @staticmethod
     def _guard(s):
-        if not isinstance(s, (int, float)) or isinstance(s, bool):
-            raise TypeError("s は実数")
+        if isinstance(s, bool) or not isinstance(s, numbers.Real):
+            raise TypeError("s は実数 (bool 不可)")
         s = float(s)
         if math.isnan(s) or math.isinf(s):
             raise ValueError("s が NaN/Inf")
@@ -282,8 +294,8 @@ def contract(pdir, allow_dev=False, verbose=True):
         # ---- C2: 固定フィールド ------------------------------------------------
         if d.get("schema_version") != 1 or d.get("dataset") != "temari-factors":
             ng += _fail("C2 %s: schema_version/dataset" % tag)
-        if not allow_dev and d.get("dataset_version") != "1.0.0":
-            ng += _fail("C2 %s: dataset_version %r (出荷は 1.0.0)" % (tag, d.get("dataset_version")))
+        if not allow_dev and not SHIP_VERSION_RE.match(str(d.get("dataset_version"))):
+            ng += _fail("C2 %s: dataset_version %r (出荷は 1.x.y)" % (tag, d.get("dataset_version")))
         if d.get("charge") != 0 or float(d.get("n_electrons")) != float(z):
             ng += _fail("C2 %s: 中性でない" % tag)
         if int(re.search(r"SF_Z(\d{3})\.json$", f).group(1)) != z:
@@ -295,7 +307,8 @@ def contract(pdir, allow_dev=False, verbose=True):
         if d.get("units", {}).get("s") != "A^-1" or d["units"].get("f_x") != "electrons" or d["units"].get("f_e_A") != "A":
             ng += _fail("C2 %s: 単位" % tag)
         ic = d.get("interpolation_contract", {})
-        if "clamped" not in ic.get("f_x", "") or "not-a-knot" not in ic.get("f_x", "") or "t" not in ic.get("f_e_A", ""):
+        if ("clamped" not in ic.get("f_x", "") or "not-a-knot" not in ic.get("f_x", "")
+                or not re.search(r"t = s\^2|t_i = s_i\^2", ic.get("f_e_A", "")) or "not-a-knot" not in ic.get("f_e_A", "")):
             ng += _fail("C2 %s: interpolation_contract の文言" % tag)
         meta = (d.get("model_id"), d.get("generator_source_sha256"), d.get("dataset_version"),
                 d.get("julia"), d.get("rounding", {}).get("significant_digits"))
@@ -363,6 +376,7 @@ def contract(pdir, allow_dev=False, verbose=True):
         _, d1, _, _ = el._fx.derivatives(0.0, side="right")
         if abs(d1) > 1e-12 * z:
             ng += _fail("C7 %s: f_x'(0)=%.2e ≠ 0 (clamped-left でない)" % (tag, d1))
+        c2 = 0.0                                     # 元素ごとに集計 (前の元素の値を持ち越さない)
         # C² 連続 (内部節点で左右の 2 階微分が一致)。⚠ 区間幅が極小の節点 (t 格子の
         # 最初の数区間 h_t ~ 6e-7) では 2 階微分が (y₀−y₁)/h² の桁落ちで悪条件になり
         # 相対 1e-6 級の丸め床が出る (2026-08-16 実測。規約違反ではない) ので、
@@ -370,13 +384,14 @@ def contract(pdir, allow_dev=False, verbose=True):
         for j in (1, 2, 1000, 3840, N_NODES - 3, N_NODES - 2):
             xl = el._fx.derivatives(s[j], side="left")[2]; xr = el._fx.derivatives(s[j], side="right")[2]
             scale = max(abs(xl), abs(xr), z)      # f_x'' ~ O(Z) 級
-            worst_c2 = max(worst_c2, abs(xl - xr) / scale)
+            c2 = max(c2, abs(xl - xr) / scale)
         for j in (500, 1000, 3840, N_NODES - 3, N_NODES - 2):
             tl = el._fe.derivatives(el._t[j], side="left")[2]; tr = el._fe.derivatives(el._t[j], side="right")[2]
             scale = max(abs(tl), abs(tr), 1e-3)
-            worst_c2 = max(worst_c2, abs(tl - tr) / scale)
-        if worst_c2 > 1e-8:
-            ng += _fail("C7 %s: C² 連続が破れている (相対 %.1e)" % (tag, worst_c2))
+            c2 = max(c2, abs(tl - tr) / scale)
+        worst_c2 = max(worst_c2, c2)
+        if c2 > 1e-8:
+            ng += _fail("C7 %s: C² 連続が破れている (相対 %.1e)" % (tag, c2))
         # not-a-knot: 区間 0 の 3 次式を x₂ へ延ばすと y₂ (f_e, t 上)、区間 n−2 の式を
         # x_{n−3} へ延ばすと y_{n−3} (f_x・f_e) を再現する (3 階微分の一致と同値で、良条件)
         # ⚠ 「区間 0 の 3 次式を x₂ へ延ばして y₂ を再現」だけでは、C² が別途立っていない

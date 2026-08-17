@@ -47,7 +47,7 @@ function build(pdir::String)
         c = get(d, "generator_commit", "?"); commits[c] = get(commits, c, 0) + 1
         z = Int(d["z"]); push!(zs, z)
         sgrid === nothing && (sgrid = Dict{String,Any}(
-            "definition" => d["s_grid"]["definition"], "n_nodes" => d["s_grid"]["n_nodes"],
+            "definition" => d["s_grid"]["definition"], "n_nodes" => Int(d["s_grid"]["n_nodes"]),
             "s_max_A_inv" => d["s_grid"]["s_max_A_inv"], "sha256_f64le" => d["s_grid"]["sha256_f64le"]))
         d["scf"]["retried"] === true && push!(retried, z)
         g = d["gates"]

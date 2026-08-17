@@ -84,13 +84,23 @@ PYTHONUTF8=1 python "$tmp/$name/tools/temari_factors_contract.py" "$tmp/$name" \
     --golden "$tmp/$name/schema/factors_golden_v1.json" --negative     $( [ "${FACTORS_RELEASE_DRYRUN:-0}" = "1" ] && echo --allow-dev ) > "$tmp/contract.log" || {
   echo "契約テストに失敗"; tail -20 "$tmp/contract.log"; rm -rf "$tmp"; exit 1; }
 tail -3 "$tmp/contract.log"
-# ---- 展開物に Julia QC (F1–F10) も掛ける。指紋は manifest に凍結した値を期待値にする ----------
+# ---- 展開物に Julia QC も掛ける。指紋は manifest に凍結した値を期待値にする ----------------------
+# ⚠ archive だけでは F8 (認証副本・tight 参照との突き合わせ) と F10 の runlog 集計は再実行できない —
+#   それらは梱包前に外部の参照 (`--certify-dir`, `--tight-extra`) で通しておく。CERTIFY_DIR /
+#   TIGHT_EXTRA を環境変数で渡せば展開物に対しても F8 を回す (作者機のみ)。
 fp=$(python -c "import json; print(json.load(open('$prod/manifest.json',encoding='utf-8'))['generator_source_sha256'])")
+extra=""
+[ -n "${CERTIFY_DIR:-}" ] && extra="$extra --certify-dir $CERTIFY_DIR"
+[ -n "${TIGHT_EXTRA:-}" ] && extra="$extra --tight-extra $TIGHT_EXTRA"
 julia --startup-file=no tools/check_factor_tables.jl "$tmp/$name" --expect-fingerprint "$fp" \
-      --golden "$tmp/$name/schema/factors_golden_v1.json" \
+      --golden "$tmp/$name/schema/factors_golden_v1.json" $extra \
       $( [ "${FACTORS_RELEASE_DRYRUN:-0}" = "1" ] && echo --allow-dev ) > "$tmp/qc.log" || {
   echo "Julia QC に失敗"; tail -20 "$tmp/qc.log"; rm -rf "$tmp"; exit 1; }
 tail -1 "$tmp/qc.log"
-echo "  ✅ 展開物で manifest 照合・schema・契約テスト (golden + 負のミュータント + scipy) ・Julia QC が通った"
+if [ -n "$extra" ]; then
+  echo "  ✅ 展開物で manifest 照合・schema・契約テスト (golden + 負のミュータント + scipy) ・Julia QC F1–F9 (F8 は外部参照つき) が通った"
+else
+  echo "  ✅ 展開物で manifest 照合・schema・契約テスト (golden + 負のミュータント + scipy) ・Julia QC F1–F7, F9 が通った (F8 は外部参照が要るので梱包前の実行結果を MANIFEST.md で参照)"
+fi
 rm -rf "$tmp"
 rm -rf "$stage"
