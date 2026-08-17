@@ -118,7 +118,7 @@ $-M_4/60 = -22.5/60 = -3/8$ が一致することも同時に確認できる。
 
 ## 4. 検証スイート
 
-F dataset の C1–C15 に対応するもの。**15 件すべて実装済** (X13 の golden 凍結だけ出荷生成の完走待ち。2026-08-16)。
+F dataset の C1–C15 に対応するもの。**15 件すべて実装済・実施済** (2026-08-16/17)。
 
 | | 検査 | 状態 |
 |---|---|---|
@@ -134,7 +134,7 @@ F dataset の C1–C15 に対応するもの。**15 件すべて実装済** (X13
 | X10 | 全有限 s 点の Mott–Bethe 恒等式 | ✅ 同上 |
 | X11 | **s 補間の直接プローブ** (§4.9) | ✅ `tools/probe_interp.jl` |
 | X12 | **OFFV1 に対する事前固定の合否判定** (§4.8) | ✅ `tools/compare_offv1.jl` |
-| X13 | C・Fe・Au 等の公開 golden vector | ✅ 道具 (`temari_factors_contract.py --make-golden`、C/Fe/Cs/Au、許容 1e-12、負のミュータント 17 種)。**凍結は出荷生成完走後** |
+| X13 | C・Fe・Au 等の公開 golden vector | ✅ **凍結済 (2026-08-16/17)** `schema/factors_golden_v1.json` (C/Fe/Cs/Au、16 点、許容 1e-12、負のミュータント 18 種、SciPy 独立実装 4e-16) |
 | X14 | 決定性・manifest・archive 再検証 | ✅ `make_factors_manifest.jl` / `make_factors_release.sh` (2 回組んで同 SHA) / `factors_regen_check.sh` (H @dt/16 byte 同一) |
 | X15 | **γ 非包含**と Å/a₀ 変換を検出する契約テスト | ✅ 同上 |
 
@@ -1674,7 +1674,7 @@ $K_{sw}^2 = 2|\delta M_2/\delta M_4|$ の [0.005, 0.2] への丸めが効いた�
 ⚠ **丸め床を Z=6 の 1e-13 で代表させていたが、全 Z の中央は 4.21e-13 で 4 倍**だった。
 **また 1 元素からの外挿である**。
 
-#### 4.23.8 ★ 作者決定 (2026-08-14) — $T_{comp,e}$ = 1e-7 Å (案 A)。⚠ 凍結は構成法の決定待ち
+#### 4.23.8 ★ 作者決定 (2026-08-14) — $T_{comp,e}$ = 1e-7 Å (案 A)。凍結済 (2026-08-15、下の ★★)。生成完了 2026-08-16/17 (`src/prod_factors_v1/MANIFEST.md`)
 
 **f_e の総計算誤差契約は案 A (記述的契約) = $T_{comp,e} = 1\times10^{-7}$ Å**、
 内訳は f_x と同型に $B_{num,e} = 9.09\times10^{-8}$ / $B_{repr,e} = 9.09\times10^{-9}$ Å

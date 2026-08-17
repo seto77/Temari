@@ -12,3 +12,12 @@
 | `fx_launch.vbs` | 非表示起動 (ASCII のみ) |
 
 ⚠ 走行中の bash 台本は編集しない (bash は実行しながら読む)。直すなら次の走から。
+
+## 8/16 深夜〜8/17 の追加 (run 2 / run 3 / 補完)
+
+| ファイル | 役割 |
+|---|---|
+| `run_factors_fleet_run2.sh` / `launch_run2.sh` | run 2 (G3 を 4 項展開に直した生成器 `f27ed05`、worktree `repo2`) — 完了数カウンタの Julia soft-scope バグは `3ad4646` で修正 |
+| (run 3 は同じ台本の `sed` 置換: `repo3`・`prod_factors_v1_run3`。生成器 `0612e0c` = notes 文言の訂正) | **出荷 = run 3** |
+| `launch_ep2.sh` / `ep2_is_current.py` | 端点 2 段目の再発火 (中身検査を別ファイルの python に出した版) |
+| `tight_extra.jl` | v1 認証に収束 tight が無い元素 (Yb) の tight (τ/10) 参照解の補完 |

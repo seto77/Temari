@@ -16,7 +16,8 @@
 > 端点切断 2 段目 (極端例 6 元素 dt/16 deep + 標本 14 元素 deep) が続く。
 > **X1 (schema) / X13 (golden の道具、凍結は完走後) / X14 (manifest・梱包・再現性) は実装済み**、
 > loader 契約も (`tools/temari_factors_contract.py` + `factors_loader.jl`)。
-> パイロット H @dt/16 は認証 prod_stage5 と ρ ビット同一 (norm_correction 17 桁一致)、
+> (履歴。出荷は run 3。) パイロット H @dt/16 は認証 prod_stage5 と norm_correction 17 桁一致
+> (⚠ 当時これを「ρ ビット同一」と読んだが撤回 — F8a の発見)、
 > 再生成 byte 同一。codex レビューの欠陥 10 件は全部対処済み。
 > **正本 = `docs/next_chat_2026-08-16.md`** (完走後の手順 §2)。
 
