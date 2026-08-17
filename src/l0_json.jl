@@ -2,8 +2,15 @@
 #
 # 用途は bote_salvat.json・reference_values.json の読み込みと --json 保存のみ。
 # 数値ではないが、同じく「Python の標準品を自前で置き換えた小道具」なので L0 に置く。
+#
+# ⚠ 260818Cl 訂正: 上の「用途は … のみ」は成り立たない。出荷データセット
+#   (prod_v5_jl / prod_factors_v1) の JSON 本体と本番チェックポイントもこの codec が
+#   書き (gen_production.jl / gen_factors.jl の write_json)、公開 loader
+#   (tools/factors_loader.jl) は parse_json_file に依存する。canonical は JSON なので
+#   (docs/dataset_contract_2026-08-09.md)、ここは補助の小道具ではなく出荷物の
+#   直列化器そのもの。下の 260809Cl エスケープ欠陥が重かったのもそのため。
 
-# ---- 最小 JSON パーサ (bote_salvat.json / reference_values.json 専用) ----
+# ---- 最小 JSON パーサ (自前の JSON 一式用。260818Cl: 「2 ファイル専用」ではない) ----
 # 対応: object / array / 数値 / 文字列 / true / false / null。UTF-8 の
 # マルチバイト文字 (日本語コメント等) を扱うためバイト列上で走査する。
 # 標準ライブラリに JSON が無いための自前品。
@@ -87,7 +94,7 @@ function _json_value(b::Vector{UInt8}, i::Int)
     end
 end
 
-"JSON ファイルを読む (このパッケージの 2 つの JSON 専用の最小実装)"
+"JSON ファイルを読む (依存を持たないための最小実装。260818Cl: 出荷 JSON もこれで読む)"
 parse_json_file(path::String) = _json_value(read(path), 1)[1]
 
 # ---- 最小 JSON writer (--json 保存用) ----

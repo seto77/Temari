@@ -42,8 +42,9 @@ direct–exchange 干渉項 −Re(DX*) なし / 孤立原子 (化学状態依存
     julia -t auto ionization.jl edge 26 K 200        # EELS 出口 dσ/dΔE (K=0 のみ)
 
 `-t auto` で ε ノードがスレッド並列になります (Python 版の multiprocessing
-に相当。省略すると逐次)。初回はその元素の SCF を解き、atom_cache_jl_*.jls
-に保存されます (Python 版のキャッシュとは独立)。
+に相当。省略すると逐次)。初回はその元素の SCF を解き、atom_cache/*.jls
+に保存されます (260818Cl 訂正: 260807Cl にリポ直下からこのサブディレクトリへ移した。
+Python 版のキャッシュとは独立)。
 
 Python 版との実装差 (数値に効き得るのはこの 3 つだけ):
   1. スプライン / PCHIP / Gauss–Legendre / 球ベッセルを自前実装
@@ -64,6 +65,8 @@ Python 版との実装差 (数値に効き得るのはこの 3 つだけ):
 using LinearAlgebra
 using Serialization
 using Printf
+# ⚠ 260818Cl 訂正: 下の「E8 休眠計装のみ」は古い — atom_cache のソース指紋と包
+#   (l5_channel.jl)、gen_production.jl のチェックポイントも sha256 を使う (どちらも自前の using を持たない)
 using SHA                      # 260806Cl E8 休眠計装のみが使用 (標準ライブラリ)
 
 # ==== 層構成 (docs/architecture.md) ==================================
@@ -183,6 +186,9 @@ function main_fx(args)
     # `dirac_true_midpoint_v1` が要るが、**既定を動かすのは処方の変更**なので
     # 採用を決めてから (計画書 §4.21)。fx 出口は get_neutral しか使わないので、
     # EDX 出口と違って backend をそのまま通してよい
+    # 260818Cl 追記: 出荷 dataset-factors v1.0.0 は `dirac_true_midpoint_v1` + dt/16 格子で
+    #   生成済 (gen_factors.jl が明示指定)。CLI の既定は `legacy_v5` のままなので、素の
+    #   `fx` はデータセットのバイトを再現しない (src/prod_factors_v1/MANIFEST.md)
     numerics = :legacy_v5
     i = 2
     while i <= length(args)

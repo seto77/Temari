@@ -12,7 +12,9 @@
 # V_eff = −Z/r + V_H[ρ] + V_x^Slater[ρ]、束縛軌道のみ Latter 補正
 # (局所交換は遠方で自己相互作用を消しきれず V→0 になってしまうので、
 # V ≤ −q/r を強制して束縛軌道の尾を正しくする処方。中性原子は q=1)。
-# 260807Cl: `exchange = :kli` で**厳密交換 (KLI)** に切り替えられる。局所交換の
+# 260807Cl: `exchange = :kli` で **KLI 交換**に切り替えられる (⚠ 260818Cl 訂正:
+# 旧記述の「厳密交換 (KLI)」は不正確 — 交換**エネルギー**は厳密でも、それを局所
+# ポテンシャルに直す段で**交換のみの OEP に対する KLI 近似**が入る)。局所交換の
 # α という knob も Latter という当て物も消え、尾 −(Z−N+1)/r は物理の帰結になる。
 # 球対称 average-of-configuration・スピン非分極。この粗い場で足りる理由:
 # F(s) は束縛軌道の精密化に鈍感 (Roothaan-HF に替えても不変を実測) で、
@@ -571,7 +573,9 @@ converged を持つ。latter_charge: Latter 尾の電荷 (中性 1、+1 イオ�
 非相対論経路とは別物なので、`relativistic` フィールドで取り違えを防ぐ
 (ディスクキャッシュも別キー — l5_channel.jl の get_neutral を参照)。
 
-`exchange = :kli` で**厳密交換 (KLI)** になる (260807Cl 追加)。局所交換 α を捨て、
+`exchange = :kli` で **KLI 交換** (交換のみの OEP に対する KLI 近似。260818Cl 訂正:
+旧記述の「厳密交換」は交換エネルギーには当たるが、ポテンシャルには当たらない)
+になる (260807Cl 追加)。局所交換 α を捨て、
 Latter クリップも外す — 詳細は下の SCF 本体のコメント。"""
 mutable struct SCFAtom
     z::Int
@@ -1140,8 +1144,12 @@ end
   * こちら             真の 2 成分規格化。**小成分を含む行列要素**
     R^λ = ∫[G_aG_b + F_aF_b]j_λ dr (第 3.6 章) を使うならこちらが正しい
 
-Au 1s では frac_small = 4.7 %、2p3/2 では 1.9 % なので、両者は振幅で 1-2 %
-違う。どちらが正しいかは**どの行列要素を使うか**で決まり、混ぜてはいけない。"""
+Au 1s では frac_small ≈ 9 %、2p3/2 では 1.9 % なので、両者は振幅
+(1/√(1−frac_small)) で 4.7 % / 1.0 % 違う。⚠ 260818Cl 訂正: 旧記述
+「frac_small = 4.7 %、振幅で 1-2 %」は **1s の振幅差を frac_small に取り違えていた**
+(4.7 % は docs/next_phase_2026-08-07.md §2 が挙げた振幅差。frac_small ~9 % は
+`dirac_orbital_on_grid` の注記と、Fe 1s の frac_small 0.88 % ↔ 振幅 0.44 % に整合)。
+どちらが正しいかは**どの行列要素を使うか**で決まり、混ぜてはいけない。"""
 function solve_dirac_bound_2c(pot_V, z::Int; kappa::Int=-1, n_nodes::Int=0,
                               r0::Float64=GRID_R0, rmax::Float64=BOUND_RMAX,
                               dt::Float64=GRID_DT, tol::Float64=EIG_TOL,

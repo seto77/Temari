@@ -28,7 +28,11 @@ v3 (Julia 初代、2026-08-05 出荷) が v2 から変えたもの:
 
 使い方 (レーン分割で複数プロセス並行可。出力先が同じでも resume 安全)。
 ⚠ --gcthreads=1 を必ず付ける: Julia 1.12/Windows の並列 GC は高負荷の
-マルチスレッド計算で segfault することがある (audit で実際に再現・回避を確認):
+マルチスレッド計算で segfault することがある (audit で実際に再現・回避を確認)。
+⚠ 260818Cl 訂正: 「回避」ではなく**発生率が下がるだけ** — `--gcthreads=1` を付けても
+落ちる (src/IMPORT.md「既知の運用上の注意」。v4 生成は 1.11.9 + --gcthreads=1 で
+5 回発生し、うち 2 回は wedged = プロセスが死なずログだけ止まる)。1.12 に限った話でも
+ない (1.11 は `sweep_malloced_memory`)。長時間実行は tools/lane_watchdog.sh とセットで:
   julia -t 8 --gcthreads=1 gen_production.jl                # v4 全 525 チャネル
   julia -t 8 --gcthreads=1 gen_production.jl --lane 0/8     # 8 分割の 0 番
   julia -t 8 --gcthreads=1 gen_production.jl --tags K --out prod_v4_jl
@@ -658,6 +662,10 @@ function run_channel(z::Int, tag::String, outdir::String;
         #   「診断値は正常 (ソルバは正常終了したと信じて書いた)」まま生成ゲートを
         #   素通りし、QC で初めて見つかった。今回の v4 生成でも同じ形が 1 行出た
         #   (Sc L1 @150 kV、σ_own/σ_Bote = 6.9e21)。
+        #   ⚠ 260818Cl 訂正: v4 生成の最終的な破損は **3 行** (Sc L1 @150 kV /
+        #   Se L1 @400 kV / Nb M3 @225 kV、比 1e10〜1e23)。3 本とも生成ゲートは
+        #   素通りして QC の C11 が捕まえ、tools/repair_rows.jl で修復した
+        #   (このゲートはその後に足したので、v4 出荷分は通っていない)。
         #   ⚠ **同じ設定で引き直す** — ppw を上げる下の経路と違い、正常なら
         #   クリーンな実行と**ビット同一**の値が戻る。物理的な帯域外 (閾値近傍の
         #   u<2 で比 0.3 など) を誤検知しないよう、閾値は 1e-3..1e3 と極端に緩くする

@@ -84,6 +84,10 @@ const SCF_RETRY = (beta=0.08, max_iter=400)   # 未収束時の再試行
 const CONT_DT_LOG = 2e-3     # 連続状態 log セグメントの刻み
 const CONT_PPW = 25.0        # 1 波長あたりの点数
 const N_FIT = 8              # Coulomb マッチ窓の点数
+# ⚠ 260818Cl 訂正: 下の「(テスト用)」は成り立たない。イオン化経路 (z_asym = 1) では
+#   確かに通らないが、phase / mott 出口は中性場 (z_asym = 0) で走るのでこの枝が本番
+#   経路になる。参照ペアが Riccati-Bessel になり δ_l の全体符号が一意に決まるのは
+#   その帰結 (l5_exit_phase.jl 冒頭 / l2_continuum.jl の δ_l コメント)
 const ETA_BESSEL = 0.02      # |η| がこれ未満なら球ベッセルで代用 (テスト用)
 
 # ====================================================================
@@ -649,8 +653,11 @@ end
 """フィット窓 (等間隔 x グリッド) 上の Coulomb 関数 F, G。
 
 最大の x で Steed (coulomb_fg_point) により値と微分を取り、u'' = w·u
-(w = l(l+1)/x² + 2η/x − 1) を細分 Numerov で内向きに伝播して窓内の
+(w = l(l+1)/x² + 2η/x − 1) を細分 RK4 で内向きに伝播して窓内の
 全点を得る。窓は高々数波長なので伝播誤差は ~1e-12 (T0 で照合)。
+
+⚠ 260818Cl 訂正: 旧記述の「細分 Numerov」は実装と食い違っていた。下の伝播は
+初版から 4 次 Runge–Kutta で、1 窓刻みを nsub = 40 に細分している。
 """
 function coulomb_fg_window(l::Real, eta::Float64, xs::AbstractVector)
     l = Float64(l)                         # 260804Cl 非整数 λ 対応 (点関数と同様)

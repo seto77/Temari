@@ -417,7 +417,8 @@ const MODEL_ID_KD = "DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4"
 
   `rel`   放出電子のスカラー相対論 (第 3.5 章)
   `dscf`  SCF 自体を Dirac で解く (260807Cl)。既定
-  α       交換係数。Slater の 1 以外なら -XaNN が付く (既定は 2/3 → -Xa67)
+  α       交換係数。Slater の 1 以外なら -XaNN が付く (既定の X_ALPHA = 1 なので無印。
+          260818Cl 訂正: 旧記述「既定は 2/3 → -Xa67」は誤り — l1_atomic.jl:478)
   `xc`    交換処方。`:kli` なら -KLI が付き、α は意味を失うので出さない
   `fs`    終状態の処方 (260807Cl)。`:frozen` は -FZ、`:frozen_static` は -FZS。
           既定 `:relaxed` は無印

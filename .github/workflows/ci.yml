@@ -20,8 +20,11 @@ permissions:
 
 jobs:
   selftest:
-    # Analytic ladder T0-T8: hydrogen bound and continuum states, point-nucleus
-    # Dirac eigenvalues, 3j closed forms, and the c -> infinity limit.
+    # Analytic ladder T0-T24 and T26-T27, plus lettered sub-tests (T25 is
+    # unassigned; 260818Cl -- this said "T0-T8", the ladder as it stood then):
+    # hydrogen bound and continuum states, point-nucleus Dirac eigenvalues,
+    # 3j closed forms, the c -> infinity limit, the virial identity, KLI
+    # exchange, Mott elastic scattering and the Bethe-ridge impulse limit.
     # Failures are @assert, so a non-zero exit is a real failure.
     name: selftest (${{ matrix.os }}, Julia ${{ matrix.julia }})
     runs-on: ${{ matrix.os }}
@@ -38,14 +41,18 @@ jobs:
         with:
           version: ${{ matrix.julia }}
 
-      # 1.11.9 is the interpreter pinned by the shipped dataset generation
-      # (see the reproducibility policy); 1.12 is tested to catch drift early.
+      # The pin is per dataset generation (see the reproducibility policy):
+      # 1.11.9 for the F(s, E0) datasets (v3/v4/v5), 1.12.6 for dataset-factors
+      # v1.0.0 -- 260818Cl: so the 1.12 leg is a shipping interpreter too, not
+      # only an early warning for drift.
       - name: selftest
         run: julia --startup-file=no -t auto src/ionization.jl selftest
 
   bit-identity:
     # The optimized kernels must produce exactly the same bits as the scalar
-    # reference implementations. Both scripts exit non-zero on any mismatch.
+    # reference implementations. Every script in this job exits non-zero on a
+    # mismatch (260818Cl: five steps now, and the integrity one guards the
+    # cache and the production checkpoint rather than a kernel).
     name: bit-identity of the optimized kernels
     runs-on: ubuntu-latest
     timeout-minutes: 30

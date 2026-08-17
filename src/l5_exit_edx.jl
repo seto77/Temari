@@ -4,7 +4,9 @@
 # 共通基盤は l5_channel.jl (prepare_channel / compute_NK)。
 
 """1 つの (Z, チャネル, E0) について F(s) と σ を計算 — 本体の入口
-(Python 版 compute_channel)。tag: "K"/"L1"/"L2"/"L3"。
+(Python 版 compute_channel)。tag: "K"/"L1"/"L2"/"L3"/"M1"–"M5"
+(260818Cl 訂正: M 殻は 260807Cl に追加済で出荷 v4/v5 に入っている。正本は
+l5_channel.jl の `CHANNELS` / `available_channels`)。
 
 戻り値は Dict (そのまま JSON 化できる)。主要キー:
   "F"               F(s) = N(K)/N(0)。s_nodes 上の符号付き形状 (F(0)=1)
@@ -15,7 +17,10 @@
                     自前固有値との二重定義を避けるため)
   "diag"            本番ゲート対象: max_match_resid <1e-4 / r_tail_max <1e-4 /
                     bad_significant_l = 0
-  "model_id"        v2 (既定) / v3 (rel_continuum=true、第 3.5 章)
+  "model_id"        v2 (この関数の既定) / v3 (rel_continuum=true、第 3.5 章) /
+                    **v4 = 出荷 v4/v5 の処方** (dirac_continuum=true、第 3.6 章。
+                    260818Cl 追記)。⚠ 既定処方 (v4) を持つのは CLI の引数解釈だけで、
+                    この関数の既定は基底のまま — refcheck が関数既定に依存するため
 
 `numerics` は数値 backend の版 (260811Cl)。**出荷世代の処方が明示的に固定する**
 値であって、ここの既定に委ねてよいものではない (`PRESC_V3` / `PRESC_V4` を参照)。
