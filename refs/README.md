@@ -18,6 +18,13 @@
 |---|---|---|
 | `data/OFFV1_Olukayode2023_ActaA79_59_sup4_DHF-form-factors.txt` | **DHF (DBSR_HF) の X 線原子散乱因子** f_x。Z = 2–118、s = 0–6 Å⁻¹ の IUCr グリッド 62 点、精度 1e-5。f_x(0) = Z が厳密 | 公開: `https://journals.iucr.org/a/issues/2023/01/00/ae5122/ae5122sup4.txt` (Olukayode et al. 2023 の補足資料 sup4) |
 
+⚠ **F(s) の外部参照 (µSTEM の形状因子 / Oxley–Allen 2000 の表) はここには置かない** —
+ReciPro 側のローカル repo `ReciPro/tools/IonizationGen/` (`mustem_*_full.json`、
+`oa_*_full.json`、`refs_oa2000.py`) が所在で、`tools/make_comparison_figures.py` は
+そこを既定パス (環境変数 `TEMARI_IONGEN` で上書き可) として読む。図に焼くのは比だけ。
+解析パラメータ化の係数 (Cromer–Mann / WK / Peng / Kirkland) も同様に
+`Crystallography/Atom/AtomStatic.cs` から読むだけで、ここへは写さない。
+
 **OFFV1 が現時点の f_x 検証の正本。** 公開パラメータ化 (WK / Cromer–Mann / Peng /
 Kirkland) は全てこれ相当の DHF 計算への**フィット**なので、フィット残差が我々の
 残差と同程度になった時点で分解能を失う。測定結果は

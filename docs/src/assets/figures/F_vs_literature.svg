@@ -1,0 +1,204 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="392" viewBox="0 0 940 392" role="img">
+  <style>
+    .bg   { fill: #ffffff }
+    .fg   { fill: #1f2328 }
+    .axis { stroke: #8c959f; stroke-width: 1; fill: none }
+    .grid { stroke: #d0d7de; stroke-width: 0.5; fill: none }
+    .zero { stroke: #8c959f; stroke-width: 1; stroke-dasharray: 4 3; fill: none }
+    .band { fill: #d0d7de; opacity: 0.45 }
+    text  { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif }
+    @media (prefers-color-scheme: dark) {
+      .bg   { fill: #0d1117 }
+      .fg   { fill: #e6edf3 }
+      .axis { stroke: #6e7681 }
+      .grid { stroke: #30363d }
+      .zero { stroke: #6e7681 }
+      .band { fill: #30363d; opacity: 0.6 }
+    }
+  </style>
+  <rect class="bg" width="940" height="392" fill="#ffffff"/>
+  <text x="12.00" y="24.00" font-size="15" text-anchor="start" font-weight="600" class="fg" fill="#1f2328">Inner-shell ionization form factor F(s)/F(0) — ratio to the literature, E₀ = 200 keV</text>
+  <text x="12.00" y="42.00" font-size="11" text-anchor="start" font-weight="normal" class="fg" fill="#1f2328">Temari dataset v5.0.0 (κ-resolved Dirac continuum). Ratios are taken at the reference grid points; points where the reference shape is below 0.005 are not drawn.</text>
+  <polyline points="12.00,62.00 34.00,62.00" fill="none" stroke="#14b8a6" stroke-width="1.2" stroke-linejoin="round"/>
+  <circle cx="23.00" cy="62.00" r="3.0" fill="#14b8a6"/>
+  <text x="39.00" y="66.00" font-size="11.5" text-anchor="start" font-weight="normal" class="fg" fill="#1f2328">Temari / µSTEM − 1</text>
+  <polygon points="178.20,59.00 181.20,62.00 178.20,65.00 175.20,62.00" fill="#f59e0b"/>
+  <text x="194.20" y="66.00" font-size="11.5" text-anchor="start" font-weight="normal" class="fg" fill="#1f2328">Temari / Oxley–Allen (2000) − 1</text>
+  <polyline points="399.10,62.00 421.10,62.00" fill="none" stroke="#d0d7de" stroke-width="2.4" stroke-linejoin="round"/>
+  <text x="426.10" y="66.00" font-size="11.5" text-anchor="start" font-weight="normal" class="fg" fill="#1f2328">±1 % band</text>
+  <text x="66.00" y="83.00" font-size="12.5" text-anchor="start" font-weight="600" class="fg" fill="#1f2328">Si K</text>
+  <rect x="66.00" y="119.43" width="250.00" height="13.71" class="band" fill="#d0d7de" opacity="0.45"/>
+  <line class="grid" x1="66.00" y1="332.00" x2="316.00" y2="332.00" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="60.00" y="335.50" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-30</text>
+  <line class="grid" x1="66.00" y1="297.71" x2="316.00" y2="297.71" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="60.00" y="301.21" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-25</text>
+  <line class="grid" x1="66.00" y1="263.43" x2="316.00" y2="263.43" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="60.00" y="266.93" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-20</text>
+  <line class="grid" x1="66.00" y1="229.14" x2="316.00" y2="229.14" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="60.00" y="232.64" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-15</text>
+  <line class="grid" x1="66.00" y1="194.86" x2="316.00" y2="194.86" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="60.00" y="198.36" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-10</text>
+  <line class="grid" x1="66.00" y1="160.57" x2="316.00" y2="160.57" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="60.00" y="164.07" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-5</text>
+  <line class="zero" x1="66.00" y1="126.29" x2="316.00" y2="126.29" stroke="#8c959f" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="60.00" y="129.79" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">0</text>
+  <line class="grid" x1="66.00" y1="92.00" x2="316.00" y2="92.00" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="60.00" y="95.50" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">+5</text>
+  <rect x="66.00" y="92.00" width="250.00" height="240.00" class="axis" fill="none" stroke="#8c959f"/>
+  <line class="axis" x1="66.00" y1="332.00" x2="66.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="66.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">0</text>
+  <line class="axis" x1="116.00" y1="332.00" x2="116.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="116.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">1</text>
+  <line class="axis" x1="166.00" y1="332.00" x2="166.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="166.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">2</text>
+  <line class="axis" x1="216.00" y1="332.00" x2="216.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="216.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">3</text>
+  <line class="axis" x1="266.00" y1="332.00" x2="266.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="266.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">4</text>
+  <line class="axis" x1="316.00" y1="332.00" x2="316.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="316.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">5</text>
+  <text x="191.00" y="363.00" font-size="11" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">s = sinθ/λ  [Å⁻¹]</text>
+  <text transform="translate(32.00,212.00) rotate(-90)" font-size="10.5" text-anchor="middle" class="fg" fill="#1f2328">F / F_ref − 1  [%]</text>
+  <polyline points="66.00,126.29 67.25,125.87 68.50,125.94 71.00,126.28 76.00,127.14 81.00,128.48 86.00,129.95 91.00,131.36 97.25,132.77 103.50,134.70 109.75,136.34 116.00,138.25 141.00,145.67 166.00,155.27 191.00,167.85 216.00,184.45 241.00,206.10 266.00,229.78 316.00,276.59" fill="none" stroke="#14b8a6" stroke-width="1.2" stroke-linejoin="round"/>
+  <circle cx="66.00" cy="126.29" r="3.0" fill="#14b8a6"/>
+  <circle cx="67.25" cy="125.87" r="3.0" fill="#14b8a6"/>
+  <circle cx="68.50" cy="125.94" r="3.0" fill="#14b8a6"/>
+  <circle cx="71.00" cy="126.28" r="3.0" fill="#14b8a6"/>
+  <circle cx="76.00" cy="127.14" r="3.0" fill="#14b8a6"/>
+  <circle cx="81.00" cy="128.48" r="3.0" fill="#14b8a6"/>
+  <circle cx="86.00" cy="129.95" r="3.0" fill="#14b8a6"/>
+  <circle cx="91.00" cy="131.36" r="3.0" fill="#14b8a6"/>
+  <circle cx="97.25" cy="132.77" r="3.0" fill="#14b8a6"/>
+  <circle cx="103.50" cy="134.70" r="3.0" fill="#14b8a6"/>
+  <circle cx="109.75" cy="136.34" r="3.0" fill="#14b8a6"/>
+  <circle cx="116.00" cy="138.25" r="3.0" fill="#14b8a6"/>
+  <circle cx="141.00" cy="145.67" r="3.0" fill="#14b8a6"/>
+  <circle cx="166.00" cy="155.27" r="3.0" fill="#14b8a6"/>
+  <circle cx="191.00" cy="167.85" r="3.0" fill="#14b8a6"/>
+  <circle cx="216.00" cy="184.45" r="3.0" fill="#14b8a6"/>
+  <circle cx="241.00" cy="206.10" r="3.0" fill="#14b8a6"/>
+  <circle cx="266.00" cy="229.78" r="3.0" fill="#14b8a6"/>
+  <circle cx="316.00" cy="276.59" r="3.0" fill="#14b8a6"/>
+  <polygon points="66.00,123.29 69.00,126.29 66.00,129.29 63.00,126.29" fill="#f59e0b"/>
+  <polygon points="72.25,123.64 75.25,126.64 72.25,129.64 69.25,126.64" fill="#f59e0b"/>
+  <polygon points="84.75,125.78 87.75,128.78 84.75,131.78 81.75,128.78" fill="#f59e0b"/>
+  <polygon points="97.25,126.51 100.25,129.51 97.25,132.51 94.25,129.51" fill="#f59e0b"/>
+  <polygon points="128.50,130.83 131.50,133.83 128.50,136.83 125.50,133.83" fill="#f59e0b"/>
+  <polygon points="191.00,155.15 194.00,158.15 191.00,161.15 188.00,158.15" fill="#f59e0b"/>
+  <text x="71.00" y="99.54" font-size="10.5" text-anchor="start" font-weight="600" class="fg" fill="#14b8a6">|Δ| &gt; 1 % (vs µSTEM) from s ≈ 0.75</text>
+  <text x="366.00" y="83.00" font-size="12.5" text-anchor="start" font-weight="600" class="fg" fill="#1f2328">Fe K</text>
+  <rect x="366.00" y="119.43" width="250.00" height="13.71" class="band" fill="#d0d7de" opacity="0.45"/>
+  <line class="grid" x1="366.00" y1="332.00" x2="616.00" y2="332.00" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="360.00" y="335.50" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-30</text>
+  <line class="grid" x1="366.00" y1="297.71" x2="616.00" y2="297.71" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="360.00" y="301.21" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-25</text>
+  <line class="grid" x1="366.00" y1="263.43" x2="616.00" y2="263.43" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="360.00" y="266.93" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-20</text>
+  <line class="grid" x1="366.00" y1="229.14" x2="616.00" y2="229.14" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="360.00" y="232.64" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-15</text>
+  <line class="grid" x1="366.00" y1="194.86" x2="616.00" y2="194.86" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="360.00" y="198.36" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-10</text>
+  <line class="grid" x1="366.00" y1="160.57" x2="616.00" y2="160.57" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="360.00" y="164.07" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-5</text>
+  <line class="zero" x1="366.00" y1="126.29" x2="616.00" y2="126.29" stroke="#8c959f" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="360.00" y="129.79" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">0</text>
+  <line class="grid" x1="366.00" y1="92.00" x2="616.00" y2="92.00" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="360.00" y="95.50" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">+5</text>
+  <rect x="366.00" y="92.00" width="250.00" height="240.00" class="axis" fill="none" stroke="#8c959f"/>
+  <line class="axis" x1="366.00" y1="332.00" x2="366.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="366.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">0</text>
+  <line class="axis" x1="416.00" y1="332.00" x2="416.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="416.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">1</text>
+  <line class="axis" x1="466.00" y1="332.00" x2="466.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="466.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">2</text>
+  <line class="axis" x1="516.00" y1="332.00" x2="516.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="516.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">3</text>
+  <line class="axis" x1="566.00" y1="332.00" x2="566.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="566.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">4</text>
+  <line class="axis" x1="616.00" y1="332.00" x2="616.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="616.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">5</text>
+  <text x="491.00" y="363.00" font-size="11" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">s = sinθ/λ  [Å⁻¹]</text>
+  <polyline points="366.00,126.29 367.25,124.86 368.50,124.90 371.00,124.89 376.00,124.84 381.00,124.84 386.00,124.85 391.00,124.95 397.25,125.13 403.50,125.68 409.75,125.86 416.00,126.44 441.00,129.30 466.00,133.14 491.00,137.47 516.00,143.30 541.00,152.75 566.00,162.17 616.00,182.82" fill="none" stroke="#14b8a6" stroke-width="1.2" stroke-linejoin="round"/>
+  <circle cx="366.00" cy="126.29" r="3.0" fill="#14b8a6"/>
+  <circle cx="367.25" cy="124.86" r="3.0" fill="#14b8a6"/>
+  <circle cx="368.50" cy="124.90" r="3.0" fill="#14b8a6"/>
+  <circle cx="371.00" cy="124.89" r="3.0" fill="#14b8a6"/>
+  <circle cx="376.00" cy="124.84" r="3.0" fill="#14b8a6"/>
+  <circle cx="381.00" cy="124.84" r="3.0" fill="#14b8a6"/>
+  <circle cx="386.00" cy="124.85" r="3.0" fill="#14b8a6"/>
+  <circle cx="391.00" cy="124.95" r="3.0" fill="#14b8a6"/>
+  <circle cx="397.25" cy="125.13" r="3.0" fill="#14b8a6"/>
+  <circle cx="403.50" cy="125.68" r="3.0" fill="#14b8a6"/>
+  <circle cx="409.75" cy="125.86" r="3.0" fill="#14b8a6"/>
+  <circle cx="416.00" cy="126.44" r="3.0" fill="#14b8a6"/>
+  <circle cx="441.00" cy="129.30" r="3.0" fill="#14b8a6"/>
+  <circle cx="466.00" cy="133.14" r="3.0" fill="#14b8a6"/>
+  <circle cx="491.00" cy="137.47" r="3.0" fill="#14b8a6"/>
+  <circle cx="516.00" cy="143.30" r="3.0" fill="#14b8a6"/>
+  <circle cx="541.00" cy="152.75" r="3.0" fill="#14b8a6"/>
+  <circle cx="566.00" cy="162.17" r="3.0" fill="#14b8a6"/>
+  <circle cx="616.00" cy="182.82" r="3.0" fill="#14b8a6"/>
+  <polygon points="366.00,123.29 369.00,126.29 366.00,129.29 363.00,126.29" fill="#f59e0b"/>
+  <polygon points="372.25,121.87 375.25,124.87 372.25,127.87 369.25,124.87" fill="#f59e0b"/>
+  <polygon points="384.75,121.92 387.75,124.92 384.75,127.92 381.75,124.92" fill="#f59e0b"/>
+  <polygon points="397.25,122.26 400.25,125.26 397.25,128.26 394.25,125.26" fill="#f59e0b"/>
+  <polygon points="428.50,124.57 431.50,127.57 428.50,130.57 425.50,127.57" fill="#f59e0b"/>
+  <polygon points="491.00,135.09 494.00,138.09 491.00,141.09 488.00,138.09" fill="#f59e0b"/>
+  <text x="371.00" y="99.54" font-size="10.5" text-anchor="start" font-weight="600" class="fg" fill="#14b8a6">|Δ| &gt; 1 % (vs µSTEM) from s ≈ 2.5</text>
+  <text x="666.00" y="83.00" font-size="12.5" text-anchor="start" font-weight="600" class="fg" fill="#1f2328">Fe L shell (2s + 2p)</text>
+  <rect x="666.00" y="119.43" width="250.00" height="13.71" class="band" fill="#d0d7de" opacity="0.45"/>
+  <line class="grid" x1="666.00" y1="332.00" x2="916.00" y2="332.00" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="660.00" y="335.50" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-30</text>
+  <line class="grid" x1="666.00" y1="297.71" x2="916.00" y2="297.71" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="660.00" y="301.21" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-25</text>
+  <line class="grid" x1="666.00" y1="263.43" x2="916.00" y2="263.43" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="660.00" y="266.93" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-20</text>
+  <line class="grid" x1="666.00" y1="229.14" x2="916.00" y2="229.14" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="660.00" y="232.64" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-15</text>
+  <line class="grid" x1="666.00" y1="194.86" x2="916.00" y2="194.86" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="660.00" y="198.36" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-10</text>
+  <line class="grid" x1="666.00" y1="160.57" x2="916.00" y2="160.57" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="660.00" y="164.07" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-5</text>
+  <line class="zero" x1="666.00" y1="126.29" x2="916.00" y2="126.29" stroke="#8c959f" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="660.00" y="129.79" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">0</text>
+  <line class="grid" x1="666.00" y1="92.00" x2="916.00" y2="92.00" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="660.00" y="95.50" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">+5</text>
+  <rect x="666.00" y="92.00" width="250.00" height="240.00" class="axis" fill="none" stroke="#8c959f"/>
+  <line class="axis" x1="666.00" y1="332.00" x2="666.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="666.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">0</text>
+  <line class="axis" x1="716.00" y1="332.00" x2="716.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="716.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">1</text>
+  <line class="axis" x1="766.00" y1="332.00" x2="766.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="766.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">2</text>
+  <line class="axis" x1="816.00" y1="332.00" x2="816.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="816.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">3</text>
+  <line class="axis" x1="866.00" y1="332.00" x2="866.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="866.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">4</text>
+  <line class="axis" x1="916.00" y1="332.00" x2="916.00" y2="336.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="916.00" y="348.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">5</text>
+  <text x="791.00" y="363.00" font-size="11" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">s = sinθ/λ  [Å⁻¹]</text>
+  <text x="671.00" y="270.29" font-size="9.5" text-anchor="start" font-weight="normal" class="fg" fill="#1f2328">Temari L₁+L₂+L₃ (N₀-weighted) vs</text>
+  <text x="671.00" y="288.11" font-size="9.5" text-anchor="start" font-weight="normal" class="fg" fill="#1f2328">µSTEM 2s+2p summed / OA whole-L table</text>
+  <polyline points="666.00,126.29 667.25,126.21 668.50,126.25 671.00,127.42 676.00,131.20 681.00,135.20 686.00,139.05 691.00,142.28 697.25,145.68 703.50,149.44 709.75,153.69 716.00,154.84 741.00,163.68 766.00,175.54" fill="none" stroke="#14b8a6" stroke-width="1.2" stroke-linejoin="round"/>
+  <circle cx="666.00" cy="126.29" r="3.0" fill="#14b8a6"/>
+  <circle cx="667.25" cy="126.21" r="3.0" fill="#14b8a6"/>
+  <circle cx="668.50" cy="126.25" r="3.0" fill="#14b8a6"/>
+  <circle cx="671.00" cy="127.42" r="3.0" fill="#14b8a6"/>
+  <circle cx="676.00" cy="131.20" r="3.0" fill="#14b8a6"/>
+  <circle cx="681.00" cy="135.20" r="3.0" fill="#14b8a6"/>
+  <circle cx="686.00" cy="139.05" r="3.0" fill="#14b8a6"/>
+  <circle cx="691.00" cy="142.28" r="3.0" fill="#14b8a6"/>
+  <circle cx="697.25" cy="145.68" r="3.0" fill="#14b8a6"/>
+  <circle cx="703.50" cy="149.44" r="3.0" fill="#14b8a6"/>
+  <circle cx="709.75" cy="153.69" r="3.0" fill="#14b8a6"/>
+  <circle cx="716.00" cy="154.84" r="3.0" fill="#14b8a6"/>
+  <circle cx="741.00" cy="163.68" r="3.0" fill="#14b8a6"/>
+  <circle cx="766.00" cy="175.54" r="3.0" fill="#14b8a6"/>
+  <polygon points="666.00,123.29 669.00,126.29 666.00,129.29 663.00,126.29" fill="#f59e0b"/>
+  <polygon points="672.25,126.79 675.25,129.79 672.25,132.79 669.25,129.79" fill="#f59e0b"/>
+  <polygon points="684.75,138.21 687.75,141.21 684.75,144.21 681.75,141.21" fill="#f59e0b"/>
+  <polygon points="697.25,153.36 700.25,156.36 697.25,159.36 694.25,156.36" fill="#f59e0b"/>
+  <polygon points="728.50,218.90 731.50,221.90 728.50,224.90 725.50,221.90" fill="#f59e0b"/>
+  <text x="671.00" y="99.54" font-size="10.5" text-anchor="start" font-weight="600" class="fg" fill="#14b8a6">|Δ| &gt; 1 % (vs µSTEM) from s ≈ 0.3</text>
+  <text x="914.00" y="321.71" font-size="10.5" text-anchor="end" font-weight="600" class="fg" fill="#1f2328">F changes sign near s ≈ 2.7 → ratio undefined</text>
+</svg>

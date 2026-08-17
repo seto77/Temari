@@ -12,7 +12,7 @@ MkDocs Material sources for <https://seto77.github.io/Temari/>, deployed by
 | `mkdocs.yml` | Site configuration. `docs_dir: src`, `site_dir: site`. |
 | `src/en/` | English pages — the default locale, served at the site root. |
 | `src/ja/` | Japanese pages. Anything missing here falls back to the English page, with a banner saying so, so translation can be incremental. |
-| `src/assets/` | Shared CSS and the MathJax configuration (not per-locale). |
+| `src/assets/` | Shared CSS, the MathJax configuration, and the figures (not per-locale). `figures/coverage.svg` and `sign.svg` come from `tools/make_figures.jl`; `figures/*_vs_literature.svg` (the *Against the literature* page) from `tools/make_comparison_figures.py`, which needs the locally held references and writes only ratios. |
 | `overrides/main.html` | The "translation pending" banner. |
 | `requirements.txt` | Build dependencies. **ASCII only** — pip decodes this file with the system locale encoding, which fails on a cp932 Windows console. |
 

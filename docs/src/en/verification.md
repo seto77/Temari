@@ -73,8 +73,13 @@ is 10⁻⁵.
 
 ## Tier 3 — external references
 
-Where published values exist: K-shell form factors agree with Oxley & Allen
-(2000) and with µSTEM to within 1 % for $s \le 1.25$ Å⁻¹.
+Where published values exist: the K-shell shape factors $F(s)/F(0)$ agree with
+Oxley & Allen (2000) and with µSTEM at small $s$ and fall below both references
+as $s$ grows — with the v5 tables at 200 keV the 1 % line is crossed at
+$s \approx 0.75$ Å⁻¹ for Si K and $\approx 2.5$ Å⁻¹ for Fe K, and at
+$s \approx 0.3$ Å⁻¹ for the Fe L shell. The two references also part from each
+other — by about 1 % for K and about 10 % for the L shell at $s = 1.25$. The
+curves, for Si and Fe, are on the [Against the literature](comparison.md) page.
 
 The scattering factors were checked the same way, against the standard analytic
 parameterizations for C, Si, Fe and Au. With the non-relativistic density
@@ -105,10 +110,16 @@ fit. Relative RMS in $f_x$ over $s \le 2$ Å⁻¹:
 With exact exchange the engine matches the accuracy of the standard
 parameterizations and beats them for C, Fe and Au — for gold by 2.6×. Over the
 full range to $s = 6$ Å⁻¹ the worst $|\Delta f_x|$ is 0.030 e, against 7.8 e for
-Cromer–Mann at gold, where a four-Gaussian form simply runs out.
+Cromer–Mann at gold, where a four-Gaussian form simply runs out. The
+$s$-resolved curves for Si and Fe — $f_x$ against DHF, Waasmaier–Kirfel and
+Cromer–Mann, and $f_e$ against DHF, Kirkland and Peng — are on the
+[Against the literature](comparison.md) page.
 
 This measures fidelity to the same physics rather than completeness of it: OFFV1
-is Dirac–Hartree–Fock, exchange-exact and correlation-free, and so is Dirac + KLI.
+is Dirac–Hartree–Fock, exchange-exact and correlation-free; Dirac + KLI is
+correlation-free with exchange treated exactly up to the KLI approximation of the
+exchange potential — the one place that approximation shows, $f_e$ as
+$s \to 0$ for the d block, is on the comparison page.
 
 ### The GOS exit against the Dirac GOS database
 

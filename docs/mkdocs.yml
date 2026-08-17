@@ -76,6 +76,7 @@ plugins:
             The physics: 物理 (処方)
             Architecture: 層構造
             Verification: 検証
+            Against the literature: 文献との比較
             Reproducibility: 再現性の規律
             Performance: 性能
             Roadmap: ロードマップ
@@ -136,6 +137,7 @@ nav:
   - The physics: physics.md
   - Architecture: architecture.md
   - Verification: verification.md
+  - Against the literature: comparison.md
   - Reproducibility: reproducibility.md
   - Performance: performance.md
   - Roadmap: roadmap.md

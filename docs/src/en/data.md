@@ -205,8 +205,16 @@ sealed midpoints for all 86 elements (worst 0.16 × B_repr for f_x, 0.34 ×
 B_repr,e for f_e); the sensitivity to the tested endpoint extensions of the
 radial grid was ≤ 0.9 % of B_grid (an observed sensitivity, not an
 infinite-domain bound). f_x was compared with the DHF values of OFFV1 on eight
-elements; **the tables are KLI, not DHF**, and no independent external validation
-of f_e was performed. Regeneration of the table bytes is not guaranteed — the
+elements; **the tables are KLI, not DHF**. The one place where that shows is
+$f_e$ as $s \to 0$: against DHF (through Mott–Bethe) the shipped $f_e$ is low by
+up to 2 % for the d block and 4 % for Cr and Cu at $s = 0.02$ Å⁻¹, while noble
+gases sit at zero and $f_e$ for $s \ge 0.5$ Å⁻¹ agrees to 0.14 % for every
+element. This tracks the KLI approximation to exact exchange — its neglected
+orbital-shift terms, the natural reading being that they bind an $n$s electron
+over a $(n-1)$d shell slightly too tightly — identified by matching the KLI/HF
+ratio of $\langle r^2 \rangle$ published with the approximation itself for the
+ten closed-subshell atoms it covers; see [Against the literature](comparison.md).
+$f_x$ is affected at ≤ 0.22 % for every d-block element. Regeneration of the table bytes is not guaranteed — the
 SCF can stop at a different iterate between processes (observed sporadically,
 within the stopping tolerance); **the released archive bytes and their SHA-256
 are canonical**. Neutral atoms only.

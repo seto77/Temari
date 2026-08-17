@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="854" height="382" viewBox="0 0 854 382" role="img">
+  <style>
+    .bg   { fill: #ffffff }
+    .fg   { fill: #1f2328 }
+    .axis { stroke: #8c959f; stroke-width: 1; fill: none }
+    .grid { stroke: #d0d7de; stroke-width: 0.5; fill: none }
+    .zero { stroke: #8c959f; stroke-width: 1; stroke-dasharray: 4 3; fill: none }
+    .band { fill: #d0d7de; opacity: 0.45 }
+    text  { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif }
+    @media (prefers-color-scheme: dark) {
+      .bg   { fill: #0d1117 }
+      .fg   { fill: #e6edf3 }
+      .axis { stroke: #6e7681 }
+      .grid { stroke: #30363d }
+      .zero { stroke: #6e7681 }
+      .band { fill: #30363d; opacity: 0.6 }
+    }
+  </style>
+  <rect class="bg" width="854" height="382" fill="#ffffff"/>
+  <text x="12.00" y="24.00" font-size="15" text-anchor="start" font-weight="600" class="fg" fill="#1f2328">X-ray scattering factor f_x — deviation from Dirac–Hartree–Fock (OFFV1)</text>
+  <text x="12.00" y="42.00" font-size="11" text-anchor="start" font-weight="normal" class="fg" fill="#1f2328">Reference: Olukayode, Froese Fischer &amp; Volkov (2023), computed DHF, evaluated on their 62-point grid. Temari = dataset-factors v1.0.0 (Dirac + KLI).</text>
+  <polyline points="12.00,62.00 34.00,62.00" fill="none" stroke="#3b82f6" stroke-width="2.4" stroke-linejoin="round"/>
+  <text x="39.00" y="66.00" font-size="11.5" text-anchor="start" font-weight="normal" class="fg" fill="#1f2328">Temari</text>
+  <polyline points="96.40,62.00 118.40,62.00" fill="none" stroke="#14b8a6" stroke-width="2.4" stroke-linejoin="round"/>
+  <text x="123.40" y="66.00" font-size="11.5" text-anchor="start" font-weight="normal" class="fg" fill="#1f2328">Waasmaier–Kirfel (1995)</text>
+  <polyline points="281.10,62.00 303.10,62.00" fill="none" stroke="#f59e0b" stroke-width="2.4" stroke-linejoin="round"/>
+  <text x="308.10" y="66.00" font-size="11.5" text-anchor="start" font-weight="normal" class="fg" fill="#1f2328">Cromer–Mann (1968, ITC)</text>
+  <text x="66.00" y="83.00" font-size="12.5" text-anchor="start" font-weight="600" class="fg" fill="#1f2328">Si (Z = 14)</text>
+  <line class="grid" x1="66.00" y1="322.00" x2="396.00" y2="322.00" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="60.00" y="325.50" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-3</text>
+  <line class="grid" x1="66.00" y1="283.67" x2="396.00" y2="283.67" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="60.00" y="287.17" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-2</text>
+  <line class="grid" x1="66.00" y1="245.33" x2="396.00" y2="245.33" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="60.00" y="248.83" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-1</text>
+  <line class="zero" x1="66.00" y1="207.00" x2="396.00" y2="207.00" stroke="#8c959f" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="60.00" y="210.50" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">0</text>
+  <line class="grid" x1="66.00" y1="168.67" x2="396.00" y2="168.67" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="60.00" y="172.17" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">+1</text>
+  <line class="grid" x1="66.00" y1="130.33" x2="396.00" y2="130.33" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="60.00" y="133.83" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">+2</text>
+  <line class="grid" x1="66.00" y1="92.00" x2="396.00" y2="92.00" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="60.00" y="95.50" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">+3</text>
+  <rect x="66.00" y="92.00" width="330.00" height="230.00" class="axis" fill="none" stroke="#8c959f"/>
+  <line class="axis" x1="66.00" y1="322.00" x2="66.00" y2="326.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="66.00" y="338.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">0</text>
+  <line class="axis" x1="121.00" y1="322.00" x2="121.00" y2="326.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="121.00" y="338.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">1</text>
+  <line class="axis" x1="176.00" y1="322.00" x2="176.00" y2="326.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="176.00" y="338.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">2</text>
+  <line class="axis" x1="231.00" y1="322.00" x2="231.00" y2="326.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="231.00" y="338.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">3</text>
+  <line class="axis" x1="286.00" y1="322.00" x2="286.00" y2="326.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="286.00" y="338.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">4</text>
+  <line class="axis" x1="341.00" y1="322.00" x2="341.00" y2="326.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="341.00" y="338.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">5</text>
+  <line class="axis" x1="396.00" y1="322.00" x2="396.00" y2="326.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="396.00" y="338.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">6</text>
+  <text x="231.00" y="353.00" font-size="11" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">s = sinθ/λ  [Å⁻¹]</text>
+  <text transform="translate(32.00,207.00) rotate(-90)" font-size="10.5" text-anchor="middle" class="fg" fill="#1f2328">(f_x − f_x^DHF) / f_x^DHF  [%]</text>
+  <polyline points="66.00,207.00 66.55,206.96 67.10,206.83 67.65,206.63 68.20,206.36 68.75,206.05 69.30,205.70 69.85,205.35 70.40,204.99 70.95,204.65 71.50,204.33 72.05,204.04 72.60,203.79 73.15,203.57 73.70,203.39 74.25,203.25 74.80,203.14 75.35,203.05 75.90,203.01 76.45,202.98 77.00,202.99 78.10,203.06 79.20,203.22 79.75,203.32 80.30,203.44 81.40,203.72 82.50,204.03 83.60,204.37 84.70,204.71 85.25,204.89 85.80,205.06 86.90,205.40 88.00,205.71 89.10,205.99 90.20,206.22 90.75,206.33 91.30,206.42 92.40,206.57 93.50,206.66 96.25,206.66 99.00,206.33 101.75,205.70 104.50,204.86 110.00,202.86 115.50,201.00 121.00,199.77 126.50,199.31 132.00,199.54 137.50,200.23 143.00,201.17 148.50,202.19 154.00,203.23 159.50,204.30 165.00,205.31 170.50,206.32 176.00,207.35 203.50,211.77 231.00,214.79 258.50,216.40 286.00,216.94 341.00,216.18 396.00,215.03" fill="none" stroke="#3b82f6" stroke-width="2.0" stroke-linejoin="round"/>
+  <polyline points="66.00,207.30 66.55,207.31 67.10,207.36 67.65,207.45 68.20,207.60 68.75,207.83 69.30,208.13 69.85,208.50 70.40,208.90 70.95,209.30 71.50,209.62 72.05,209.84 72.60,209.90 73.15,209.79 73.70,209.52 74.25,209.10 74.80,208.58 75.35,208.02 75.90,207.46 76.45,206.96 77.00,206.57 78.10,206.14 79.20,206.19 79.75,206.33 80.30,206.52 81.40,206.92 82.50,207.20 83.60,207.28 84.70,207.21 85.25,207.13 85.80,207.05 86.90,206.90 88.00,206.82 89.10,206.85 90.20,206.97 90.75,207.07 91.30,207.18 92.40,207.41 93.50,207.62 96.25,207.90 99.00,207.68 101.75,207.13 104.50,206.63 110.00,206.65 115.50,207.93 121.00,208.79 126.50,207.82 132.00,205.21 137.50,202.48 143.00,201.26 148.50,202.31 154.00,205.28 159.50,209.19 165.00,212.82 170.50,215.32 176.00,216.27 203.50,200.74 231.00,177.95 258.50,172.75 286.00,194.43 341.00,263.21 396.00,122.95" fill="none" stroke="#14b8a6" stroke-width="1.6" stroke-linejoin="round"/>
+  <polyline points="66.00,207.66 66.55,207.65 67.10,207.62 67.65,207.61 68.20,207.64 68.75,207.74 69.30,207.95 69.85,208.26 70.40,208.65 70.95,209.08 71.50,209.50 72.05,209.84 72.60,210.05 73.15,210.08 73.70,209.92 74.25,209.57 74.80,209.07 75.35,208.46 75.90,207.80 76.45,207.16 77.00,206.59 78.10,205.81 79.20,205.61 79.75,205.70 80.30,205.90 81.40,206.46 82.50,207.06 83.60,207.53 84.70,207.82 85.25,207.89 85.80,207.92 86.90,207.90 88.00,207.82 89.10,207.72 90.20,207.62 90.75,207.58 91.30,207.53 92.40,207.45 93.50,207.34 96.25,206.93 99.00,206.32 101.75,205.77 104.50,205.61 110.00,207.00 115.50,209.57 121.00,210.58 126.50,208.30 132.00,203.73 137.50,199.91 143.00,199.75 148.50,204.10 154.00,211.09 159.50,216.87 165.00,216.60 170.50,205.84 176.00,181.03" fill="none" stroke="#f59e0b" stroke-width="1.6" stroke-linejoin="round"/>
+  <text x="71.50" y="102.73" font-size="10.5" text-anchor="start" font-weight="600" class="fg" fill="#f59e0b">Cromer–Mann leaves the frame past s = 2 ↗ (fitted for s ≤ 2)</text>
+  <text x="71.50" y="118.07" font-size="10.5" text-anchor="start" font-weight="600" class="fg" fill="#f59e0b">(+32 % at s = 3, +415 % at 6 Å⁻¹)</text>
+  <text x="400.00" y="126.45" font-size="10.5" text-anchor="start" font-weight="600" class="fg" fill="#14b8a6">WK</text>
+  <text x="400.00" y="218.53" font-size="10.5" text-anchor="start" font-weight="600" class="fg" fill="#3b82f6">Temari</text>
+  <text x="454.00" y="83.00" font-size="12.5" text-anchor="start" font-weight="600" class="fg" fill="#1f2328">Fe (Z = 26)</text>
+  <line class="grid" x1="454.00" y1="322.00" x2="784.00" y2="322.00" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="448.00" y="325.50" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-3</text>
+  <line class="grid" x1="454.00" y1="283.67" x2="784.00" y2="283.67" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="448.00" y="287.17" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-2</text>
+  <line class="grid" x1="454.00" y1="245.33" x2="784.00" y2="245.33" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="448.00" y="248.83" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">-1</text>
+  <line class="zero" x1="454.00" y1="207.00" x2="784.00" y2="207.00" stroke="#8c959f" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="448.00" y="210.50" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">0</text>
+  <line class="grid" x1="454.00" y1="168.67" x2="784.00" y2="168.67" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="448.00" y="172.17" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">+1</text>
+  <line class="grid" x1="454.00" y1="130.33" x2="784.00" y2="130.33" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="448.00" y="133.83" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">+2</text>
+  <line class="grid" x1="454.00" y1="92.00" x2="784.00" y2="92.00" stroke="#d0d7de" stroke-width="0.5"/>
+  <text x="448.00" y="95.50" font-size="10" text-anchor="end" font-weight="normal" class="fg" fill="#1f2328">+3</text>
+  <rect x="454.00" y="92.00" width="330.00" height="230.00" class="axis" fill="none" stroke="#8c959f"/>
+  <line class="axis" x1="454.00" y1="322.00" x2="454.00" y2="326.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="454.00" y="338.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">0</text>
+  <line class="axis" x1="509.00" y1="322.00" x2="509.00" y2="326.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="509.00" y="338.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">1</text>
+  <line class="axis" x1="564.00" y1="322.00" x2="564.00" y2="326.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="564.00" y="338.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">2</text>
+  <line class="axis" x1="619.00" y1="322.00" x2="619.00" y2="326.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="619.00" y="338.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">3</text>
+  <line class="axis" x1="674.00" y1="322.00" x2="674.00" y2="326.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="674.00" y="338.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">4</text>
+  <line class="axis" x1="729.00" y1="322.00" x2="729.00" y2="326.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="729.00" y="338.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">5</text>
+  <line class="axis" x1="784.00" y1="322.00" x2="784.00" y2="326.00" stroke="#8c959f" stroke-width="1"/>
+  <text x="784.00" y="338.00" font-size="10" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">6</text>
+  <text x="619.00" y="353.00" font-size="11" text-anchor="middle" font-weight="normal" class="fg" fill="#1f2328">s = sinθ/λ  [Å⁻¹]</text>
+  <polyline points="454.00,207.00 454.55,206.91 455.10,206.65 455.65,206.25 456.20,205.75 456.75,205.20 457.30,204.64 457.85,204.13 458.40,203.73 458.95,203.46 459.50,203.34 460.05,203.40 460.60,203.63 461.15,204.02 461.70,204.54 462.25,205.18 462.80,205.90 463.35,206.66 463.90,207.45 464.45,208.23 465.00,208.97 466.10,210.28 467.20,211.27 467.75,211.62 468.30,211.88 469.40,212.11 470.50,211.98 471.60,211.56 472.70,210.90 473.25,210.50 473.80,210.06 474.90,209.11 476.00,208.09 477.10,207.06 478.20,206.04 478.75,205.55 479.30,205.08 480.40,204.19 481.50,203.40 484.25,201.86 487.00,200.99 489.75,200.69 492.50,200.85 498.00,201.94 503.50,203.34 509.00,204.63 514.50,205.68 520.00,206.48 525.50,207.07 531.00,207.47 536.50,207.67 542.00,207.71 547.50,207.55 553.00,207.22 558.50,206.74 564.00,206.14 591.50,202.77 619.00,201.89 646.50,203.76 674.00,206.18 729.00,209.47 784.00,211.27" fill="none" stroke="#3b82f6" stroke-width="2.0" stroke-linejoin="round"/>
+  <polyline points="454.00,207.80 454.55,207.70 455.10,207.45 455.65,207.07 456.20,206.67 456.75,206.30 457.30,206.05 457.85,205.96 458.40,206.04 458.95,206.26 459.50,206.57 460.05,206.91 460.60,207.21 461.15,207.39 461.70,207.43 462.25,207.30 462.80,207.02 463.35,206.61 463.90,206.12 464.45,205.61 465.00,205.12 466.10,204.41 467.20,204.20 467.75,204.30 468.30,204.51 469.40,205.17 470.50,205.95 471.60,206.61 472.70,207.01 473.25,207.08 473.80,207.06 474.90,206.79 476.00,206.26 477.10,205.60 478.20,204.93 478.75,204.63 479.30,204.36 480.40,204.00 481.50,203.91 484.25,204.93 487.00,207.24 489.75,209.64 492.50,210.98 498.00,208.68 503.50,202.57 509.00,198.66 514.50,200.05 520.00,205.69 525.50,212.48 531.00,217.51 536.50,219.08 542.00,216.83 547.50,211.36 553.00,203.86 558.50,195.66 564.00,188.07 591.50,184.22 619.00,221.37 646.50,233.51 674.00,212.45 729.00,174.97 784.00,216.81" fill="none" stroke="#14b8a6" stroke-width="1.6" stroke-linejoin="round"/>
+  <polyline points="454.00,208.42 454.55,208.27 455.10,207.88 455.65,207.29 456.20,206.63 456.75,206.00 457.30,205.52 457.85,205.26 458.40,205.25 458.95,205.49 459.50,205.93 460.05,206.48 460.60,207.05 461.15,207.55 461.70,207.90 462.25,208.05 462.80,207.98 463.35,207.70 463.90,207.24 464.45,206.65 465.00,205.99 466.10,204.73 467.20,203.85 467.75,203.64 468.30,203.58 469.40,203.89 470.50,204.63 471.60,205.57 472.70,206.48 473.25,206.86 473.80,207.17 474.90,207.56 476.00,207.61 477.10,207.35 478.20,206.84 478.75,206.53 479.30,206.19 480.40,205.49 481.50,204.85 484.25,203.93 487.00,204.37 489.75,205.85 492.50,207.60 498.00,209.12 503.50,207.26 509.00,204.83 514.50,204.42 520.00,206.13 525.50,208.38 531.00,209.55 536.50,208.86 542.00,206.70 547.50,204.24 553.00,203.23 558.50,205.49 564.00,212.69" fill="none" stroke="#f59e0b" stroke-width="1.6" stroke-linejoin="round"/>
+  <text x="459.50" y="300.92" font-size="10.5" text-anchor="start" font-weight="600" class="fg" fill="#f59e0b">Cromer–Mann leaves the frame past s = 2 ↘ (fitted for s ≤ 2)</text>
+  <text x="459.50" y="316.25" font-size="10.5" text-anchor="start" font-weight="600" class="fg" fill="#f59e0b">(-9 % at s = 3, +28 % at 6 Å⁻¹)</text>
+  <text x="788.00" y="214.77" font-size="10.5" text-anchor="start" font-weight="600" class="fg" fill="#3b82f6">Temari</text>
+  <text x="788.00" y="226.77" font-size="10.5" text-anchor="start" font-weight="600" class="fg" fill="#14b8a6">WK</text>
+</svg>

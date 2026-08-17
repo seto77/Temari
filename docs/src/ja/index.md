@@ -44,6 +44,7 @@ Temari は孤立原子をゼロから解く — 自己無撞着場、束縛軌�
 | 実装されている処方そのもの | [物理 (処方)](physics.md) |
 | 新しい量をどこに挿すのか | [層構造](architecture.md) |
 | 数値をどこまで信じてよいか | [検証](verification.md) |
+| 文献値との比較を曲線で見る (Si, Fe) | [文献との比較](comparison.md) |
 | なぜ「効きそうな最適化」が却下されたのか | [再現性の規律](reproducibility.md)・[性能](performance.md) |
 | これから何を作るのか / 何を作らないのか | [ロードマップ](roadmap.md) |
 | Windows で長時間バッチが進まなくなった | [トラブルシューティング](troubleshooting.md) |

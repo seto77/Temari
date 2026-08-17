@@ -61,6 +61,7 @@ See [The physics](physics.md) for the prescription and its known limits, and
 | What prescription is actually implemented | [The physics](physics.md) |
 | Where a new quantity would be plugged in | [Architecture](architecture.md) |
 | How far the numbers are trusted, and why | [Verification](verification.md) |
+| How the tables compare with the literature, as curves (Si, Fe) | [Against the literature](comparison.md) |
 | Why an obvious optimization was rejected | [Reproducibility](reproducibility.md), [Performance](performance.md) |
 | What is planned, and what is deliberately out of scope | [Roadmap](roadmap.md) |
 | A long batch stopped making progress on Windows | [Troubleshooting](troubleshooting.md) |
