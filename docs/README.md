@@ -11,7 +11,7 @@ MkDocs Material sources for <https://seto77.github.io/Temari/>, deployed by
 | --- | --- |
 | `mkdocs.yml` | Site configuration. `docs_dir: src`, `site_dir: site`. |
 | `src/en/` | English pages — the default locale, served at the site root. |
-| `src/ja/` | Japanese pages. Anything missing here falls back to the English page, with a banner saying so, so translation can be incremental. |
+| `src/ja/` | Japanese pages — a complete set since 2026-08-17 (every English page has a Japanese counterpart, です・ます style, same headings and `{ #anchor }` ids). Should one go missing, the site falls back to the English page with a banner saying so. |
 | `src/assets/` | Shared CSS, the MathJax configuration, and the figures (not per-locale). `figures/coverage.svg` and `sign.svg` come from `tools/make_figures.jl`; `figures/*_vs_literature.svg` (the *Against the literature* page) from `tools/make_comparison_figures.py`, which needs the locally held references and writes only ratios. |
 | `overrides/main.html` | The "translation pending" banner. |
 | `requirements.txt` | Build dependencies. **ASCII only** — pip decodes this file with the system locale encoding, which fails on a cp932 Windows console. |
@@ -32,7 +32,15 @@ for the fallback banner.
 
 `src/en/architecture.md` deliberately contains almost nothing — it includes
 `docs/architecture.md` verbatim through a snippet, so the repository file stays
-the single source of truth. Edit that file, not the page.
+the single source of truth. Edit that file, not the page. `src/ja/architecture.md`
+is a full translation of it (a snippet cannot translate), so an edit to
+`docs/architecture.md` has to be mirrored there by hand.
+
+Conventions shared by every page (2026-08-17 overhaul): literature is cited in the
+text as "Olukayode et al. (2023)" and listed under `## References` /
+`## 参考文献` at the end of each page — only works cited on that page, entries
+identical on the English and Japanese pages; the comparison page publishes
+ratios and deviations only, never reference values.
 
 ## 2. Working documents (`*.md`, `*.json` in this directory)
 
@@ -51,7 +59,7 @@ rather than in a wiki:
 | `frozen_core_and_transverse_2026-08-07.md` / `mott_elastic_2026-08-07.md` / `exchange_diagnosis_2026-08-07.md` | The frozen core and transverse interaction, the Mott elastic exit, and the exchange diagnosis. Japanese. |
 | `scattering_factor_dataset_plan_2026-08-10.md` | **Plan, not a record**: what the f_x/f_e dataset needs before it can be published to the same standard as F — the prescription decision (Dirac + KLI), the X1–X15 verification suite, and the checks that must *not* be used as gates. Japanese. |
 | `handoff_scattering_factor_2026-08-11.md` | Handover for the f_x/f_e track: current position, the next tasks in order, and the traps already stepped in. The plan above is authoritative; this is the entry point. Japanese. |
-| `next_phase_2026-08-0*.md` | Handover: current state, settled decisions, remaining work in priority order. **The highest-numbered one is current** (`2026-08-09`). Japanese. |
+| `next_phase_2026-08-*.md`, `next_chat_2026-08-*.md` | Handover: current state, settled decisions, remaining work in priority order. **The highest-numbered `next_phase` is current** (`2026-08-13`); the `next_chat` files are the day-by-day handovers of the scattering-factor track. Japanese. |
 
 The published statement of the working rules is `CONTRIBUTING.md` (the
 verification a change is expected to show) together with the Reproducibility and

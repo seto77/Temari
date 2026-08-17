@@ -54,7 +54,7 @@ because "no third-party number tables in the repository" makes it the one
 exception that has to be justified:
 
 - **What it is.** The analytic parameterization of Bote, Salvat, Jablonski &
-  Powell, *At. Data Nucl. Data Tables* **96**, 871 (2009) (and its Erratum,
+  Powell, *At. Data Nucl. Data Tables* **95**, 871 (2009) (and its Erratum,
   **97**, 186), fitted to the relativistic distorted-wave calculations of
   Bote & Salvat, *Phys. Rev. A* **77**, 042701 (2008).
 - **Where these bits came from.** Machine-extracted from

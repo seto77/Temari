@@ -1,32 +1,65 @@
 # Roadmap
 
-The physics of an isolated atom is **one engine with several exits**. Everything
-below is a choice of two independent things: the *operator* that couples the
-initial and final state, and the *exit* — what you integrate over and what you
-report. Layers L0–L4 are shared by all of them; see
-[Architecture](architecture.md).
+The physics of an isolated atom is **one engine with several exits**. Every
+quantity on this page is a choice of two independent things: the *operator*
+that couples the initial and final state, and the *exit* — what you integrate
+over and what you report. Layers L0–L4 (numerics, the self-consistent atom, the
+continuum, the radial and angular matrix elements) are the shared toolbox —
+each exit uses as much of it as its operator needs — and only the top layer L5
+knows what is being reported. See
+[Architecture](architecture.md) for the stack.
+
+!!! example "Operator and exit, on two quantities you already know"
+    The ionization form factor $F(s, E_0)$ and the generalized oscillator
+    strength (GOS) use the *same operator* — a fast electron coupling the
+    initial and final state through the screened Coulomb interaction in the
+    first Born approximation — and differ in the *exit*: $F$ contracts the
+    mixed (off-diagonal) form factor over the ejected electron's energy and
+    direction and reports a normalized shape, the GOS keeps the diagonal
+    quantity at every energy loss and momentum transfer and reports the surface
+    itself (so $F$ is not simply an integral of the GOS surface). The X-ray
+    scattering factor $f_x(s)$ is the opposite case: no transition at all, a
+    *different operator* (the Fourier transform of the charge density), and it
+    reads the L1 density directly.
+
+Effort estimates below are estimates of the work relative to the existing
+engine, not dates. In the exit tables, **done** means the exit exists as a
+subcommand of `src/ionization.jl` and is covered by `selftest`.
+
+## Where things stand
+
+Six exits are implemented. The rest of this page is what remains.
+
+| Exit | Quantity | Command | Status |
+| --- | --- | --- | --- |
+| EDX | $F(s, E_0)$, K, L1–L3, M1–M5 | `<Z> <channel> <E0>` | shipping (dataset v5.0.0) |
+| EELS | core-loss $\mathrm{d}\sigma/\mathrm{d}\Delta E$ and the inner-shell stopping-power contribution | `edge` | done |
+| GOS | $\mathrm{d}f/\mathrm{d}\Delta E(Q)$, the Bethe surface | `gos` | done |
+| Elastic phases | $\delta_l$ in the neutral atom's static field | `phase` | done |
+| Mott elastic | $\mathrm{d}\sigma/\mathrm{d}\Omega$, $\sigma_\text{el}$, $\sigma_\text{tr}$, Sherman function | `mott` | done |
+| Scattering factors | $f_x(s)$, $f_e(s)$ | `fx` | shipping (dataset-factors v1.0.0) |
 
 ## Already computed and thrown away
 
-These quantities exist inside the current call graph and are discarded before
-returning. Exposing them is output plumbing, not physics — which is why they
-come first.
+Three quantities existed inside the call graph of the $F(s, E_0)$ exit and were
+discarded before returning. Exposing them was output plumbing, not physics —
+which is why they came first, and why all three are now done.
 
-| Quantity | Where it already is | Status |
+| Quantity | Where it already was | Status |
 | --- | --- | --- |
-| **EELS core-loss dσ/dΔE** | The `diag.dNde` matrix (ε node × K node). Its K = 0 column, times $4\gamma^2 a_0^2$, *is* the parallel-illumination dσ/dε. | **done** — `edge` subcommand |
+| **EELS core-loss dσ/dΔE** | The `diag.dNde` matrix (ε node × K node). Its K = 0 column, times $4\gamma^2 a_0^2$, *is* the parallel-illumination dσ/dε. | **done** — `edge` subcommand (from the command line the transverse Møller term is on by default in this exit; `--no-transverse` restores the longitudinal kernel alone) |
 | **Inner-shell stopping power** | One contraction of `diag.dNde` with the ε quadrature weights. | **done** — reported by `edge` |
-| **Elastic phase shifts $\delta_l$** | The continuum solver least-squares fits the tail to $u \approx a F_l + b G_l$. Then $\delta_l = \mathrm{atan2}(b, a)$. | **done** — `phase` subcommand, validated against the Born approximation to 3 % at high $l$ |
+| **Elastic phase shifts $\delta_l$** | The continuum solver least-squares fits the tail to $u \approx a F_l + b G_l$. Then $\delta_l = \mathrm{atan2}(b, a)$. | **done** — `phase` subcommand, validated against the Born approximation to 3 % at high $l$. The default scattering field is purely electrostatic, $-Z/r + V_H$; see [the command-line reference](cli.md#the-phase-exit) |
 
 ## Small to medium effort
 
 | Quantity | Effort | Why it is cheap here |
 | --- | --- | --- |
-| **Generalized oscillator strength (GOS) / Bethe surface** | **done** | The `gos` subcommand. The E₀ dimension is gone: one run per channel instead of one per (channel, E₀), a factor of ~22 against the shipped grids. Validated against the Bethe sum rule at large Q and, at Q → 0, against the exact hydrogen continuum dipole strength. |
+| **Generalized oscillator strength (GOS) / Bethe surface** | **done** | The `gos` subcommand. The E₀ dimension is gone: one run per channel instead of one per (channel, E₀), a factor of 22 to 40 against the shipped grids (each channel of dataset v5 carries 22 to 40 E₀ rows; the GOS needs one). Checked, for hydrogen, against the Bethe sum rule at large Q and, at Q → 0, against the exact hydrogen continuum dipole strength (`selftest` T11). |
 | **Double-differential d²σ/dΩdΔE** | small | The K = 0 branch of the angular integral already evaluates $S/Q^4$ on a θ grid — and that grid is built by a transform that flattens the forward $1/Q^4$ peak, so nodes automatically cluster where EELS collection angles are. |
 | **Partial cross sections σ(β, Δ)** | medium | The EELS quantification k-factor itself. Broadest reach of anything on this list. The real work is designing ε nodes for the energy window. |
-| **X-ray scattering factors $f_x(s)$, Mott–Bethe, $f_e(s)$** | **done** | The `fx` subcommand — straight from the SCF charge density. Verified against the closed form for hydrogen 1s to 8×10⁻¹⁴. Against published parameterizations it agrees to 1–3 % for light and medium Z, drifting to ~7 % for Au at high $s$ where the non-relativistic density costs the most. Beyond $s \approx 3$ Å⁻¹ the Gaussian fits die exponentially while $f_e$ genuinely falls as $s^{-2}$, so there Temari is the correct one. |
-| **Mott elastic dσ/dΩ, σ_el, σ_tr** | **done** | The `mott` subcommand. Spin is in: the κ-resolved Dirac continuum gives $\delta_\kappa$, hence both the direct amplitude $f(\theta)$ and the spin-flip amplitude $g(\theta)$, the Sherman function $S(\theta)$, and $\sigma_\text{el}$, $\sigma_\text{tr}$. Against NIST SRD 64 the ratio sits at 0.90–0.94 above 1 keV. ⚠ The scattering potential must stay purely electrostatic — adding the target's own Xα exchange is not a field the incoming electron feels, and it inflates $\sigma_\text{el}$ to 1.6–4.9× NIST. |
+| **X-ray scattering factors $f_x(s)$, Mott–Bethe, $f_e(s)$** | **done** | The `fx` subcommand — straight from the SCF charge density. Verified against the closed form for hydrogen 1s to 8×10⁻¹⁴. With the non-relativistic density it agreed with the published parameterizations to 1–3 % for light and medium Z but drifted to ~7 % for Au at high $s$. The full Dirac SCF closes that gap to ~1 % for Au (the relativistic contraction moves $f_x$ by 10.8 % at $s = 4$ Å⁻¹). Dirac + KLI, the command-line default (KLI exchange — the exchange-only KLI approximation to the OEP of Krieger et al., 1992), reaches 0.030 % relative RMS for Au over $s \le 2$ Å⁻¹ against OFFV1 (Olukayode et al., 2023), a computed Dirac–Hartree–Fock table rather than a fit; the full table is on the [Verification](verification.md#tier-3-external-references) page. Beyond $s \approx 3$ Å⁻¹ a sum of Gaussians decays as $\exp(-bs^2)$ while $f_e$ genuinely falls as $s^{-2}$, so there a Gaussian fit is simply out of its range; a computed table is not. |
+| **Mott elastic dσ/dΩ, σ_el, σ_tr** | **done** | The `mott` subcommand. Spin is in: the κ-resolved Dirac continuum gives $\delta_\kappa$, hence both the direct amplitude $f(\theta)$ and the spin-flip amplitude $g(\theta)$, the Sherman function $S(\theta)$, and $\sigma_\text{el}$, $\sigma_\text{tr}$. Against NIST SRD 64 (Powell et al., 2016) the ratio sits at 0.90–0.94 above 1 keV. ⚠ The scattering potential must stay purely electrostatic — adding the target's own Xα exchange is not a field the incoming electron feels, and it inflates $\sigma_\text{el}$ to 1.6–4.9× NIST. |
 | **Photoionization σ_nl(ω) and asymmetry β_nl** | medium | Swap the fast-electron operator for the photon dipole operator. The energy normalization is already the one photoionization requires. |
 | **M shell (M1–M5)** | **done** | All five subshells ship in dataset v5 (525 channels against v3's 246). It cost five rows in the channel table plus a $[3j]^2$ table extended to $l_\text{init} = 2$. |
 | **ΔSCF binding and relaxation energies** | medium | Both the neutral and the relaxed-ion SCF are already solved and cached. |
@@ -58,25 +91,50 @@ come first.
 | Phase | Content | Status |
 | --- | --- | --- |
 | **P0** | Repository, design principles, layer declaration | **done** |
-| **P1** | Vectorization across radial points | **done** — 11.7× over the dataset-generation code, all bit-identical |
-| **P2** | Split into the L0–L5 layer files; verification in CI | **done** — bit-identical; the operator/exit seam waits for a second exit to define it |
+| **P1** | Vectorization across radial points | **done** — 11.7× over the code that generated the v3 dataset, all bit-identical |
+| **P2** | Split into the L0–L5 layer files; verification in CI | **done** — bit-identical; the operator/exit seam was left to the first exit that needed it |
 | **P3** | The discarded exits: GOS, dσ/dΔE, δ_l, stopping power | **done** |
 | **P4** | Elastic side: $f_x(s)$, Mott–Bethe, Mott DCS; add the sum-rule check | **done** |
-| **P5** | EELS quantification σ(β, Δ); systematic comparison against Egerton SIGMAK/SIGMAL and Hartree–Slater GOS | |
-| **P6** | Photon side: σ_nl, β_nl; comparison against xraylib | |
+| **P5** | EELS quantification σ(β, Δ); systematic comparison against SIGMAK/SIGMAL (Egerton, 2011) and the Hartree–Slater GOS of Leapman et al. (1980) | open |
+| **P6** | Photon side: σ_nl, β_nl; comparison against xraylib | open |
 | **P7** | M shell, full Dirac continuum | **done** — M1–M5 and the κ-resolved two-component continuum ship in dataset v5 |
 
 P2 was deliberately unglamorous: pure code movement, so **bit identity was a
-hard requirement** — verified with `selftest`, `refcheck` (unchanged at
-9.044×10⁻⁸) and the kernel bit-identity checks. What it did *not* do is make the
-operator and the exit injectable: L5 still calls the L4 routines by name. That
-seam gets defined by the first quantity that needs it, which is P3 — and P3 is
-where Temari first becomes useful for something other than EDX.
+hard requirement** — verified with `selftest`, `refcheck` (the cross-check
+against the independent Python v2 baseline, unchanged at 9.044×10⁻⁸) and the
+kernel bit-identity checks. What it did *not* do was make the operator and the
+exit injectable: L5 still calls the L4 routines by name. That seam was left to
+the first quantity that needed it, which was P3 — and P3 is where Temari first
+became useful for something other than EDX. What P3 actually produced is a
+narrow seam, `eps_setup` in `l5_channel.jl`: everything about one ε node that
+does not depend on the incident kinematics, factored out so that an exit only
+chooses its Q range. It separates kinematics from reporting, not operator from
+exit; the scattering-factor exit (P4) sidestepped the question by reading the
+L1 density directly. See [Architecture](architecture.md).
 
 ## The gap worth aiming at
 
-The strongest scientific argument in the list is the GOS: the standard EELS
-tables date from the 1980s (Egerton's SIGMAK/SIGMAL, Leapman's Hartree–Slater
-tables), and **a modern, open, relativistic GOS table effectively does not
-exist**. The engine already computes what is needed and throws it away, and the
-exit costs a factor of 22 *less* than the tables already being generated.
+The strongest scientific argument in the list is still the EELS side. The
+standard EELS cross-section tools date from the 1980s — SIGMAK/SIGMAL (Egerton,
+2011) and the Hartree–Slater tables of Leapman et al. (1980). The one modern
+open reference for the GOS exit is the Dirac GOS database (Zhang et al., 2023):
+CC-BY, Z = 1–108, computed with the Flexible Atomic Code from Dirac–Fock–Slater
+orbitals. It stops at $q = 50$ Å⁻¹ — $s \approx 3.98$ Å⁻¹ in the
+crystallographic variable used throughout this site, since $q = 4\pi s$ — and it
+is a GOS table, not a Bloch-wave/multislice ionization form-factor table.
+
+The engine computed what a GOS table needs and threw it away; the `gos` exit now
+reports it, at a factor of 22 to 40 *less* than the shipped $F(s, E_0)$ grids.
+How it compares against the Dirac GOS database is recorded on the
+[Verification](verification.md) page. What the list still lacks on this side is
+P5: the partial cross sections σ(β, Δ) that quantification actually consumes,
+and the systematic comparison against SIGMAK/SIGMAL and the Hartree–Slater GOS.
+
+## References
+
+- Egerton, R. F. (2011). *Electron Energy-Loss Spectroscopy in the Electron Microscope*, 3rd ed. Springer, New York.
+- Krieger, J. B., Li, Y. & Iafrate, G. J. (1992). Construction and application of an accurate local spin-polarized Kohn–Sham potential with integer discontinuity: Exchange-only theory. *Physical Review A* **45**, 101–126.
+- Leapman, R. D., Rez, P. & Mayers, D. F. (1980). K, L, and M shell generalized oscillator strengths and ionization cross sections for fast electron collisions. *Journal of Chemical Physics* **72**, 1232–1243.
+- Olukayode, S., Froese Fischer, C. & Volkov, A. (2023). Revisited relativistic Dirac–Hartree–Fock X-ray scattering factors. I. Neutral atoms with Z = 2–118. *Acta Crystallographica A* **79**, 59–79.
+- Powell, C. J., Jablonski, A., Salvat, F. & Lee, A. Y. (2016). *NIST Electron Elastic-Scattering Cross-Section Database, Version 4.0*. NIST Standard Reference Database 64 (NSRDS 64), National Institute of Standards and Technology, Gaithersburg. doi:10.6028/NIST.NSRDS.64
+- Zhang, Z., Lobato, I., Jannis, D., Verbeeck, J., Van Aert, S. & Nellist, P. (2023). Generalised oscillator strength for core-shell electron excitation by fast electrons based on Dirac solutions [Data set]. Zenodo. doi:10.5281/zenodo.7729585

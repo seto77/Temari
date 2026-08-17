@@ -3,17 +3,24 @@
 **Atomic scattering and excitation factors from first principles.**
 
 Temari solves an isolated atom from scratch — self-consistent field, bound
-orbitals, distorted continuum waves — and derives the scattering and excitation
-factors that electron microscopy, spectroscopy and transport simulation need.
-No external atomic-structure code, no fitted parameter tables, no dependencies
-beyond the Julia standard library.
+orbitals, distorted continuum waves — and derives from that one atom the
+scattering and excitation factors that electron microscopy, spectroscopy and
+transport simulation need. It calls no external atomic-structure code, it does
+not read scattering factors from a fitted table, and it depends on nothing but
+the Julia standard library. The one third-party table it carries is the
+Bote–Salvat coefficient set (Bote & Salvat, 2008; Bote et al., 2009), which
+supplies the *absolute* ionization cross sections and the edge energies; every
+shape and every scattering factor is computed here.
 
 !!! tip "Just want the numbers?"
-    The inner-shell ionization form factors are already computed and published
-    as a dataset with its own DOI — 525 channels, K through M5 — and so are the
-    X-ray and electron atomic scattering factors for Z = 1–86
-    (dataset-factors v1.0.0). You do not need to run anything. See
-    **[Data](data.md)**.
+    Two datasets are already published, and neither needs Julia:
+
+    - **Inner-shell ionization form factors** $F(s, E_0)$ for STEM-EDX —
+      525 channels (K through M5), with a DOI.
+    - **X-ray and electron atomic scattering factors** $f_x(s)$, $f_e(s)$ for
+      the neutral atoms Z = 1–86 (dataset-factors v1.0.0).
+
+    See **[Data](data.md)** — and read its contract before using the numbers.
 
 !!! quote "The name"
     *Temari* (手毬) is a traditional Japanese craft: a sphere divided
@@ -23,19 +30,26 @@ beyond the Julia standard library.
     exit is an ionization form factor, a generalized oscillator strength, or an
     elastic phase shift.
 
-!!! info "Status: early"
-    The engine exists and is in production use — it generates the STEM-EDX
-    ionization tables shipped with [ReciPro](https://github.com/seto77/ReciPro).
-    It is split into the L0–L5 layer files, and six exits now sit on top of it:
-    $F(s, E_0)$, the EELS edge $\mathrm{d}\sigma/\mathrm{d}\Delta E$, the
-    generalized oscillator strength, elastic phase shifts, Mott elastic scattering,
-    and atomic scattering factors. The repository is being assembled around them.
+!!! info "Status"
+    The engine is in production use: it generates the STEM-EDX ionization
+    tables shipped with [ReciPro](https://github.com/seto77/ReciPro), and it
+    generated both published datasets. It is split into the L0–L5 layer files
+    described under [Architecture](architecture.md), and six exits sit on top
+    of the same atom. The ionization tables and the scattering factors have
+    been checked against external references ([Verification](verification.md),
+    [Against the literature](comparison.md)); the EELS, GOS, phase-shift and
+    Mott exits are checked against analytic limits and, where one exists, an
+    external reference — the GOS comparison against the Dirac GOS database
+    leaves a Bethe-ridge discrepancy that the Verification page records as
+    unexplained — and no dataset has been published from them yet.
 
 ## What it computes today
 
-One engine, six exits. Everything below comes from the same self-consistent
-atom, the same relativistic bound orbitals and the same distorted continuum
-waves — they differ only in the operator and in what is reported.
+One engine, six exits. Everything below starts from the same self-consistent
+atom: the three ionization exits share its relativistic bound orbitals and
+distorted continuum waves, the two elastic exits use its continuum solver, and
+the scattering-factor exit reads its density directly. The exits differ in the
+operator and in what is reported.
 
 | Exit | Quantity | Command |
 | --- | --- | --- |
@@ -44,7 +58,15 @@ waves — they differ only in the operator and in what is reported.
 | **Generalized oscillator strength** | $\mathrm{d}f/\mathrm{d}\Delta E(Q)$, the Bethe surface — **independent of $E_0$** | `gos` |
 | **Elastic phase shifts** | $\delta_l$ in the neutral atom's static field | `phase` |
 | **Mott elastic scattering** | $\mathrm{d}\sigma/\mathrm{d}\Omega$, $\sigma_{el}$, $\sigma_{tr}$ and the Sherman function | `mott` |
-| **Atomic scattering factors** | $f_x(s)$ for X-rays and $f_e(s)$ for electrons, from the SCF density — first principles instead of a fitted table | `fx` |
+| **Atomic scattering factors** | $f_x(s)$ for X-rays and $f_e(s)$ for electrons, from the SCF density — computed, not read from a fitted table | `fx` |
+
+!!! example "What a channel is, and what s is"
+    A *channel* is one element and one subshell: **Fe K** is iron's 1s shell,
+    **Au L3** is gold's 2p₃/₂ shell. The ionization form factor is computed per
+    channel and per incident energy $E_0$; the scattering factors need only the
+    element. Throughout the site $s = \sin\theta/\lambda$ in Å⁻¹, the
+    crystallographic variable — a momentum transfer of $q = 4\pi s$, so
+    $s = 0.5$ Å⁻¹ is $q = 6.28$ Å⁻¹.
 
 The form factor is normalized to $F(0) = 1$ and carries the delocalization of
 the inelastic image; the absolute scale is supplied by the cross section.
@@ -74,23 +96,29 @@ one exit and hide the engine:
 
 - Ionization form factors for STEM-EDX / EELS mapping are locked inside
   microscopy simulators.
-- The standard EELS generalized oscillator strength (GOS) tables date from the
-  1980s (Egerton's SIGMAK/SIGMAL, Leapman's Hartree–Slater tables). **A modern,
-  open, relativistic GOS table effectively does not exist.**
+- The generalized oscillator strength (GOS) tables that EELS quantification
+  still runs on date from the 1980s — Egerton's SIGMAK/SIGMAL (Egerton, 2011)
+  and the Hartree–Slater tables of Leapman et al. (1980). One modern, open,
+  relativistic reference now exists, the Dirac GOS database (Zhang et al.,
+  2023); it stops at $q = 50$ Å⁻¹ ($s \approx 3.98$ Å⁻¹) and it is a GOS table,
+  not an ionization form-factor table for Bloch-wave or multislice codes.
 - Elastic scattering phase shifts live in separate Fortran packages.
 - Atomic scattering factors are distributed as fitted parameterizations rather
   than as something you can recompute for an arbitrary ion.
 
-Temari puts the engine in the open and adds exits to it. Three quantities are
-already computed inside the current call graph and thrown away before returning
-— exposing them is output plumbing, not physics. See
-[Architecture](architecture.md#what-is-already-computed-and-thrown-away).
+Temari puts the engine in the open and adds exits to it. Three quantities — the
+EELS edge shape, the inner-shell stopping power and the elastic phase shifts —
+already existed inside the call graph of the ionization exit and were discarded
+before returning; exposing them (as the `edge` and `phase` subcommands) was
+output plumbing, not new physics. See
+[Architecture](architecture.md#what-was-already-computed-and-thrown-away).
 
 ## Design commitments
 
-1. **Zero dependencies.** Julia standard library only. The sole bundled data
-   file is the Bote–Salvat cross-section coefficient set (public domain).
-2. **Standalone.** No `module`, no package environment: the layer files carry a
+1. **Zero dependencies.** Julia standard library only. The sole bundled
+   third-party data file is the Bote–Salvat cross-section coefficient set
+   (public domain).
+2. **Standalone.** No `module`, no package to install: the layer files carry a
    flat namespace and concatenate in include order, so it stays possible to
    hand the whole engine to someone as a single file.
 3. **MIT licensed.** A reference implementation should be readable and usable.
@@ -106,16 +134,19 @@ already computed inside the current call graph and thrown away before returning
 
 - **No dataset inside the repository.** The generated tables are large and are
   versioned independently of the code, so they are distributed as their own
-  release under their own DOI rather than committed here — see
+  releases — the ionization form factors under their own DOI, the scattering
+  factors as a versioned GitHub release — rather than committed here; see
   [Data](data.md). This repository holds code, documentation and small derived
   index tables.
 - **No reference data from restricted sources.** Comparison against published
   tables and GPL-licensed codes is part of development, but those numbers are
-  never copied into this repository.
+  never copied into this repository. What is published is ratios and
+  deviations, as on the [comparison page](comparison.md).
 
 ## Credits and licensing
 
-MIT. Copyright © 2026 Yusuke SETO.
+The software is MIT; the datasets are CC-BY-4.0 with an MIT loader.
+Copyright © 2026 Yusuke SETO.
 
 The implementation was largely written with AI assistance (Anthropic Claude);
 the choice of physical prescription and all verification are the author's
@@ -123,5 +154,12 @@ responsibility.
 
 `bote_salvat.json` is machine-extracted from NIST's BoteSalvatICX.jl (Unlicense,
 public domain). If you publish results using the cross sections, please cite
-Bote & Salvat, *Phys. Rev. A* **77** (2008) 042701 and Bote *et al.*, *At. Data
-Nucl. Data Tables* **95** (2009) 871.
+Bote & Salvat (2008) and Bote et al. (2009) as well.
+
+## References
+
+- Bote, D. & Salvat, F. (2008). Calculations of inner-shell ionization by electron impact with the distorted-wave and plane-wave Born approximations. *Physical Review A* **77**, 042701.
+- Bote, D., Salvat, F., Jablonski, A. & Powell, C. J. (2009). Cross sections for ionization of K, L and M shells of atoms by impact of electrons and positrons with energies up to 1 GeV: Analytical formulas. *Atomic Data and Nuclear Data Tables* **95**, 871–909. Erratum: **97** (2011), 186.
+- Egerton, R. F. (2011). *Electron Energy-Loss Spectroscopy in the Electron Microscope*, 3rd ed. Springer, New York.
+- Leapman, R. D., Rez, P. & Mayers, D. F. (1980). K, L, and M shell generalized oscillator strengths and ionization cross sections for fast electron collisions. *Journal of Chemical Physics* **72**, 1232–1243.
+- Zhang, Z., Lobato, I., Jannis, D., Verbeeck, J., Van Aert, S. & Nellist, P. (2023). Generalised oscillator strength for core-shell electron excitation by fast electrons based on Dirac solutions [Data set]. Zenodo. doi:10.5281/zenodo.7729585
