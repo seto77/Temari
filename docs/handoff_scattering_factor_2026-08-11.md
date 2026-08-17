@@ -1,6 +1,9 @@
 # 引き継ぎ — 原子散乱因子 (f_x / f_e) データセット (2026-08-16 夜に更新)
 
-> ## ★★★★★★ 2026-08-16 23:30 — **dataset-factors v1.0.0 完成** (生成・QC・golden・manifest・梱包)
+> ## ★★★★★★★ 2026-08-17 — **リリース**: 出荷 = run 3 (`0612e0c`、指紋 `ad392337…`)、archive SHA `f2b32a5c…`、
+> ソフトウェア v1.1.0 + データ dataset-factors-v1.0.0 (詳細 = `docs/next_chat_2026-08-16.md` 冒頭)
+>
+> ## ★★★★★★ 2026-08-16 23:30 — dataset-factors v1.0.0 完成 (生成・QC・golden・manifest・梱包。⚠ その後 run 3 で差し替え)
 >
 > 出荷 = run 2 (`src/prod_factors_v1/`、86 元素、`f27ed05`、指紋 `f8e829b7…`)。QC 86/86 ALL PASS、
 > 契約 + 負のミュータント 18/18、golden 凍結、`dist/temari-factors-v1.0.0.tar.gz` (SHA `c46b20b2…`)
