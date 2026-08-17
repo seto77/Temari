@@ -117,7 +117,8 @@ opts: [--quick|--high] [--rel|--no-kdirac] [--nodscf] [--kli] [--frozen]
                --rel で v3 (SRC。⚠ 欠陥あり)、--no-kdirac で v2 (旧既定) へ戻す。
                どれを使ったかは 1 行目の model_id に必ず出る
       SCF は既定で完全 Dirac (DHFS)。--nodscf で旧来の非相対論 SCF (比較用)
-      --kli は厳密交換 (Latter 補正なし)。Dirac・非相対論のどちらとも組める
+      --kli は KLI 交換 = 交換のみの OEP の KLI 近似 (Latter 補正なし)。
+               Dirac・非相対論のどちらとも組める
       --frozen は厳密 frozen core = 束縛も連続も**同一の中性 KS ポテンシャル**
                (Latter 補正込み、z_asym=1)。Zhang らの Dirac GOS DB と同じ規約
       --frozen-static は同じ frozen core を「尾が 0 の静的場」で組む比較用の版
@@ -391,7 +392,7 @@ function main_phase(args)
             maximum(abs, d), argmax(abs.(d)) - 1, abs(d[end]))
     println("参照: ", o["reference"], " / 散乱場: ", o["scattering_potential"],
             " / SCF交換: ", o["scf_exchange"])
-    println("注意: ", o["note"], "。Mott 断面積 (スピン分解) は P4")
+    println("注意: ", o["note"], "。スピン分解が要るなら mott 出口")
     if json_path !== nothing
         open(json_path, "w") do io
             write_json(io, o); println(io)
@@ -453,7 +454,7 @@ function main_(args)
             "   処方: ", model_id_of(rel, dscf, X_ALPHA, xc, fs, trans, kd))
     println("求積: ", quick ? "QUICK (参考値)" : (high ? "HIGH (強化)" : "本番"),
             "   スレッド: ", Threads.nthreads())
-    println("初回はこの元素の SCF を解くため時間がかかります (atom_cache_jl_*.jls に保存)...")
+    println("初回はこの元素の SCF を解くため時間がかかります (atom_cache/*.jls に保存)...")
     o = edge_mode ?
         compute_edge(z, tag, e0; settings=settings, rel_continuum=rel, dirac_scf=dscf,
                      exchange=xc, final_state=fs, transverse=trans,

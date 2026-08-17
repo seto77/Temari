@@ -85,7 +85,7 @@ core-hole イオン (内殻に空孔を開けて解き直したイオン) — �
 ```text
 Z=26 K @ 200.0 keV   出口: F(s) (EDX)   処方: DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4-DSCF
 求積: QUICK (参考値)   スレッド: 4
-初回はこの元素の SCF を解くため時間がかかります (atom_cache_jl_*.jls に保存)...
+初回はこの元素の SCF を解くため時間がかかります (atom_cache/*.jls に保存)...
   eps 32/32
 
 完了 (4 s)   E_bound = -7083.6 eV (小成分ノルム比 0.0088)

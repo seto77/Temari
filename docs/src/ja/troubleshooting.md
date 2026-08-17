@@ -320,7 +320,7 @@ julia -e 'include("src/ionization.jl"); exit(refcheck() < 1e-5 ? 0 : 1)'
 ## 元素の初回計算が遅い { #the-first-calculation-for-an-element-is-slow }
 
 **症状**。`julia -t auto src/ionization.jl 79 L3 300` が
-`初回はこの元素の SCF を解くため時間がかかります (atom_cache_jl_*.jls に保存)...`
+`初回はこの元素の SCF を解くため時間がかかります (atom_cache/*.jls に保存)...`
 を印字したあと、長いあいだ止まって見えます。
 
 **何が起きているのか**。中性原子と、そのチャネルの緩和 core-hole イオン (内殻空孔を

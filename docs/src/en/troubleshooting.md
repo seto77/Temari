@@ -332,7 +332,7 @@ julia -e 'include("src/ionization.jl"); exit(refcheck() < 1e-5 ? 0 : 1)'
 ## The first calculation for an element is slow
 
 **Symptom.** `julia -t auto src/ionization.jl 79 L3 300` sits for a long time
-after printing `初回はこの元素の SCF を解くため時間がかかります (atom_cache_jl_*.jls
+after printing `初回はこの元素の SCF を解くため時間がかかります (atom_cache/*.jls
 に保存)...` ("the first run for this element solves the SCF and takes time;
 saved to the cache").
 

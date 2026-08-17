@@ -87,7 +87,7 @@ Output:
 ```text
 Z=26 K @ 200.0 keV   出口: F(s) (EDX)   処方: DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4-DSCF
 求積: QUICK (参考値)   スレッド: 4
-初回はこの元素の SCF を解くため時間がかかります (atom_cache_jl_*.jls に保存)...
+初回はこの元素の SCF を解くため時間がかかります (atom_cache/*.jls に保存)...
   eps 32/32
 
 完了 (4 s)   E_bound = -7083.6 eV (小成分ノルム比 0.0088)
@@ -111,7 +111,7 @@ reproduced verbatim above rather than rewritten. Line by line it reads:
 ```text
 Z=26 K @ 200.0 keV   exit: F(s) (EDX)   prescription: DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4-DSCF
 quadrature: QUICK (indicative)   threads: 4
-The first run for this element solves its SCF and takes a while (cached in atom_cache_jl_*.jls)...
+The first run for this element solves its SCF and takes a while (cached in atom_cache/*.jls)...
   eps 32/32
 
 done (4 s)   E_bound = -7083.6 eV (small-component norm fraction 0.0088)

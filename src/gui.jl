@@ -40,9 +40,9 @@ v0 の「同期実行・進捗なし・中止なし・ブラウザ側タイム�
 - E0 掃引・複数チャネル重ね描きは無し (1 ジョブ = 1 チャネル 1 E0)
 - エンジン stdout は子プロセス側でバッファされるため、log_tail の更新が
   数 KB 単位で遅れることがある (進捗の正確なストリーミングではない)
-- 初回の元素はエンジンが SCF を解くため時間がかかる (atom_cache_jl_*.jls に
-  保存され 2 回目以降は速い)。⚠ 260818Cl 訂正: 置き場は 260807Cl に**リポジトリ直下から
-  `<cwd>/atom_cache/atom_cache_*.jls` へ移った** (l5_channel.jl の CACHE_DIR)。
+- 初回の元素はエンジンが SCF を解くため時間がかかる (`<cwd>/atom_cache/*.jls` に
+  保存され 2 回目以降は速い。260818Cl: 置き場は 260807Cl にリポジトリ直下から
+  このサブディレクトリへ移った — l5_channel.jl の CACHE_DIR)。
   パスは cwd 相対のままなので、サブプロセスの cwd をリポジトリ直下に固定して
   既存キャッシュを共有する、という設計は変わらない
 
@@ -70,7 +70,7 @@ using Dates
 # 第 1 章  定数と共有状態
 # ====================================================================
 
-const REPO_ROOT   = dirname(@__DIR__)                       # atom_cache_jl_*.jls の置き場
+const REPO_ROOT   = dirname(@__DIR__)                       # atom_cache/ の置き場
 const ENGINE_PATH = joinpath(@__DIR__, "ionization.jl")
 const JULIA_EXE   = joinpath(Sys.BINDIR, Base.julia_exename())
 const ENGINE_THREADS    = 4                                  # 掟: -t auto にしない
@@ -320,7 +320,7 @@ function handle_compute(q::Dict{String,String})
         rel && push!(eargs, "--rel")
         append!(eargs, ["--json", tmpjson])
         cmd = Cmd(`$(JULIA_EXE) --startup-file=no -t $(ENGINE_THREADS) $(ENGINE_PATH) $(eargs)`;
-                  dir=REPO_ROOT)     # cwd = リポ直下 (atom_cache_jl_*.jls を共有)
+                  dir=REPO_ROOT)     # cwd = リポ直下 (atom_cache/ を共有)
 
         logio = open(logfile, "w")
         proc = try
@@ -647,8 +647,8 @@ footer p { color: var(--muted); font-size: 12px; }
   <section class="card">
     <form id="form">
       <div class="fields">
-        <label>Z (原子番号 1–99)
-          <input id="z" type="number" min="1" max="99" step="1" value="26" required>
+        <label>Z (原子番号 1–86)
+          <input id="z" type="number" min="1" max="86" step="1" value="26" required>
         </label>
         <label>チャネル
           <select id="channel">
@@ -663,7 +663,7 @@ footer p { color: var(--muted); font-size: 12px; }
           <select id="mode">
             <option value="quick" selected>quick (粗い・参考値)</option>
             <option value="prod">prod (本番)</option>
-            <option value="high">high (強化・v3 テーブル用)</option>
+            <option value="high">high (強化・出荷テーブル用)</option>
           </select>
         </label>
         <!-- 260809Cl: CLI 既定が v4 (κ 分解 Dirac) になったので文言を書き換えた。
@@ -682,7 +682,7 @@ footer p { color: var(--muted); font-size: 12px; }
       </div>
       <pre id="runlog" class="hidden"></pre>
       <p class="note">初めての元素はエンジンが SCF を解くため時間がかかります
-        (atom_cache_jl_*.jls に保存され 2 回目以降は速い)。
+        (atom_cache/*.jls に保存され 2 回目以降は速い)。
         L1–L3/M1–M5 は Bote 表と原子配置に該当副殻がある元素のみ。E0 は吸収端より上。
         同時 1 ジョブ (実行中の追加要求は 423)。進捗はログ末尾の 1 秒ポーリング表示、
         中止ボタンでエンジンを kill します。ページ再読み込みでジョブ表示は失われます。</p>
