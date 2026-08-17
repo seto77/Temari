@@ -51,9 +51,11 @@ dt=GRID_DT/16, numerics=:dirac_true_midpoint_v1)` を直接呼び、未収束な
 
 ## provenance と決定論
 
-- **JSON 本体は決定論的** (同じソース・同じ処理系なら byte 同一)。時刻・所要秒・
-  ホスト名などの揮発情報は **副ファイル `runlog/SF_Zxxx.run.json`** に分離する
-  (X14 の byte 同一検証を可能にするため。codex 指摘)
+- **JSON 本体は揮発情報を持たない** (時刻・所要秒・ホスト名は **副ファイル
+  `runlog/SF_Zxxx.run.json`** に分離。直列化は決定論的)。⚠ ただし **SCF はプロセス間で
+  散発的に別の停止反復に落ちる** (2026-08-16 実測: 同じ生成器の 2 走で 85 元素中 6 元素が
+  停止許容内で違った) ので、**表本体の byte 同一は保証ではなく観測**である。公開 archive の
+  バイトと SHA-256 が正本。QC は tight (τ/10) 参照との差で停止誤差をゲートする (F8b/F8d)
 - `generator_commit` = 純粋な 40 桁 SHA / `source_dirty` = src/ の汚れの有無 (別欄) /
   `generator_source_sha256` = **include 閉包全体** (gen_factors.jl + ionization.jl が
   include する全ファイル + Project.toml) の SHA-256。QC は 86 ファイルで一意である
@@ -292,7 +294,7 @@ runlog_filename(z::Int) = @sprintf("SF_Z%03d.run.json", z)
 const SHIP_S_SHA256 = "1476113c622ccb9e62d4b56973277b7e550fef44357cf42d7923a9dde84f32fb"
 
 """1 元素を生成して JSON を書く。ゲートに落ちたら `GateFailure` を投げて**書かない**。
-戻り値 = 書いたパス。JSON 本体は決定論的、揮発情報は `runlog/` の副ファイルへ。"""
+戻り値 = 書いたパス。JSON 本体は揮発情報を持たない (揮発情報は `runlog/` の副ファイルへ)。"""
 function generate_element(z::Int, outdir::String; recipe::FactorsRecipe=FactorsRecipe(),
                           verbose::Bool=true, allow_dirty::Bool=false)
     z in FACTORS_Z_RANGE || error("Z=$z は収録範囲 $(FACTORS_Z_RANGE) の外")
@@ -456,7 +458,7 @@ function generate_element(z::Int, outdir::String; recipe::FactorsRecipe=FactorsR
             "f_e is the first-Born (Mott-Bethe) NON-relativistic electron scattering factor; the incident-electron gamma is NOT included (same convention as Peng / Doyle-Turner). Multiply by gamma downstream.",
             "f_x(0) = Z exactly by construction (X4 is a wiring check, not a physics check); the pre-normalization electron count is n_electrons_raw (X3).",
             "Neutral atoms only (v1). Ions are not derivable from these tables.",
-            "This file is deterministic under the tested condition (byte-identical on regeneration with the same source fingerprint and Julia version, on the same platform, in a fresh single-threaded process); volatile run information lives in runlog/SF_Zxxx.run.json"])
+            "Serialization is deterministic and no volatile run information is stored here (timings/host live in runlog/SF_Zxxx.run.json). Exact table-byte regeneration is NOT guaranteed: the SCF can stop at a different iterate between processes (observed sporadically; differences stay within the stopping tolerance and are gated by QC F8b/F8d against tight references). The released archive bytes and their SHA-256 are canonical; see MANIFEST.md."])
     mkpath(outdir)
     mkpath(joinpath(outdir, "runlog"))
     path = joinpath(outdir, factors_filename(z))
