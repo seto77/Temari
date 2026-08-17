@@ -72,7 +72,7 @@ negative mutant showing that the check detects it.
   theorem. Concretely: the radial grid dt/16 was certified element by element
   (density L¹ bound, worst 0.58 × B_grid); the SCF stopping error of every
   shipped solve was measured against a τ/10 reference (worst 0.39 × B_scf for
-  f_x, 0.67 × of the f_e allowance), with an assumed 0.10 allowance for the
+  f_x, 0.59 × of the f_e allowance), with an assumed 0.10 allowance for the
   residual of that reference (τ/10 sufficiency was verified at τ/100 on the light
   elements where τ/100 converges); the representation error was measured on
   sealed midpoints for all 86 elements; and the sensitivity to the tested
