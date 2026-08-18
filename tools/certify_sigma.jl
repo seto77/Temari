@@ -123,6 +123,27 @@ function cert_window_oracle(ch, r_core, k_i, T0, settings, betas, transverse,
     return [pref * sum(we .* V[:, ib]) for ib in 1:nb]
 end
 
+"""始状態の指紋 — **SCF の停止点差とホストのビット化けを分ける**ための鍵 (260819Cl)。
+
+codex の指摘 (2026-08-18): 同じ行を 2 回計算して答えが違ったとき、原因は
+(a) このホストのビット化け (`docs/host_stability_2026-08-19.md`) か
+(b) 既知の「SCF がプロセス間で散発的に別反復で止まる」現象か、区別が付かない。
+
+束縛軌道 `u_b` と動径格子 `r_b` を丸ごとハッシュしておけば分けられる:
+
+| state_sha | 認証値 | 読み |
+|---|---|---|
+| 一致 | 一致 | 正常 |
+| **一致** | **不一致** | ⚠⚠ **始状態は同じなのに答えが違う** = 求積より下流の非決定性かビット化け |
+| 不一致 | 不一致 | SCF の停止点が違う (既知の現象。差が停止許容内かを見る) |
+"""
+function state_hash(ch)
+    io = IOBuffer()
+    write(io, ch.u_b)
+    write(io, ch.r_b)
+    return bytes2hex(sha256(take!(io)))[1:16]
+end
+
 "1 行の認証。戻り値は JSONL に書く Dict"
 function certify_row(z::Int, tag::String, e0::Float64, settings)
     t0 = time()
@@ -190,7 +211,8 @@ function certify_row(z::Int, tag::String, e0::Float64, settings)
                             "worst_window" => worst_win, "worst_window_at" => worst_at,
                             "worst_window_per_beta" => per_beta,
                             "worst_angular" => worst_ang, "worst_angular_at" => ang_at,
-                            "elapsed_s" => time() - t0, "cert_fp" => CERT_FP)
+                            "elapsed_s" => time() - t0, "cert_fp" => CERT_FP,
+                            "state_sha" => state_hash(ch))
 end
 
 """1 行を**1 行の JSON** で書く。
@@ -204,7 +226,7 @@ function jsonl_line(d::Dict{String,Any})
     for k in ("z", "tag", "e0_keV", "eth_keV", "u", "eps_max_eV", "n_windows",
               "n_out_of_domain", "worst_window", "worst_window_at",
               "worst_window_per_beta", "worst_angular", "worst_angular_at",
-              "elapsed_s", "cert_fp", "error")
+              "elapsed_s", "cert_fp", "state_sha", "error")
         haskey(d, k) || continue
         first || print(io, ",")
         first = false
@@ -297,26 +319,38 @@ end
 function report_duplicates(dups)
     isempty(dups) && return
     n = length(dups)
-    exact = count(d -> d[2] == d[3] && d[4] == d[5], dups)
-    rels = Float64[]
-    for (_, w1, w2, a1, a2) in dups
-        push!(rels, max(reldiff(w1, w2), reldiff(a1, a2)))
-    end
+    exact = count(d -> d.w1 == d.w2 && d.a1 == d.a2, dups)
+    rels = [max(reldiff(d.w1, d.w2), reldiff(d.a1, d.a2)) for d in dups]
     srt = sort(rels)
     @printf("\n重複した行の突き合わせ: %d 対\n", n)
     @printf("  **ビット一致 %d / %d (%.1f %%)**\n", exact, n, 100.0 * exact / n)
+    # 不一致 0 のときの汚染率の片側 95 % 上限 (「3 の法則」)
+    exact == n && @printf("  ⇒ 不一致 0。汚染率の片側 95 %% 上限は約 %.2f %% (3/N)\n",
+                          300.0 / n)
     if exact < n
         @printf("  一致しない対の相対差: 中央値 %.3e / 最悪 %.3e\n",
                 srt[max(1, cld(length(srt), 2))], srt[end])
+        # ★ 始状態が同じなのに答えが違う対 = SCF では説明できない
+        # ⚠ 片方に state_sha が無い対は「不明」に置く — 無いものを「相違」に数えない
+        known = [d for d in dups if d.s1 != "(無し)" && d.s2 != "(無し)"]
+        n_unknown = n - length(known)
+        same_state = [d for d in known if d.s1 == d.s2 && !(d.w1 == d.w2 && d.a1 == d.a2)]
+        diff_state = [d for d in known if d.s1 != d.s2]
+        @printf("  内訳: 始状態が違う %d 対 / **始状態は同じなのに答えが違う %d 対**",
+                length(diff_state), length(same_state))
+        n_unknown > 0 ? @printf(" / 始状態が記録されていない %d 対\n", n_unknown) :
+                        print("\n")
+        if !isempty(same_state)
+            println("  ⚠⚠ **後者は SCF の停止点差では説明できない** — 求積より下流の")
+            println("     非決定性か、ホストのビット化け (`docs/host_stability_2026-08-19.md`)")
+        end
         ord = sortperm(rels; rev=true)
         println("  差の大きい対:")
         for i in first(ord, min(6, n))
-            k, w1, w2, a1, a2 = dups[i]
-            @printf("    %s  窓 %.6e vs %.6e   角度 %.6e vs %.6e\n", k, w1, w2, a1, a2)
+            d = dups[i]
+            @printf("    %s  窓 %.6e vs %.6e   角度 %.6e vs %.6e   始状態 %s\n",
+                    d.key, d.w1, d.w2, d.a1, d.a2, d.s1 == d.s2 ? "同一" : "相違")
         end
-        println("  ⚠⚠ **一致しない = 同じ計算が同じ答えを出していない**。")
-        println("     `docs/host_stability_2026-08-19.md` の仮説 (ホストのビット化け) と")
-        println("     既知の SCF 停止点差のどちらかを切り分けること")
     end
 end
 
@@ -337,7 +371,8 @@ function summarize(paths::Vector{String})
     n_bad = 0        # ⚠ 沈黙する catch を作らない — 読めなかった行を数える
     n_err = 0
     bykey = Dict{String,Any}()
-    dups = Tuple{String,Float64,Float64,Float64,Float64}[]   # 鍵, w1, w2, a1, a2
+    dups = NamedTuple{(:key, :w1, :w2, :a1, :a2, :s1, :s2),
+                      Tuple{String,Float64,Float64,Float64,Float64,String,String}}[]
     fps = Dict{String,Int}()
     for path in paths
         isfile(path) || (@printf("⚠ 無い: %s\n", path); continue)
@@ -354,8 +389,12 @@ function summarize(paths::Vector{String})
             k = rowkey(Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"]))
             if haskey(bykey, k)
                 p = bykey[k]
-                push!(dups, (k, Float64(p["worst_window"]), Float64(d["worst_window"]),
-                             Float64(p["worst_angular"]), Float64(d["worst_angular"])))
+                sh(x) = haskey(x, "state_sha") ? String(x["state_sha"]) : "(無し)"
+                push!(dups, (key=k, w1=Float64(p["worst_window"]),
+                             w2=Float64(d["worst_window"]),
+                             a1=Float64(p["worst_angular"]),
+                             a2=Float64(d["worst_angular"]),
+                             s1=sh(p), s2=sh(d)))
                 # ⚠ 統計に載せるのは**今の版の行**。古い版と重複しているときは差し替える
                 pfp = haskey(p, "cert_fp") ? String(p["cert_fp"]) : ""
                 if pfp != CERT_FP && fp == CERT_FP
@@ -415,6 +454,40 @@ function summarize(paths::Vector{String})
     return 0
 end
 
+"""★ 260819Cl: **同じ行をもう一度計算して突き合わせる**ための系統抽出 (codex の指摘)。
+
+## なぜ要るか
+
+このホストは直近 1 か月で 10 回 BSOD しており、メモリ破損が疑われる
+(`docs/host_stability_2026-08-19.md`)。**散発的なビット化けが起きているなら、
+14,796 行の認証結果そのものが汚染されうる**。
+
+⚠ codex の指摘: 「各行で 16 窓 × 8 β の**最大値**を取るから単発の化けは効きにくい」は
+**安全性の根拠にはならない** — 化けは真の最大点そのもの・共通の SCF 状態・
+全体に掛かる係数・添字・比較・被検査値とオラクルの両方、のどれでも壊せる。
+
+⇒ **同じ入力をもう一度計算して突き合わせる**のが唯一の直接測定である。
+⚠ 標本の大きさで言えることが決まる: 不一致 0 のとき汚染率の片側 95 % 上限は
+**約 3/N** (N = 対の数)。50 対なら 5.8 %、500 対なら 0.6 %、1500 対なら 0.2 %。
+
+## 使い方
+
+    # 本走が終わってから (負荷を重ねない)
+    julia +1.11 --project=. -t 3 tools/certify_sigma.jl \\
+          ../cert_sigma_v1_audit.jsonl --audit 500
+    # 突き合わせ (重複として自動的に比較される)
+    julia +1.11 --project=. tools/certify_sigma.jl \\
+          ../cert_sigma_v1_lane*.jsonl ../cert_sigma_v1_audit.jsonl --summary
+
+⚠ 抽出は**系統抽出** (全行を tag → z → E₀ の順に並べて等間隔に取る) なので、
+殻・Z・過電圧のどれにも偏らない。⚠ 無作為ではないので「無作為標本」と書かないこと。
+"""
+function audit_rows(rows::Vector{Tuple{Int,String,Float64}}, n::Int)
+    n >= length(rows) && return copy(rows)
+    step = length(rows) / n
+    return [rows[clamp(round(Int, (k - 0.5) * step) + 1, 1, length(rows))] for k in 1:n]
+end
+
 function main_certify(args)
     isempty(args) && (println("出力先 (.jsonl) を指定"); return 1)
     if "--summary" in args
@@ -426,10 +499,12 @@ function main_certify(args)
     limit = typemax(Int)
     lane_i, lane_n = 0, 1
     accept = Set{String}([CERT_FP])
+    audit_n = 0
     i = 2
     while i <= length(args)
         args[i] == "--tags" && (tags = String.(split(args[i+1], ",")); i += 1)
         args[i] == "--limit" && (limit = parse(Int, args[i+1]); i += 1)
+        args[i] == "--audit" && (audit_n = parse(Int, args[i+1]); i += 1)
         # ⚠ 作者が「その変更は数値に無関係」と判断したときだけ、古い指紋を受け入れる
         args[i] == "--accept-fp" && (push!(accept, args[i+1]); i += 1)
         if args[i] == "--lane"
@@ -455,6 +530,15 @@ function main_certify(args)
     sibs = sibling_lane_files(path)
     done, stale = load_done(sibs, accept)
     todo = [r for r in rows if !(rowkey(r...) in done)]
+    if audit_n > 0
+        # ⚠ 監査は**済み判定を無視する** — 済んだ行をもう一度計算するのが目的
+        todo = audit_rows(rows, audit_n)
+        # 監査ファイル自身に既にある行だけは飛ばす (再開)
+        adone, _ = load_done([path], accept)
+        todo = [r for r in todo if !(rowkey(r...) in adone)]
+        @printf("★ 監査モード: %d 行を系統抽出 (残り %d)。**同じ行を引き直して突き合わせる**\n",
+                audit_n, length(todo))
+    end
     length(todo) > limit && (todo = todo[1:limit])
     @printf("済み判定に読んだファイル: %d 本   認証の指紋 %s\n", length(sibs), CERT_FP)
     stale > 0 && @printf("⚠⚠ **指紋が合わず捨てた行: %d** (別の版で計算されている。引き直す)\n",
