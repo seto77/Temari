@@ -191,8 +191,14 @@ Recorded because they look plausible and cost time to disprove:
 ## What is still on the table
 
 - **Sharing the radial-integral table across E₀ rows.** $R$ does not depend on
-  E₀, and 82 % of it is currently recomputed. Bounded at 3–5×, plausibly
-  bit-identical. This is the largest remaining structural win.
+  E₀, yet 82 % of it is recomputed for every one of a channel's ~30 E₀ rows.
+  That is the largest remaining structural win, and it is **unmeasured**: the
+  audit estimates 1.15–1.25× end to end for the staged version (cache the
+  E₀-independent first-segment ε nodes, ~30 MB) and 2.0–2.5× for the full one
+  (transpose onto a master ε grid), against an Amdahl ceiling of about 5.6× if
+  the whole 82 % vanished at no cost. **Bit identity is not assumed**: the full
+  version changes the ε sampling and the unit of the row checkpoint, so it
+  belongs to a dataset generation, not to a refactor.
 - **Reusing the logarithmic radial grid.** The mesh is logarithmic in its inner
   region, so the distinct values of $x = qr$ collapse from about 6.2 M to about
   1.2 M — about 1.9× end to end. **Not bit-identical** (it changes the q grid),

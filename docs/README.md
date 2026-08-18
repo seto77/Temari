@@ -59,7 +59,7 @@ rather than in a wiki:
 | `frozen_core_and_transverse_2026-08-07.md` / `mott_elastic_2026-08-07.md` / `exchange_diagnosis_2026-08-07.md` | The frozen core and transverse interaction, the Mott elastic exit, and the exchange diagnosis. Japanese. |
 | `scattering_factor_dataset_plan_2026-08-10.md` | **Plan, not a record**: what the f_x/f_e dataset needs before it can be published to the same standard as F — the prescription decision (Dirac + KLI), the X1–X15 verification suite, and the checks that must *not* be used as gates. Japanese. |
 | `handoff_scattering_factor_2026-08-11.md` | Handover for the f_x/f_e track: current position, the next tasks in order, and the traps already stepped in. The plan above is authoritative; this is the entry point. Japanese. |
-| `next_phase_2026-08-*.md`, `next_chat_2026-08-*.md` | Handover: current state, settled decisions, remaining work in priority order. **The highest-numbered `next_phase` is current** (`2026-08-13`); the `next_chat` files are the day-by-day handovers of the scattering-factor track. Japanese. |
+| `next_phase_2026-08-*.md`, `next_chat_2026-08-*.md` | Handover: current state, settled decisions, remaining work in priority order. **The highest-numbered `next_phase` is current** (`2026-08-18`, which sets the direction for the release after this one; `2026-08-13` remains authoritative for what is still open in the F(s, E₀) track). The `next_chat` files are the day-by-day handovers of the scattering-factor track. Japanese. |
 
 The published statement of the working rules is `CONTRIBUTING.md` (the
 verification a change is expected to show) together with the Reproducibility and
