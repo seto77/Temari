@@ -187,10 +187,35 @@ end
 "既に済んだ行の鍵 (再開用)"
 rowkey(z, tag, e0) = @sprintf("%d|%s|%.6f", z, tag, e0)
 
+"""`<接頭辞>_laneN.jsonl` の兄弟をすべて挙げる (260819Cl)。
+
+**レーン数を変えても計算をやり直さないため**の仕掛け。`--lane i/n` の分割は n に依存
+するので、n を変えると同じ行が別のレーンに移る。自分のファイルしか見ないと、
+そこで**既に認証済みの行を全部引き直す**ことになる。
+負荷の調整でレーン数を動かすのは想定内なので、済み判定は接頭辞全体で行う。"""
+function sibling_lane_files(path::String)
+    ap = abspath(path)
+    dir = dirname(ap)
+    m = match(r"^(.*)_lane\d+\.jsonl$", basename(ap))
+    m === nothing && return [ap]
+    pre = m[1] * "_lane"
+    isdir(dir) || return [ap]
+    return [joinpath(dir, f) for f in readdir(dir)
+            if startswith(f, pre) && endswith(f, ".jsonl")]
+end
+
 """既に済んだ行の鍵を集める (再開用)。
 
 ⚠ 260819Cl: **例外で落ちた行 (`error`) は「済」に数えない** — 数えると、GC クラッシュ
 由来の一過性の失敗が**黙って認証済みの扱いになる**。再実行のたびに引き直させる。"""
+function load_done(paths::Vector{String})
+    done = Set{String}()
+    for p in paths
+        union!(done, load_done(p))
+    end
+    return done
+end
+
 function load_done(path::String)
     done = Set{String}()
     isfile(path) || return done
@@ -306,9 +331,11 @@ function main_certify(args)
             push!(rows, (z, tag, e0))
         end
     end
-    done = load_done(path)
+    sibs = sibling_lane_files(path)
+    done = load_done(sibs)
     todo = [r for r in rows if !(rowkey(r...) in done)]
     length(todo) > limit && (todo = todo[1:limit])
+    @printf("済み判定に読んだファイル: %d 本\n", length(sibs))
     @printf("認証 (lane %d/%d): 全 %d 行 / 済 %d / 今回 %d   スレッド %d   窓 %d 種 × β %d 本\n",
             lane_i, lane_n, length(rows), length(done), length(todo), Threads.nthreads(),
             length(CERT_STARTS_EV) * length(CERT_WIDTHS_EV), length(CERT_BETAS_MRAD))
