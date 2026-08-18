@@ -58,6 +58,11 @@ HARTREE_EV = 27.211386245988
 C_LIGHT = 137.035999084
 DB = "refs/data/database/{}.hdf5"
 
+# 比を集計に入れる門 (260819Cl、codex の指摘を受けて明示化)
+# ⚠ 「数値が出た」と「比較できる」は別。**検算(1) が悪い条件の比を混ぜない**。
+CHECK_MAX = 3e-3      # |GOS 経由 − 直接求積|/直接求積 の上限
+CLAMP_MAX = 1e-3      # 面の外を clamp した点が σ に持つ重みの上限
+
 
 def kin_k(T_ha):
     return math.sqrt(2.0 * T_ha * (1.0 + T_ha / (2.0 * C_LIGHT**2)))
@@ -89,21 +94,34 @@ def leggauss(n):
 
 
 class Surface:
-    """log-log の双 1 次内挿。⚠ 範囲外は端で clamp し、**clamp した回数を数える**"""
+    """log-log の双 1 次内挿。範囲外は端で clamp する。
+
+    ## ⚠⚠ 260819Cl: clamp を**軸ごと・向きごと**に数え、`last_clamped` を残す
+
+    codex の指摘 (2026-08-18): 「108 元素すべてで数値が出ること」と「比較可能で
+    あること」は別。参照面の外を勝手に外挿した点で比を取ってはいけない。
+
+    ⚠ ただし**回数で判断しない** — このリポの規律 ([[count-vs-weight]]) どおり、
+    効くのは回数ではなく**その点が積分に持つ重み**である。回数はここで数え、
+    重みは `sigma_from_gos` 側で積む。
+    """
 
     def __init__(self, eps_eV, q_au, g):
         self.le = [math.log(e) for e in eps_eV]
         self.lq = [math.log(q) for q in q_au]
         self.g = g
         self.clamped = 0
+        self.n_eps_lo = self.n_eps_hi = self.n_q_lo = self.n_q_hi = 0
+        self.last_clamped = False
 
     def _idx(self, arr, v):
+        """(下端の添字, 内分比, clamp した向き) — 向きは -1 / 0 / +1"""
         if v <= arr[0]:
             self.clamped += 1
-            return 0, 0.0
+            return 0, 0.0, -1
         if v >= arr[-1]:
             self.clamped += 1
-            return len(arr) - 2, 1.0
+            return len(arr) - 2, 1.0, +1
         lo, hi = 0, len(arr) - 1
         while hi - lo > 1:
             m = (lo + hi) // 2
@@ -111,11 +129,20 @@ class Surface:
                 lo = m
             else:
                 hi = m
-        return lo, (v - arr[lo]) / (arr[hi] - arr[lo])
+        return lo, (v - arr[lo]) / (arr[hi] - arr[lo]), 0
 
     def __call__(self, eps_eV, q_au):
-        i, te = self._idx(self.le, math.log(eps_eV))
-        j, tq = self._idx(self.lq, math.log(q_au))
+        i, te, ce = self._idx(self.le, math.log(eps_eV))
+        j, tq, cq = self._idx(self.lq, math.log(q_au))
+        if ce < 0:
+            self.n_eps_lo += 1
+        elif ce > 0:
+            self.n_eps_hi += 1
+        if cq < 0:
+            self.n_q_lo += 1
+        elif cq > 0:
+            self.n_q_hi += 1
+        self.last_clamped = bool(ce or cq)
         v = 0.0
         for (di, wi) in ((0, 1 - te), (1, te)):
             for (dj, wj) in ((0, 1 - tq), (1, tq)):
@@ -131,6 +158,10 @@ def sigma_from_gos(surf, E_th_eV, T0_ha, beta_rad, d1_eV, d2_eV,
     """GOS 面から σ(β, [Δ₁,Δ₂]) [nm²] を組む。窓は**端相対**。
 
     ε 側は u = √ε の変数変換 (閾値端の √ 立ち上がりを吸収)。
+
+    戻り値 = (σ [nm²], **面の外を clamp した点が σ に持つ重みの割合**)。
+    ⚠ 2 つ目が本命の指標 — clamp の**回数**は誤読のもとで、実際に効くのは重み
+    ([[count-vs-weight]])。
     """
     k_i = kin_k(T0_ha)
     g2 = kin_gamma(T0_ha) ** 2
@@ -139,6 +170,7 @@ def sigma_from_gos(surf, E_th_eV, T0_ha, beta_rad, d1_eV, d2_eV,
     lo = math.sqrt(d1_eV)
     hi = math.sqrt(d2_eV)
     acc = 0.0
+    acc_clamped = 0.0
     for a, wa in zip(xu, wu):
         u = lo + (hi - lo) * a
         eps_eV = u * u
@@ -164,15 +196,22 @@ def sigma_from_gos(surf, E_th_eV, T0_ha, beta_rad, d1_eV, d2_eV,
         a = 4.0 * k_i * k_f / (dq * dq)
         x_hi = math.log1p(a * tb)
         inner = 0.0
+        inner_cl = 0.0
         for b, wb in zip(xt, wt):
             x = x_hi * b
             t = math.expm1(x) / a
             Q = math.sqrt(dq * dq + 4.0 * k_i * k_f * t)
             gos = surf(eps_eV, Q) * scale       # [1/Ha]
-            inner += x_hi * wb * gos
-        inner /= 4.0 * k_i * k_f
-        acc += we / HARTREE_EV * (k_f / k_i) / (2.0 * dE_ha) * inner
-    return 4.0 * g2 * BOHR_NM**2 * 4.0 * math.pi * acc
+            term = x_hi * wb * gos
+            inner += term
+            if surf.last_clamped:
+                inner_cl += term
+        pre = we / HARTREE_EV * (k_f / k_i) / (2.0 * dE_ha) / (4.0 * k_i * k_f)
+        acc += pre * inner
+        acc_clamped += pre * inner_cl
+    pref = 4.0 * g2 * BOHR_NM**2 * 4.0 * math.pi
+    frac = abs(acc_clamped) / abs(acc) if acc != 0.0 else 0.0
+    return pref * acc, frac
 
 
 def load_entries(path):
@@ -255,25 +294,28 @@ def compare_entry(h5py, ent, align):
         for ib, bm in enumerate(ent["betas_mrad"]):
             b = bm * 1e-3
             direct = svals[ib]
-            mine = sigma_from_gos(ours, E_th, T0, b, d1, d2)
+            mine, fr_mine = sigma_from_gos(ours, E_th, T0, b, d1, d2)
             if align == "abs":
                 # 先方も**我々の閾値**を基準に同じ絶対損失域を取る
                 zd1 = E_th + d1 - z_eth
                 zd2 = E_th + d2 - z_eth
-                theirs = sigma_from_gos(zsurf, z_eth, T0, b, max(zd1, 1e-6),
-                                        zd2, scale=z_scale)
+                theirs, fr_th = sigma_from_gos(zsurf, z_eth, T0, b, max(zd1, 1e-6),
+                                               zd2, scale=z_scale)
             else:
-                theirs = sigma_from_gos(zsurf, z_eth, T0, b, d1, d2, scale=z_scale)
+                theirs, fr_th = sigma_from_gos(zsurf, z_eth, T0, b, d1, d2,
+                                               scale=z_scale)
             if direct <= 0.0 or mine <= 0.0:
                 continue                        # 比の取れない条件は落とす (数える)
             recs.append(dict(elem=elem, tag=ent["tag"], z=int(ent["z"]),
                              edge=edge, window=wkey, beta=bm,
                              direct=direct, mine=mine, theirs=theirs,
                              check=abs(mine - direct) / direct,
-                             ratio=theirs / mine))
-    note = dict(norm_ok=norm_ok, clamped_ours=ours.clamped,
-                clamped_theirs=zsurf.clamped, E_th=E_th, z_eth=z_eth,
-                z_scale=z_scale)
+                             ratio=theirs / mine,
+                             clamp_ours=fr_mine, clamp_theirs=fr_th))
+    note = dict(norm_ok=norm_ok, E_th=E_th, z_eth=z_eth, z_scale=z_scale,
+                cl_ours=(ours.n_eps_lo, ours.n_eps_hi, ours.n_q_lo, ours.n_q_hi),
+                cl_theirs=(zsurf.n_eps_lo, zsurf.n_eps_hi,
+                           zsurf.n_q_lo, zsurf.n_q_hi))
     return recs, note
 
 
@@ -284,14 +326,16 @@ def print_detail(ent, recs, note):
     if not note["norm_ok"]:
         print("   ⚠⚠ 規格化補正が先方の occupancy_ratio と食い違う")
     print("   β [mrad]  窓 [eV]     直接求積        GOS 経由        検算(1)"
-          "      先方 σ          比 先方/我々")
+          "      先方 σ          比 先方/我々   clamp 重み(我/先)")
     for r in recs:
         print(f"   {r['beta']:8.0f}  {r['window']:>9}   {r['direct']:.6e}   "
               f"{r['mine']:.6e}   {r['check']:.2e}   {r['theirs']:.6e}   "
-              f"{r['ratio']:.4f}")
-    if note["clamped_ours"] or note["clamped_theirs"]:
-        print(f"   ⚠ 面の範囲外で clamp した回数: 我々 {note['clamped_ours']} / "
-              f"先方 {note['clamped_theirs']} — **多いなら格子を広げること**")
+              f"{r['ratio']:.4f}   {r['clamp_ours']:.1e}/{r['clamp_theirs']:.1e}")
+    print(f"   面の外を clamp した回数: 我々 ε下 {note['cl_ours'][0]} ε上 {note['cl_ours'][1]} "
+          f"q下 {note['cl_ours'][2]} q上 {note['cl_ours'][3]} / "
+          f"先方 ε下 {note['cl_theirs'][0]} ε上 {note['cl_theirs'][1]} "
+          f"q下 {note['cl_theirs'][2]} q上 {note['cl_theirs'][3]}")
+    print("   ⚠ 判断は回数ではなく **clamp 重み** (σ のうち外挿点から来た割合) で行う")
     print()
 
 
@@ -317,7 +361,29 @@ def summarize(recs, skipped, n_bad, n_err, norm_bad, align):
     print(f"\n検算(1) |GOS 経由 − 直接求積|/直接求積:")
     print(f"  中央値 {pct(chk,0.5):.2e} / p90 {pct(chk,0.9):.2e} / "
           f"p99 {pct(chk,0.99):.2e} / **最悪 {chk[-1]:.2e}**")
-    print("  ⚠ これが大きいうちは比に意味が無い")
+
+    cl_o = sorted(r["clamp_ours"] for r in recs)
+    cl_t = sorted(r["clamp_theirs"] for r in recs)
+    print(f"\n面の外を clamp した点が σ に持つ重み (回数ではなく重み):")
+    print(f"  我々: 中央値 {pct(cl_o,0.5):.2e} / **最悪 {cl_o[-1]:.2e}**")
+    print(f"  先方: 中央値 {pct(cl_t,0.5):.2e} / **最悪 {cl_t[-1]:.2e}**")
+
+    # ★ 260819Cl: **合格した条件だけで比を集計する** (codex の指摘)。
+    #    「検算が悪い条件の比」を混ぜると、求積の失敗を物理の食い違いとして読んでしまう。
+    good = [r for r in recs
+            if r["check"] <= CHECK_MAX and max(r["clamp_ours"], r["clamp_theirs"]) <= CLAMP_MAX]
+    bad = [r for r in recs if r not in good]
+    print(f"\n比の集計に入れる条件: {len(good)} / {len(recs)} "
+          f"(門 = 検算 ≤ {CHECK_MAX:.0e} かつ clamp 重み ≤ {CLAMP_MAX:.0e})")
+    if bad:
+        print(f"  ⚠ 外した {len(bad)} 件の内訳 (悪い順に 6 件):")
+        for r in sorted(bad, key=lambda r: -r["check"])[:6]:
+            print(f"     {r['elem']:>2} {r['tag']:<3} 窓 {r['window']:>9} β {r['beta']:5.0f}  "
+                  f"検算 {r['check']:.2e}  clamp {r['clamp_ours']:.1e}/{r['clamp_theirs']:.1e}")
+    if not good:
+        print("  ⚠⚠ **合格が 0 件。比を語ってはいけない**")
+        return
+    recs = good
 
     rat = sorted(r["ratio"] for r in recs)
     print(f"\nσ 比 (先方/我々):")
@@ -332,6 +398,14 @@ def summarize(recs, skipped, n_bad, n_err, norm_bad, align):
         if not sub:
             continue
         print(f"  {tag:<4} {len(sub):>6} {sub[0]:>8.4f} {pct(sub,0.5):>8.4f} "
+              f"{sub[-1]:>8.4f}")
+
+    # β ごと — 部分角の契約なので、β 依存が残るかは要点
+    print(f"\nβ ごとの σ 比:")
+    print(f"  {'β[mrad]':>8} {'条件数':>6} {'最小':>8} {'中央値':>8} {'最大':>8}")
+    for bm in sorted({r["beta"] for r in recs}):
+        sub = sorted(r["ratio"] for r in recs if r["beta"] == bm)
+        print(f"  {bm:>8.0f} {len(sub):>6} {sub[0]:>8.4f} {pct(sub,0.5):>8.4f} "
               f"{sub[-1]:>8.4f}")
 
     # 1 から最も離れた条件

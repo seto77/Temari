@@ -66,6 +66,19 @@ end
 const ZBETAS_MRAD = [10.0, 30.0, 100.0]
 const ZWINDOWS_EV = [(0.0, 50.0), (0.0, 100.0), (0.0, 200.0), (50.0, 150.0)]
 
+const ZEPS_LO_EV = 1e-5
+const ZEPS_HI_EV = 400.0
+const ZEPS_N = 192
+const ZQ_N = 96
+
+"""面の格子の指紋。**格子を変えたら古い行を使い回さない**ための鍵 (260819Cl)。
+
+⚠ `certify_sigma.jl` の `CERT_FP` と同じ趣旨 — 再開の済み判定が版を跨ぐと、
+古い格子で作った面が黙って新しい集計に混ざる。"""
+zgrid_id() = @sprintf("e%.3g-%.3g-%d_q%d_b%d_w%d", ZEPS_LO_EV, ZEPS_HI_EV, ZEPS_N,
+                      ZQ_N, length(ZBETAS_MRAD), length(ZWINDOWS_EV))
+const ZGRID_ID = zgrid_id()
+
 """1 チャネル分の記録を作る (JSON でも JSONL でも中身は同じ)。"""
 function dump_entry(elem::String, z::Int, tag::String, zedge::String, e0::Float64;
                     verbose::Bool=true)
@@ -77,15 +90,25 @@ function dump_entry(elem::String, z::Int, tag::String, zedge::String, e0::Float6
     r_core = clamp(ch.r_b[idx] * 1.15, 0.4, 20.0)
 
     # --- 我々の GOS 面 (ε は窓を張れる密度の対数格子、q も対数) -------
-    eps_lo = 0.2 / HARTREE_EV
-    eps_hi = 400.0 / HARTREE_EV            # 窓の上端 200 eV を余裕をもって覆う
-    epsv = exp.(range(log(eps_lo), log(eps_hi), length=96))
+    # ★ 260819Cl: 下端を 0.2 eV → **1e-5 eV** へ下げ、点数を 96 → 192 にした。
+    #
+    # ⚠⚠ 理由は測定である。Python 側で σ を組むとき、窓 [0, Δ₂] の √ε GL ノードは
+    # 最小 ~1e-4 eV まで落ちるので、下端 0.2 eV では**面の外を clamp していた**。
+    # clamp は GOS を一定に留めるので**過大評価**になり、回数ではなく重みで測ると
+    # σ の **4.8e-03** ([0,50] eV 窓、Fe K) を外挿点が占めていた。
+    # 参照 (Zhang) 側は下端 0.01 eV なので同じ条件で 1.2e-04 しか無く、
+    # **片側だけに乗るバイアス**として比に約 0.5 % 効いていた。
+    # 点数を倍にしたのは、対数範囲が 3.3 → 7.6 桁に広がる分の解像度を保つため
+    # (25 点/桁。従来は 29 点/桁)。
+    eps_lo = ZEPS_LO_EV / HARTREE_EV
+    eps_hi = ZEPS_HI_EV / HARTREE_EV       # 窓の上端 200 eV を余裕をもって覆う
+    epsv = exp.(range(log(eps_lo), log(eps_hi), length=ZEPS_N))
     # Q の範囲: Q_min = k_i−k_f (ε 最小) から β=100 mrad の Q まで余裕をみて
     kf_hi = kin_k(max(T0 - ch.E_th - eps_lo, 0.0))
     kf_lo = kin_k(max(T0 - ch.E_th - eps_hi, 0.0))
     q_lo = 0.5 * (k_i - kf_hi)
     q_hi = 2.0 * sqrt((k_i - kf_lo)^2 + 4.0 * k_i * kf_lo * sin(0.1 / 2)^2)
-    qgrid = exp.(range(log(q_lo), log(q_hi), length=96))
+    qgrid = exp.(range(log(q_lo), log(q_hi), length=ZQ_N))
     verbose && @printf("  GOS 面: ε %.2f..%.1f eV × q %.3f..%.3f a.u.\n",
             eps_lo * HARTREE_EV, eps_hi * HARTREE_EV, q_lo, q_hi)
     gos, _ = gos_surface(ch.ion_pot, ch.r_b, ch.u_b, ch.E_th, z, epsv, qgrid,
@@ -109,6 +132,7 @@ function dump_entry(elem::String, z::Int, tag::String, zedge::String, e0::Float6
 
     return Dict{String,Any}(
         "element" => elem, "z" => z, "tag" => tag, "zhang_edge" => zedge,
+        "grid_id" => ZGRID_ID,
         "e0_keV" => e0, "E_th_eV" => ch.E_th * HARTREE_EV,
         "T0_Ha" => T0, "k_i" => k_i,
         "shell_nl" => [ch.n_b, ch.l_b], "occupancy" => ch.occ_init,
@@ -172,6 +196,7 @@ function dump_jsonl(path::String; limit::Int=typemax(Int))
     spec = zspec_all()
     done = Set{String}()
     n_err = 0
+    n_stale = 0
     if isfile(path)
         for line in eachline(path)
             isempty(strip(line)) && continue
@@ -179,6 +204,11 @@ function dump_jsonl(path::String; limit::Int=typemax(Int))
             (haskey(d, "z") && haskey(d, "tag")) || continue
             haskey(d, "error") && (n_err += 1; continue)
             haskey(d, "gos_per_Ha") || continue
+            # ⚠ 格子が違う行は済みに数えない (古い面を黙って使い回さない)
+            if !(haskey(d, "grid_id") && String(d["grid_id"]) == ZGRID_ID)
+                n_stale += 1
+                continue
+            end
             push!(done, string(Int(d["z"]), "|", String(d["tag"])))
         end
     end
@@ -187,6 +217,9 @@ function dump_jsonl(path::String; limit::Int=typemax(Int))
     @printf("外部ゲート用の面: 全 %d チャネル / 済 %d / 今回 %d   スレッド %d\n",
             length(spec), length(done), length(todo), Threads.nthreads())
     n_err > 0 && @printf("⚠ 前回 例外で落ちた行: %d (引き直す)\n", n_err)
+    n_stale > 0 && @printf("⚠⚠ **格子が合わず捨てた行: %d** (別の格子で作られている)\n",
+                           n_stale)
+    @printf("面の格子: %s\n", ZGRID_ID)
     t_start = time()
     open(path, "a") do io
         for (k, s) in enumerate(todo)
