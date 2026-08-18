@@ -56,7 +56,8 @@
 
 ## 2. 運用 — レーン分割と、その罠
 
-`tools/run_cert_fleet.sh` が **4 レーン × 3 スレッド**で回す
+`tools/run_cert_fleet.sh` が回す。⚠ **実行時の構成は §4 の表を見ること** — 既定値は
+変遷しており、本走は **16 レーン × 1 スレッド、30 s 間隔**である
 (⚠ 8 × 4 = 論理 32 本を使い切る構成でホストが BSOD した。
 `docs/host_stability_2026-08-19.md`)。
 
@@ -167,13 +168,13 @@ julia +1.11 --project=. tools/certify_sigma.jl \
 | 旧世代 (引き直し対象、= 重複監査の標本) | 561 行 |
 | 壊れた行 | **0** (kill 後に全ファイルを検査済) |
 | 外部ゲートの面出し | **110 チャネル** / 525 |
-| レーン構成 | 12 レーン × 1 スレッド (実効 5.04 s/行、見込み 20.7 時間) |
+| レーン構成 | **16 レーン × 1 スレッド、30 s 間隔** (論理 32 の 50 %) |
 
 ### 4.1 再開の仕方
 
 ```bash
 cd /c/Users/seto/source/repos/Temari
-bash tools/run_cert_fleet.sh                 # 12 レーン × 1 スレッド、60 s 間隔
+STAGGER=30 bash tools/run_cert_fleet.sh 16 1   # 本走の構成 (16 レーン × 1 スレッド)
 nohup nice -n 10 julia +1.11 --project=. -t 3 \
       tools/dump_for_zhang_sigma.jl "$PWD/../zhang_all.jsonl" --all \
       > ../zhang_all_dump.log 2>&1 &         # 外部ゲートの面出し
