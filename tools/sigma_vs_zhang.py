@@ -72,8 +72,19 @@ def kin_gamma(T_ha):
     return 1.0 + T_ha / C_LIGHT**2
 
 
+_GL_CACHE = {}
+
+
 def leggauss(n):
-    """Gauss-Legendre on (0,1). numpy が無くても動くよう Newton で解く"""
+    """Gauss-Legendre on (0,1). numpy が無くても動くよう Newton で解く。
+
+    ⚠ 260819Cl: **ε ノードごとに解き直していた** — 実測で 64 点則 1.12 ms × 60 万回
+    = 11 分、外部ゲートの実行時間の約 8 割。節点も重みも n だけで決まるので覚えておく。
+    **数値には一切触らない** (同じ節点・同じ重み) ので、ビット同一の規律に抵触しない。
+    返り値は tuple にして呼び手が書き換えられないようにする。
+    """
+    if n in _GL_CACHE:
+        return _GL_CACHE[n]
     xs, ws = [], []
     for i in range(1, n + 1):
         x = math.cos(math.pi * (i - 0.25) / (n + 0.5))
@@ -90,7 +101,8 @@ def leggauss(n):
                 break
         xs.append(0.5 * (1.0 - x))
         ws.append(1.0 / ((1.0 - x * x) * dp * dp))
-    return xs, ws
+    _GL_CACHE[n] = (tuple(xs), tuple(ws))
+    return _GL_CACHE[n]
 
 
 class Surface:
@@ -283,6 +295,15 @@ def load_entries(path):
     """
     ents, n_bad, n_err = [], 0, 0
     if path.endswith(".jsonl"):
+        # ⚠⚠ 260819Cl: **格子違いと重複を見ていなかった。**
+        # Julia 側 (`dump_for_zhang_sigma.jl`) は格子が変わった行を「済」に数えないが
+        # **消しはせず追記する**ので、同じ (z,tag) が複数の格子で並びうる。
+        # ここで無条件に積むと、比の分布・p10/p90・殻別表が黙って再重み付けされる。
+        # ⇒ (z,tag) で**後勝ち**にし、格子の種類と捨てた重複を数えて表に出す。
+        bykey = {}
+        order = []
+        grids = {}
+        n_dup = 0
         with open(path, encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
@@ -299,7 +320,21 @@ def load_entries(path):
                 if "gos_per_Ha" not in d:
                     n_bad += 1
                     continue
-                ents.append(d)
+                g = d.get("grid_id", "(grid_id なし)")
+                grids[g] = grids.get(g, 0) + 1
+                k = (d.get("z"), d.get("tag"))
+                if k in bykey:
+                    n_dup += 1
+                else:
+                    order.append(k)
+                bykey[k] = d
+        ents = [bykey[k] for k in order]
+        if n_dup:
+            print(f"⚠ 同じ (Z, 殻) が {n_dup} 回 重複 — **後の行を採った**")
+        if len(grids) > 1:
+            print("⚠⚠ **面の格子が複数ある** — 集計の母集団が不均質:")
+            for g, c in sorted(grids.items(), key=lambda x: -x[1]):
+                print(f"     {g} : {c} 行")
     else:
         with open(path, encoding="utf-8") as fh:
             ents = json.load(fh)["entries"]
@@ -374,7 +409,7 @@ def compare_entry(h5py, ent, align):
                              check=abs(mine - direct) / direct,
                              ratio=theirs / mine,
                              clamp_ours=fr_mine, clamp_theirs=fr_th,
-                             atb=atb_hi))
+                             atb=atb_hi, norm_ok=norm_ok))
     note = dict(norm_ok=norm_ok, E_th=E_th, z_eth=z_eth, z_scale=z_scale,
                 cl_ours=(ours.n_eps_lo, ours.n_eps_hi, ours.n_q_lo, ours.n_q_hi),
                 cl_theirs=(zsurf.n_eps_lo, zsurf.n_eps_hi,
@@ -442,13 +477,17 @@ def summarize(recs, skipped, n_bad, n_err, norm_bad, align):
     # ⚠ `r not in good` は dict の等価比較で O(n²) になる (6300 条件で 4000 万回)。
     #   しかも**同値な dict を誤って除外しうる**ので、述語で 1 回だけ振り分ける。
     def passes(r):
+        # ⚠ 260819Cl: norm_ok を門に足した。副殻規約 (2(2l+1)/(2j+1)) が先方の
+        #   occupancy_ratio と食い違うチャネルは、1.5 倍・1.667 倍のずれが
+        #   「物理の食い違い」と見分けられないまま帯に入ってしまう。
         return (r["check"] <= CHECK_MAX
-                and max(r["clamp_ours"], r["clamp_theirs"]) <= CLAMP_MAX)
+                and max(r["clamp_ours"], r["clamp_theirs"]) <= CLAMP_MAX
+                and r["norm_ok"])
 
     good = [r for r in recs if passes(r)]
     bad = [r for r in recs if not passes(r)]
     print(f"\n比の集計に入れる条件: {len(good)} / {len(recs)} "
-          f"(門 = 検算 ≤ {CHECK_MAX:.0e} かつ clamp 重み ≤ {CLAMP_MAX:.0e})")
+          f"(門 = 検算 ≤ {CHECK_MAX:.0e} / clamp 重み ≤ {CLAMP_MAX:.0e} / 規格化の検算)")
     if bad:
         print(f"  ⚠ 外した {len(bad)} 件の内訳 (悪い順に 6 件):")
         for r in sorted(bad, key=lambda r: -r["check"])[:6]:
@@ -598,7 +637,17 @@ def main(argv):
         return 1
     align = "edge"
     if "--align" in argv:
-        align = argv[argv.index("--align") + 1]
+        i = argv.index("--align")
+        if i + 1 >= len(argv):
+            print("--align に値が要る (edge か abs)")
+            return 1
+        align = argv[i + 1]
+    # ⚠ 整合の取り方は比較の意味そのもの (端相対なら 0.83-1.11、絶対損失なら
+    #   Au M5 [0,50] eV が 2.207)。打ち間違いが黙って端相対に落ちると、
+    #   ゲートが暴くはずだった外れ値が消えたログが残る。
+    if align not in ("edge", "abs"):
+        print(f"--align は edge か abs (与えられた値: {align!r})")
+        return 1
     limit = None
     if "--limit" in argv:
         limit = int(argv[argv.index("--limit") + 1])
