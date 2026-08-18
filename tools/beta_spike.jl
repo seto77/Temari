@@ -31,7 +31,10 @@ beta_spike.jl — S2a 技術スパイク: 収集半角 β で切った角度求�
   julia +1.11 --project=. -t auto tools/beta_spike.jl [--prod] [--json 出力先]
 =====================================================================#
 
-include(joinpath(@__DIR__, "..", "src", "ionization.jl"))
+# ⚠ 二重 include のガード — `gen_production.jl` を先に読む道具 (certify_sigma.jl) から
+# 呼ばれると、そちらが既に ionization.jl を読んでいる。定数の再定義警告を避ける
+isdefined(Main, :PROD_SETTINGS) ||
+    include(joinpath(@__DIR__, "..", "src", "ionization.jl"))
 using Printf
 
 # 測る β [mrad]。EELS の実用域 (1–100 mrad) を挟み、両側へ 1 桁ずつ伸ばす
