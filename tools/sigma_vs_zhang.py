@@ -439,9 +439,14 @@ def summarize(recs, skipped, n_bad, n_err, norm_bad, align):
 
     # ★ 260819Cl: **合格した条件だけで比を集計する** (codex の指摘)。
     #    「検算が悪い条件の比」を混ぜると、求積の失敗を物理の食い違いとして読んでしまう。
-    good = [r for r in recs
-            if r["check"] <= CHECK_MAX and max(r["clamp_ours"], r["clamp_theirs"]) <= CLAMP_MAX]
-    bad = [r for r in recs if r not in good]
+    # ⚠ `r not in good` は dict の等価比較で O(n²) になる (6300 条件で 4000 万回)。
+    #   しかも**同値な dict を誤って除外しうる**ので、述語で 1 回だけ振り分ける。
+    def passes(r):
+        return (r["check"] <= CHECK_MAX
+                and max(r["clamp_ours"], r["clamp_theirs"]) <= CLAMP_MAX)
+
+    good = [r for r in recs if passes(r)]
+    bad = [r for r in recs if not passes(r)]
     print(f"\n比の集計に入れる条件: {len(good)} / {len(recs)} "
           f"(門 = 検算 ≤ {CHECK_MAX:.0e} かつ clamp 重み ≤ {CLAMP_MAX:.0e})")
     if bad:
