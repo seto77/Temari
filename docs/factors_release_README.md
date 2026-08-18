@@ -62,6 +62,22 @@ negative mutant showing that the check detects it.
    re-rounds to 10 digits moves off the golden vectors by more than the
    conformance tolerance (there is a mutant for it).
 
+## If you store the tables in a lossy form
+
+The contract asserts two separate things: that your loader implements the
+specified interpolation, and that the node values it was handed are the published
+ones. Compressing or requantizing the tables — to your own absolute step, or to
+single precision — gives up the second while leaving the first fully within
+reach. `python tools/temari_factors_contract.py PUBDIR --values-from YOURDIR
+--negative` takes up conformance alone: it builds the reference loader on your
+node values and checks that reference — analytic spline conditions, an
+independent implementation, the negative mutants. Add `--make-golden
+my_oracle.json` and it writes an oracle bound to those same values, which is what
+your own loader is then held to at 1e-12. Say "the interpolation follows the
+contract"; that run neither calls your loader nor verifies the dataset, so do not
+report it as passing the contract test. (`--values-from` is newer than the v1.0.0
+archive; take that copy of the contract from the repository.)
+
 ## What this dataset claims, and what it does not
 
 - **Numerical certification (what the numbers are worth):** T_comp = 1e-7

@@ -246,10 +246,33 @@ negative mutant showing that the check detects it:
     variant that the check is shown to catch. A Julia reference loader and
     SciPy's `CubicSpline` agree with the Python contract to 4×10⁻¹⁶.
 
+The contract asserts two different things, and they are worth telling apart. One
+is **conformance**: that a loader builds the specified curve out of the node
+values it was given — the end conditions, the t = s² change of variable, the
+domain. The other is **identity**: that those node values are the published ones.
+A consumer that keeps the tables in a lossy but documented form — compressed,
+requantized to its own absolute step, held in single precision — can satisfy the
+first completely while deliberately not satisfying the second. `--values-from
+ALT` takes up the first alone: it builds the reference loader on the node values
+in `ALT`, checks that reference against the analytic spline conditions, an
+independent implementation and the negative mutants, and with `--make-golden`
+emits an oracle bound to those same values that your loader can then be held to
+at 1e-12. Your loader is never called by that run, and neither is the dataset
+verified by it. The tolerance stays where it is: 1e-12 is a threshold on
+*agreement between implementations*, not on accuracy, and it is the check that
+catches the t = s² mix-up — on Cs that mistake is 2.4×10⁻⁸ Å in absolute terms,
+inside the 1e-7 Å release budget, so an accuracy check of your own will pass it,
+while in relative terms it is 1.5×10⁻⁹.
+
 ```bash
 tar -xzf temari-factors-v1.0.0.tar.gz && cd temari-factors-v1.0.0
 python tools/temari_factors_contract.py . --negative     # exits non-zero on failure
+python tools/temari_factors_contract.py . --values-from ALT --negative   # conformance alone
 ```
+
+(`--values-from` is newer than the v1.0.0 archive; take that copy of
+`temari_factors_contract.py` from the repository until the next data release
+re-packs it.)
 
 ### How far the numbers are trusted
 
