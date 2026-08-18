@@ -52,10 +52,54 @@ include(joinpath(@__DIR__, "beta_spike.jl"))
 const CERT_BETAS_MRAD = [0.3, 1.0, 3.0, 10.0, 30.0, 60.0, 100.0, 200.0]
 const CERT_WIDTHS_EV = [1.0, 10.0, 100.0, 1000.0]
 const CERT_STARTS_EV = [0.0, 10.0, 100.0, 1000.0]
+const CERT_WINDOW_N = 16          # 既定側の窓の GL 点数 (契約が約束する側)
+const CERT_ORACLE_NPAN = 4        # オラクル: √ε 上の複合 GL のパネル数
+const CERT_ORACLE_NPT = 12        # 同、パネルあたりの点数
+
+# ---------------------------------------------------------------------
+# ★ 260819Cl: 認証の**版の指紋** (codex の指摘を受けて追加)
+#
+# ⚠⚠ **これが無いと、済み判定が古い版の行を黙って通す。**再開の済み判定は
+# `<接頭辞>_lane*.jsonl` を全部読むので、**処方や求積を変えたあとに同じ接頭辞へ
+# 追記すると、前の版で計算した行が「認証済み」として残り続ける**。
+# 行ごとに指紋を書き、**指紋が今と違う行は済みに数えない** (既定)。
+#
+# 指紋に入れるもの:
+#   - `CACHE_SOURCE_FINGERPRINT` = src の include 閉包 (l5_channel.jl が持つ)
+#   - `tools/beta_spike.jl` と `tools/certify_sigma.jl` の中身 (求積の実体)
+#   - 認証域の定数と PROD_SETTINGS の数値
+#
+# ⚠ **この 2 つの tools を編集すると全行が無効になる** (コメントだけの変更でも)。
+#   認証を回している間は触らないこと。作者判断で「その変更は数値に無関係」と
+#   分かっているときは `--accept-fp <指紋>` で明示的に受け入れる。
+# ---------------------------------------------------------------------
+"CRLF を正規化してから読む (git の改行変換で指紋が動かないように)"
+function _fp_bytes(path::String)
+    isfile(path) || return UInt8[]
+    return Vector{UInt8}(replace(read(path, String), "\r\n" => "\n"))
+end
+
+function cert_fingerprint()
+    io = IOBuffer()
+    write(io, CACHE_SOURCE_FINGERPRINT)
+    for f in ("beta_spike.jl", "certify_sigma.jl")
+        write(io, UInt8(0)); write(io, _fp_bytes(joinpath(@__DIR__, f)))
+    end
+    write(io, UInt8(0))
+    write(io, string(CERT_BETAS_MRAD, CERT_WIDTHS_EV, CERT_STARTS_EV,
+                     CERT_WINDOW_N, CERT_ORACLE_NPAN, CERT_ORACLE_NPT))
+    write(io, UInt8(0))
+    write(io, string(PROD_SETTINGS))          # NamedTuple 丸ごと
+    write(io, string((CONT_PPW, CONT_DT_LOG)))
+    return bytes2hex(sha256(take!(io)))[1:16]
+end
+
+const CERT_FP = cert_fingerprint()
 
 """窓のオラクル — √ε 上の**複合** GL (既定の単一 GL とは別の求積)。"""
 function cert_window_oracle(ch, r_core, k_i, T0, settings, betas, transverse,
-                            d1_eV, d2_eV; npan::Int=4, npt::Int=12)
+                            d1_eV, d2_eV; npan::Int=CERT_ORACLE_NPAN,
+                            npt::Int=CERT_ORACLE_NPT)
     e1 = d1_eV / HARTREE_EV; e2 = d2_eV / HARTREE_EV
     lo = sqrt(e1); hi = sqrt(e2)
     edges = lo .+ (hi - lo) .* collect(range(0.0, 1.0, length=npan + 1))
@@ -101,7 +145,8 @@ function certify_row(z::Int, tag::String, e0::Float64, settings)
             n_oob += 1
             continue
         end
-        v = window_sigma(ch, r_core, k_i, T0, settings, betas, true, d1, d2, 16)
+        v = window_sigma(ch, r_core, k_i, T0, settings, betas, true, d1, d2,
+                         CERT_WINDOW_N)
         o = cert_window_oracle(ch, r_core, k_i, T0, settings, betas, true, d1, d2)
         n_win += 1
         for ib in 1:nb
@@ -145,7 +190,7 @@ function certify_row(z::Int, tag::String, e0::Float64, settings)
                             "worst_window" => worst_win, "worst_window_at" => worst_at,
                             "worst_window_per_beta" => per_beta,
                             "worst_angular" => worst_ang, "worst_angular_at" => ang_at,
-                            "elapsed_s" => time() - t0)
+                            "elapsed_s" => time() - t0, "cert_fp" => CERT_FP)
 end
 
 """1 行を**1 行の JSON** で書く。
@@ -159,7 +204,7 @@ function jsonl_line(d::Dict{String,Any})
     for k in ("z", "tag", "e0_keV", "eth_keV", "u", "eps_max_eV", "n_windows",
               "n_out_of_domain", "worst_window", "worst_window_at",
               "worst_window_per_beta", "worst_angular", "worst_angular_at",
-              "elapsed_s", "error")
+              "elapsed_s", "cert_fp", "error")
         haskey(d, k) || continue
         first || print(io, ",")
         first = false
@@ -208,38 +253,92 @@ end
 
 ⚠ 260819Cl: **例外で落ちた行 (`error`) は「済」に数えない** — 数えると、GC クラッシュ
 由来の一過性の失敗が**黙って認証済みの扱いになる**。再実行のたびに引き直させる。"""
-function load_done(paths::Vector{String})
+function load_done(paths::Vector{String}, accept::Set{String})
     done = Set{String}()
+    stale = 0
     for p in paths
-        union!(done, load_done(p))
+        d, s = load_done(p, accept)
+        union!(done, d)
+        stale += s
     end
-    return done
+    return done, stale
 end
 
-function load_done(path::String)
+"""戻り値 = (済みの鍵, **指紋が合わずに捨てた行数**)。
+
+⚠ 指紋が違う行を捨てるのは、済み判定が版を跨いで効いてしまうのを防ぐため
+(§ 冒頭の CERT_FP の注記)。捨てた数は**必ず表に出す** — 黙って再計算すると
+「なぜ進まないのか」が分からなくなる。"""
+function load_done(path::String, accept::Set{String})
     done = Set{String}()
-    isfile(path) || return done
+    stale = 0
+    isfile(path) || return done, stale
     for line in eachline(path)
         isempty(strip(line)) && continue
         d = try _json_value(Vector{UInt8}(line), 1)[1] catch; continue end
         haskey(d, "z") || continue
         haskey(d, "error") && continue
         haskey(d, "worst_window") || continue
+        fp = haskey(d, "cert_fp") ? String(d["cert_fp"]) : ""
+        if !(fp in accept)
+            stale += 1
+            continue
+        end
         push!(done, rowkey(Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"])))
     end
-    return done
+    return done, stale
+end
+
+"""重複した行 (同じ入力を 2 度計算した対) の突き合わせを報告する。
+
+⚠⚠ **これは「求積の誤差」ではなく「同じ計算が 2 回同じ答えを出すか」の検査**である。
+ビット一致しない対が出たら、原因は (a) ホストのビット化け (b) SCF の停止点差
+のどちらか。**どちらであっても、契約を凍結する前に説明が要る**。"""
+function report_duplicates(dups)
+    isempty(dups) && return
+    n = length(dups)
+    exact = count(d -> d[2] == d[3] && d[4] == d[5], dups)
+    rels = Float64[]
+    for (_, w1, w2, a1, a2) in dups
+        push!(rels, max(reldiff(w1, w2), reldiff(a1, a2)))
+    end
+    srt = sort(rels)
+    @printf("\n重複した行の突き合わせ: %d 対\n", n)
+    @printf("  **ビット一致 %d / %d (%.1f %%)**\n", exact, n, 100.0 * exact / n)
+    if exact < n
+        @printf("  一致しない対の相対差: 中央値 %.3e / 最悪 %.3e\n",
+                srt[max(1, cld(length(srt), 2))], srt[end])
+        ord = sortperm(rels; rev=true)
+        println("  差の大きい対:")
+        for i in first(ord, min(6, n))
+            k, w1, w2, a1, a2 = dups[i]
+            @printf("    %s  窓 %.6e vs %.6e   角度 %.6e vs %.6e\n", k, w1, w2, a1, a2)
+        end
+        println("  ⚠⚠ **一致しない = 同じ計算が同じ答えを出していない**。")
+        println("     `docs/host_stability_2026-08-19.md` の仮説 (ホストのビット化け) と")
+        println("     既知の SCF 停止点差のどちらかを切り分けること")
+    end
 end
 
 """集計。**複数のレーン出力をまとめて読む** (260819Cl)。
 
-⚠ レーンは行集合が互いに素なので単純連結でよいが、**重複が来ても落とさず数える** —
-再開の取りこぼしを黙って平均に混ぜないため。"""
+## ⚠⚠ 重複は捨てない — **突き合わせる** (codex の指摘、260819Cl)
+
+当初は 2 度目の行を黙って捨てていた。それは情報を捨てている。重複は
+**同じ入力を別のプロセス・別の時刻で計算した対**なので、
+
+  - **ホストのビット化け** (`docs/host_stability_2026-08-19.md` の仮説)
+  - **SCF がプロセス間で別反復に止まる**既知の現象
+
+の両方を**そのまま測る標本**になる。⇒ 一致率と相対差の分布を出す。
+⚠ 一致しない重複が出たら、それは異常であって「平均すればよい」ものではない。"""
 function summarize(paths::Vector{String})
     rows = Any[]
     n_bad = 0        # ⚠ 沈黙する catch を作らない — 読めなかった行を数える
-    n_dup = 0
     n_err = 0
-    seen = Set{String}()
+    bykey = Dict{String,Any}()
+    dups = Tuple{String,Float64,Float64,Float64,Float64}[]   # 鍵, w1, w2, a1, a2
+    fps = Dict{String,Int}()
     for path in paths
         isfile(path) || (@printf("⚠ 無い: %s\n", path); continue)
         for line in eachline(path)
@@ -250,14 +349,33 @@ function summarize(paths::Vector{String})
                 continue
             end
             haskey(d, "worst_window") || (n_bad += 1; continue)
+            fp = haskey(d, "cert_fp") ? String(d["cert_fp"]) : "(指紋なし)"
+            fps[fp] = get(fps, fp, 0) + 1
             k = rowkey(Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"]))
-            k in seen && (n_dup += 1; continue)
-            push!(seen, k)
+            if haskey(bykey, k)
+                p = bykey[k]
+                push!(dups, (k, Float64(p["worst_window"]), Float64(d["worst_window"]),
+                             Float64(p["worst_angular"]), Float64(d["worst_angular"])))
+                # ⚠ 統計に載せるのは**今の版の行**。古い版と重複しているときは差し替える
+                pfp = haskey(p, "cert_fp") ? String(p["cert_fp"]) : ""
+                if pfp != CERT_FP && fp == CERT_FP
+                    bykey[k] = d
+                    rows[findfirst(===(p), rows)] = d
+                end
+                continue
+            end
+            bykey[k] = d
             push!(rows, d)
         end
     end
-    n_dup > 0 && @printf("⚠ 重複した行 (集計から除外): %d\n", n_dup)
     n_err > 0 && @printf("⚠⚠ **例外で落ちた行: %d** — 中身を見ること\n", n_err)
+    if length(fps) > 1
+        println("⚠⚠ **認証の指紋が複数ある** — 版が混ざっている:")
+        for (f, n) in sort(collect(fps); by=x -> -x[2])
+            @printf("     %s : %d 行%s\n", f, n, f == CERT_FP ? "  ← 今の版" : "")
+        end
+    end
+    report_duplicates(dups)
     n_bad > 0 && @printf("⚠ 読めなかった/未完の行: %d
 ", n_bad)
     isempty(rows) && (println("行がまだ無い"); return 0)
@@ -307,10 +425,13 @@ function main_certify(args)
     tags = copy(TAGS_V4)
     limit = typemax(Int)
     lane_i, lane_n = 0, 1
+    accept = Set{String}([CERT_FP])
     i = 2
     while i <= length(args)
         args[i] == "--tags" && (tags = String.(split(args[i+1], ",")); i += 1)
         args[i] == "--limit" && (limit = parse(Int, args[i+1]); i += 1)
+        # ⚠ 作者が「その変更は数値に無関係」と判断したときだけ、古い指紋を受け入れる
+        args[i] == "--accept-fp" && (push!(accept, args[i+1]); i += 1)
         if args[i] == "--lane"
             m = match(r"^(\d+)/(\d+)$", args[i+1])
             m === nothing && error("--lane は i/n 形式 (例: 0/8)")
@@ -332,10 +453,12 @@ function main_certify(args)
         end
     end
     sibs = sibling_lane_files(path)
-    done = load_done(sibs)
+    done, stale = load_done(sibs, accept)
     todo = [r for r in rows if !(rowkey(r...) in done)]
     length(todo) > limit && (todo = todo[1:limit])
-    @printf("済み判定に読んだファイル: %d 本\n", length(sibs))
+    @printf("済み判定に読んだファイル: %d 本   認証の指紋 %s\n", length(sibs), CERT_FP)
+    stale > 0 && @printf("⚠⚠ **指紋が合わず捨てた行: %d** (別の版で計算されている。引き直す)\n",
+                         stale)
     @printf("認証 (lane %d/%d): 全 %d 行 / 済 %d / 今回 %d   スレッド %d   窓 %d 種 × β %d 本\n",
             lane_i, lane_n, length(rows), length(done), length(todo), Threads.nthreads(),
             length(CERT_STARTS_EV) * length(CERT_WIDTHS_EV), length(CERT_BETAS_MRAD))
