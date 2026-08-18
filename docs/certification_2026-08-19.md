@@ -144,7 +144,53 @@ julia +1.11 --project=. tools/certify_sigma.jl \
 同一ホストの二重実行は**確率的なビット化けは測れる**が、系統的な共通原因は排除できない。
 契約に書くときはこの限界を明記すること。
 
-## 4. 結果
+## 3.4 ★ BIOS 変更を挟む場合 — 前後の突き合わせが「効いたか」の検査になる
+
+2026-08-18 15:43 に**作者が BIOS 設定を見直すため実行を中断**した
+(4 枚挿し DDR5 の動作クロックを下げる方向。`docs/host_stability_2026-08-19.md` §3)。
+
+⇒ **中断時点までの行は「疑わしい構成」で計算された行**である。設定変更のあとで
+§3.3 の監査 (系統抽出した行の引き直し) を回すと、それは
+
+- **設定変更が効いたかどうかの検査**
+- 変更前の行が汚染されていたかどうかの検査
+
+を**同時に**兼ねる。⚠ ただし不一致が出ても、それが「前が壊れていた」のか
+「後が壊れている」のかは対だけでは決まらない。**3 回目**を取ること。
+
+## 4. 現在地 (2026-08-18 15:43、中断時点)
+
+| | |
+|---|---|
+| 認証済み (全世代) | **906 行** / 14,796 |
+| うち現行指紋 `2061dc7e3c5fcbf6` | **235 行** |
+| 旧世代 (引き直し対象、= 重複監査の標本) | 561 行 |
+| 壊れた行 | **0** (kill 後に全ファイルを検査済) |
+| 外部ゲートの面出し | **110 チャネル** / 525 |
+| レーン構成 | 12 レーン × 1 スレッド (実効 5.04 s/行、見込み 20.7 時間) |
+
+### 4.1 再開の仕方
+
+```bash
+cd /c/Users/seto/source/repos/Temari
+bash tools/run_cert_fleet.sh                 # 12 レーン × 1 スレッド、60 s 間隔
+nohup nice -n 10 julia +1.11 --project=. -t 3 \
+      tools/dump_for_zhang_sigma.jl "$PWD/../zhang_all.jsonl" --all \
+      > ../zhang_all_dump.log 2>&1 &         # 外部ゲートの面出し
+```
+
+⚠ どちらも**同じコマンドの再実行で再開する** (既にある行は読み飛ばす)。
+⚠ **`tools/certify_sigma.jl` と `tools/beta_spike.jl` は触らない** (§2.1)。
+
+### 4.2 完走したら
+
+```bash
+julia +1.11 --project=. tools/certify_sigma.jl ../cert_sigma_v1_lane*.jsonl --summary
+python tools/sigma_vs_zhang.py ../zhang_all.jsonl
+python tools/sigma_vs_zhang.py ../zhang_all.jsonl --align abs
+```
+
+## 5. 結果
 
 ⚠ **実行中**。完走後に `--summary` の出力からここに書く:
 
