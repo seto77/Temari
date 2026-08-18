@@ -1,43 +1,51 @@
 # Temari
 
 [![Documentation](https://img.shields.io/badge/%F0%9F%93%96_Documentation-blue)](https://seto77.github.io/Temari/)
-[![CI](https://github.com/seto77/Temari/actions/workflows/ci.yml/badge.svg)](https://github.com/seto77/Temari/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Julia 1.11.9 / 1.12.6](https://img.shields.io/badge/Julia-1.11.9%20%2F%201.12.6-9558B2)](https://julialang.org/)
-[![Dependencies: none](https://img.shields.io/badge/dependencies-none-lightgrey)](#design-commitments)
 [![Dataset DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21872050.svg)](https://doi.org/10.5281/zenodo.21872050)
+[![CI](https://github.com/seto77/Temari/actions/workflows/ci.yml/badge.svg)](https://github.com/seto77/Temari/actions/workflows/ci.yml)
+[![Software: MIT](https://img.shields.io/badge/software-MIT-green)](LICENSE)
+[![Data: CC BY 4.0](https://img.shields.io/badge/data-CC--BY--4.0-lightgrey)](licenses/README.md)
+[![Julia 1.11.9 / 1.12.6](https://img.shields.io/badge/Julia-1.11.9%20%2F%201.12.6-9558B2)](https://julialang.org/)
 
-**Atomic scattering and excitation factors from first principles.**
+**Open, relativistic, reproducible off-diagonal ionization form factors for
+quantitative STEM-EDX and ALCHEMI.**
 
-***[📖 Read the documentation](https://seto77.github.io/Temari/)*** — getting
-started, the full command-line reference, the prescription, verification, the
-reproducibility policy, and
-***[the published dataset](https://seto77.github.io/Temari/data/)***.
+Temari publishes the signed inner-shell ionization form factor F(s, E₀): the
+normalized off-diagonal shape obtained by contracting the mixed dynamic form
+factor over the ejected electron's energy and direction, for two Bloch waves
+separated by K = 4πs·a₀. It is the off-diagonal response needed to model how an
+EDX map depends on crystal orientation. **525
+channels (K, L1–L3, M1–M5), 14,796 rows, s ≤ 16 Å⁻¹**, published as
+[dataset v5.0.0](https://doi.org/10.5281/zenodo.21872050) under CC-BY-4.0, with
+an executable data contract. Using the tables does not require Julia.
 
-Temari solves an isolated atom from scratch — self-consistent field, bound
-orbitals, distorted continuum waves — and derives the scattering and excitation
-factors that electron microscopy, spectroscopy and transport simulation need.
-No external atomic-structure code, no fitted parameter tables, no dependencies
-beyond the Julia standard library.
+> F(s, E₀) is a normalized **shape**, not an absolute cross section. The
+> absolute σ(E₀) shipped beside it comes from the Bote–Salvat analytic
+> coefficients, and so do the edge energies.
 
-> *Temari* (手毬) is a traditional Japanese craft: a sphere divided
-> geometrically, then wound with many threads to form a pattern. That is what
-> this code does — it lays dozens of partial waves over a spherically symmetric
-> atomic field.
+***[📖 Documentation](https://seto77.github.io/Temari/)*** ·
+***[Data contract](https://seto77.github.io/Temari/data/)*** ·
+***[Verification and known limits](https://seto77.github.io/Temari/verification/)***
 
-**Status: early. The engine exists and is in production use; this repository is
-being assembled around it.** See [docs/architecture.md](docs/architecture.md)
-for the layer structure.
+Behind the dataset is a zero-dependency Julia engine that solves one
+self-consistent relativistic atom — SCF, bound orbitals, distorted continuum
+waves — and derives six scattering and excitation quantities from it. The
+published off-diagonal form factors are the product; the shared engine is why
+they are reproducible and why the family can grow.
+
+**Status: in production use; scientific validation is ongoing.** Temari
+generates the STEM-EDX tables shipped with
+[ReciPro](https://github.com/seto77/ReciPro) and produced both published
+dataset families. There is no peer-reviewed Temari paper and no independent
+external validation yet; the known limits and the open discrepancies are
+recorded on the
+[Verification page](https://seto77.github.io/Temari/verification/).
 
 ## The tables are already computed
 
 ![Coverage: 525 channels over Z and subshell](docs/src/assets/figures/coverage.svg)
 
-You do not need to run anything. The inner-shell ionization form factors
-F(s, E₀) are published as a dataset in their own right — **525 channels
-(K, L1–L3, M1–M5), 14,796 rows, s ≤ 16 Å⁻¹**, under
-[10.5281/zenodo.21872050](https://doi.org/10.5281/zenodo.21872050) (CC-BY-4.0),
-mirrored byte-identically at
+You do not need to run anything. Dataset v5.0.0 is mirrored byte-identically at
 [release `dataset-v5.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-v5.0.0).
 
 - **Is my element and edge in there?** —
@@ -48,9 +56,10 @@ mirrored byte-identically at
   q = 4πs, and values past each row's `s_cert` are padding rather than physics.
 
 The **atomic scattering factors f_x(s), f_e(s)** are published too — 86 neutral
-atoms (Z = 1–86), s ≤ 6 Å⁻¹ on 7681 nodes, full-Dirac SCF with KLI exact
-exchange — as a separate dataset family, **dataset-factors v1.0.0** (CC-BY-4.0),
-at [release `dataset-factors-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0)
+atoms (Z = 1–86), s ≤ 6 Å⁻¹ on 7681 nodes, full-Dirac SCF with the
+exchange-only KLI approximation to the optimized effective potential — as a
+separate dataset family, **dataset-factors v1.0.0** (CC-BY-4.0), at
+[release `dataset-factors-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0)
 (no DOI yet). Two things will bite you: the s grid is not stored (reconstruct
 s_i = 6i/7680 and check its SHA-256), and the interpolation convention is part
 of the contract (f_x: cubic in s, clamped left / not-a-knot right; f_e: cubic in
@@ -76,22 +85,22 @@ julia -t auto src/gui.jl                        # zero-dependency browser GUI
 
 ## Why
 
-The physics of an isolated atom scattering a fast electron, a photon, or
-another electron is one calculation with several exits. Existing open tools
-each expose one exit and hide the engine:
+The quantities an electron-microscopy workflow needs are normally split across
+separate tools and datasets, and the off-diagonal one is the hardest to obtain:
 
 - Ionization form factors for STEM-EDX / EELS mapping are locked inside
   microscopy simulators
 - The GOS tables in widest use still date from the 1980s (Egerton's
   SIGMAK/SIGMAL, Leapman's Hartree–Slater tables) and are non-relativistic.
   A modern, open, relativistic GOS database *does* now exist — Zhang *et al.*
-  (2024), CC-BY — but it tabulates the **diagonal** GOS df/dE(q) only. The
-  **off-diagonal** (mixed dynamic form factor) quantity that EDX mapping and
-  ALCHEMI need, as a function of the difference vector between two Bloch waves,
-  is not published by anyone
+  (2023 dataset; 2025 paper), CC-BY — but it tabulates the **diagonal** GOS
+  df/dE(q) only, and stops at q = 50 Å⁻¹ (s ≈ 3.98 Å⁻¹). We have not identified
+  another public, general-purpose dataset of the **off-diagonal** (mixed
+  dynamic form factor) quantity that EDX mapping and ALCHEMI need, as a
+  function of the difference vector between two Bloch waves
 - Elastic scattering phase shifts live in separate Fortran packages
-- Atomic scattering factors are distributed as fitted parameterizations rather
-  than as something you can recompute for an arbitrary ion
+- Atomic scattering factors are commonly consumed as fitted parameterizations
+  rather than as something you can recompute for an arbitrary ion
 
 Temari puts the engine in the open and adds exits to it.
 
@@ -116,8 +125,9 @@ operator and in what is reported:
   κ-resolved Dirac phase shifts (`mott`)
 - **Atomic scattering factors** f_x(s) for X-rays and f_e(s) for electrons,
   computed from the charge density rather than read from a fitted table — which
-  also means they stay correct past s ≈ 3 Å⁻¹, where Gaussian parameterizations
-  decay exponentially and the real f_e falls as s⁻² (`fx`)
+  also means they retain the computed high-s behaviour past s ≈ 3 Å⁻¹, where
+  Gaussian parameterizations decay exponentially and the real f_e falls as s⁻²
+  (`fx`)
 
 Planned, in rough order (see the
 [roadmap](https://seto77.github.io/Temari/roadmap/)):
@@ -134,7 +144,9 @@ Planned, in rough order (see the
 2. **Standalone.** No package module and no third-party dependency: the layer
    files carry a flat namespace and concatenate in include order, while
    `Project.toml` declares only Julia standard libraries.
-3. **MIT licensed.** A reference implementation should be readable and usable.
+3. **MIT licensed code, CC-BY-4.0 data.** A reference implementation should be
+   readable and usable; the generated tables carry their own licence and their
+   own version line.
 4. **Fast**, but reproducibility outranks speed: optimizations that change
    floating-point summation order are adopted only when a full table
    regeneration is intended, and are declared as such.
@@ -152,8 +164,14 @@ Three tiers, all reproducible from this repository:
 2. **Independent implementation** — a Julia and a Python implementation of the
    same prescription agree to max|ΔF| ≈ 9×10⁻⁸ (the residual of independently
    converged SCF)
-3. **External references** where they exist — K-shell form factors agree with
-   Oxley–Allen (2000) and µSTEM to within 1 % for s ≤ 1.25 Å⁻¹
+3. **External references** where they exist — the K-shell form factors are
+   compared against Oxley–Allen (2000) and µSTEM, the scattering factors
+   against the numerical Dirac–Hartree–Fock table OFFV1. How close the
+   agreement is depends on the channel and on s, external coverage is sparse,
+   and one discrepancy — the Bethe ridge against the Dirac GOS database — is
+   recorded as unexplained. The curves and the numbers are on the
+   [Against the literature](https://seto77.github.io/Temari/comparison/) and
+   [Verification](https://seto77.github.io/Temari/verification/) pages
 
 Reference data used during development (published tables, GPL code output) is
 **not included** in this repository.
@@ -182,13 +200,27 @@ dataset, cite that dataset by its own version DOI (or, for a dataset that has
 no DOI yet, by its versioned release tag and archive SHA-256) — it is CC-BY-4.0
 and is not covered by the MIT licence of this code.
 
+## The name
+
+> *Temari* (手毬) is a traditional Japanese craft: a sphere divided
+> geometrically, then wound with many threads to form a pattern. That is what
+> this code does — it lays dozens of partial waves over a spherically symmetric
+> atomic field. The partial-wave skeleton is the same whether the exit is an
+> ionization form factor, a generalized oscillator strength, or an elastic
+> phase shift.
+
 ## Credits and licensing
 
-MIT. Copyright (c) 2026 Yusuke SETO.
+The software is MIT; the datasets are CC-BY-4.0 with an MIT loader.
+Copyright (c) 2026 Yusuke SETO. See [licenses/README.md](licenses/README.md)
+for which licence covers what.
 
-The implementation was largely written with AI assistance (Anthropic Claude);
-the choice of physical prescription and all verification are the author's
-responsibility.
+Most of the implementation code was produced with assistance from Anthropic
+Claude and was reviewed and integrated by the author. The author is responsible
+for the physical prescription, for the tests and for the released data. AI
+assistance is not treated as independent validation: the reproducible checks,
+the external comparisons and the known unresolved discrepancies are documented
+under [Verification](https://seto77.github.io/Temari/verification/).
 
 `bote_salvat.json` is machine-extracted from NIST's BoteSalvatICX.jl
 (Unlicense, public domain). If you publish results using the cross sections,

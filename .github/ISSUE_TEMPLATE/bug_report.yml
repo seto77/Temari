@@ -41,7 +41,7 @@ body:
     id: julia
     attributes:
       label: Julia version
-      description: Output of `julia --version`. The shipped datasets are generated with 1.11.9.
+      description: Output of `julia --version`. The shipped datasets pin their own release — F(s, E0) dataset v5.0.0 was generated with 1.11.9, dataset-factors v1.0.0 with 1.12.6.
       placeholder: "1.11.9"
     validations:
       required: true
@@ -58,7 +58,7 @@ body:
     id: commit
     attributes:
       label: Temari version or commit
-      placeholder: "v0.9.0, or the short commit hash"
+      placeholder: "v1.1.0, or the short commit hash"
     validations:
       required: true
 

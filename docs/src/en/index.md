@@ -1,16 +1,30 @@
 # Temari
 
-**Atomic scattering and excitation factors from first principles.**
+**Open, relativistic, reproducible off-diagonal ionization form factors for
+quantitative STEM-EDX and ALCHEMI.**
 
-Temari solves an isolated atom from scratch — self-consistent field, bound
-orbitals, distorted continuum waves — and derives from that one atom the
-scattering and excitation factors that electron microscopy, spectroscopy and
-transport simulation need. It calls no external atomic-structure code, it does
-not read scattering factors from a fitted table, and it depends on nothing but
-the Julia standard library. The one third-party table it carries is the
-Bote–Salvat coefficient set (Bote & Salvat, 2008; Bote et al., 2009), which
-supplies the *absolute* ionization cross sections and the edge energies; every
-shape and every scattering factor is computed here.
+Temari publishes the signed inner-shell ionization form factor $F(s, E_0)$ that
+quantitative STEM-EDX and ALCHEMI need: the normalized off-diagonal shape
+obtained by contracting the mixed dynamic form factor over the ejected
+electron's energy and direction, for two Bloch waves separated by
+$K = 4\pi s\,a_0$ — the off-diagonal response needed to model how an EDX map
+depends on crystal orientation. Dataset v5.0.0 covers 525 channels
+from K to M5, carries a DOI, and fixes its conventions, its golden vectors and
+an executable data contract. Using the published tables does not require Julia.
+
+$F(s, E_0)$ is a normalized *shape*, not an absolute cross section: the absolute
+$\sigma(E_0)$ shipped beside it and the edge energies both come from the
+Bote–Salvat coefficient set (Bote & Salvat, 2008; Bote et al., 2009), the one
+third-party table this code carries. Every shape and every scattering factor is
+computed here.
+
+Behind the dataset is an engine that solves an isolated atom from scratch —
+self-consistent field, bound orbitals, distorted continuum waves — and derives
+from that one atom six scattering and excitation quantities. It calls no
+external atomic-structure code, it does not read scattering factors from a
+fitted table, and it depends on nothing but the Julia standard library. The
+published off-diagonal form factors are the product; the shared engine is why
+they are reproducible and why the family can grow.
 
 !!! tip "Just want the numbers?"
     Two datasets are already published, and neither needs Julia:
@@ -36,8 +50,9 @@ shape and every scattering factor is computed here.
     generated both published datasets. It is split into the L0–L5 layer files
     described under [Architecture](architecture.md), and six exits sit on top
     of the same atom. The ionization tables and the scattering factors have
-    been checked against external references ([Verification](verification.md),
-    [Against the literature](comparison.md)); the EELS, GOS, phase-shift and
+    been compared by the author against external references
+    ([Verification](verification.md), [Against the literature](comparison.md)) —
+    there is no independent third-party validation yet; the EELS, GOS, phase-shift and
     Mott exits are checked against analytic limits and, where one exists, an
     external reference — the GOS comparison against the Dirac GOS database
     leaves a Bethe-ridge discrepancy that the Verification page records as
@@ -91,8 +106,9 @@ See [The physics](physics.md) for the prescription and its known limits, and
 ## Why this exists
 
 The physics of an isolated atom scattering a fast electron, a photon, or another
-electron is one calculation with several exits. Existing open tools each expose
-one exit and hide the engine:
+electron is one calculation with several exits. The quantities an
+electron-microscopy workflow needs are normally split across separate tools and
+datasets, each exposing one exit and keeping its engine to itself:
 
 - Ionization form factors for STEM-EDX / EELS mapping are locked inside
   microscopy simulators.
@@ -103,8 +119,8 @@ one exit and hide the engine:
   2023); it stops at $q = 50$ Å⁻¹ ($s \approx 3.98$ Å⁻¹) and it is a GOS table,
   not an ionization form-factor table for Bloch-wave or multislice codes.
 - Elastic scattering phase shifts live in separate Fortran packages.
-- Atomic scattering factors are distributed as fitted parameterizations rather
-  than as something you can recompute for an arbitrary ion.
+- Atomic scattering factors are commonly consumed as fitted parameterizations
+  rather than as something you can recompute for an arbitrary ion.
 
 Temari puts the engine in the open and adds exits to it. Three quantities — the
 EELS edge shape, the inner-shell stopping power and the elastic phase shifts —
@@ -121,7 +137,9 @@ output plumbing, not new physics. See
 2. **Standalone.** No `module`, no package to install: the layer files carry a
    flat namespace and concatenate in include order, so it stays possible to
    hand the whole engine to someone as a single file.
-3. **MIT licensed.** A reference implementation should be readable and usable.
+3. **MIT licensed code, CC-BY-4.0 data.** A reference implementation should be
+   readable and usable; the generated tables carry their own licence and their
+   own version line.
 4. **Fast**, but *reproducibility outranks speed*: optimizations that change
    floating-point summation order are adopted only when a full table
    regeneration is intended, and are declared as such.
@@ -148,9 +166,12 @@ output plumbing, not new physics. See
 The software is MIT; the datasets are CC-BY-4.0 with an MIT loader.
 Copyright © 2026 Yusuke SETO.
 
-The implementation was largely written with AI assistance (Anthropic Claude);
-the choice of physical prescription and all verification are the author's
-responsibility.
+Most of the implementation code was produced with assistance from Anthropic
+Claude and was reviewed and integrated by the author. The author is responsible
+for the physical prescription, for the tests and for the released data. AI
+assistance is not treated as independent validation: the reproducible checks,
+the external comparisons and the known unresolved discrepancies are documented
+under [Verification](verification.md).
 
 `bote_salvat.json` is machine-extracted from NIST's BoteSalvatICX.jl (Unlicense,
 public domain). If you publish results using the cross sections, please cite

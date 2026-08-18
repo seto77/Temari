@@ -5,13 +5,13 @@
 #   - 未訳ページは fallback_to_default で英語本文をローカライズ URL に生成し、
 #     overrides/main.html のバナーで「未訳」と明示する (ページ単位の増分翻訳)
 site_name: Temari
-site_description: Atomic scattering and excitation factors from first principles
+site_description: Open, relativistic, reproducible off-diagonal ionization form factors for quantitative STEM-EDX and ALCHEMI
 site_author: Yusuke Seto
 site_url: https://seto77.github.io/Temari/
 repo_url: https://github.com/seto77/Temari
 repo_name: seto77/Temari
 edit_uri: edit/main/docs/src/
-copyright: Copyright &copy; 2026 Yusuke SETO &mdash; MIT License
+copyright: "Copyright &copy; 2026 Yusuke SETO &mdash; software: MIT &middot; datasets: CC-BY-4.0"
 
 docs_dir: src
 site_dir: site

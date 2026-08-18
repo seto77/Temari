@@ -88,9 +88,12 @@ Coverage by shell:
 ### What F is
 
 $F(s, E_0)$ is the **shape** of the inner-shell ionization form factor,
-normalized so that $F(0) = 1$. It is the quantity STEM-EDX and ALCHEMI need:
-the mixed dynamic form factor evaluated for the difference vector between two
-Bloch waves, which is what makes an EDX map depend on the crystal orientation.
+normalized so that $F(0) = 1$. It is the quantity STEM-EDX and ALCHEMI need: the
+mixed dynamic form factor contracted over the ejected electron's energy and
+direction, for two Bloch waves separated by $K = 4\pi s\,a_0$, then normalized
+at $K = 0$ — the off-diagonal response that an EDX map's dependence on crystal
+orientation is modelled with. [The physics](physics.md#what-is-computed) gives
+the integral it comes from.
 
 - **s is $\sin\theta/\lambda$ in Å⁻¹**, the crystallographic convention. The
   momentum transfer is **q = 4πs**, so K = 4πs·a₀ in atomic units. For example,

@@ -92,9 +92,9 @@ no transcription of their tables: no columns of their numbers, no lists of their
 raw values, and nothing that is one arithmetic step from either. Cite where the
 comparison data lives instead.
 
-What you *should* write is the outcome of the comparison: "agrees with Oxley &
-Allen (2000) and with µSTEM to within 1 % for s <= 1.25 A^-1", or a table of our
-own values, or the ratio between ours and theirs. Stating how far apart two
+What you *should* write is the outcome of the comparison: a deviation quantified
+over a stated channel and a stated s range, or a table of our own values, or the
+ratio between ours and theirs. Stating how far apart two
 calculations sit is ordinary scientific reporting and is what makes a validation
 claim checkable -- replacing it with "agrees well" would be less honest, not
 more careful. The line is transcription, not arithmetic: a deviation figure
@@ -182,8 +182,13 @@ is a known Julia runtime problem, not a Temari one.
 
 ## AI assistance
 
-Most of the implementation was written with AI assistance (Anthropic Claude).
-The choice of physical prescription and all verification are the author's
-responsibility. Contributions written the same way are welcome, under the same
-condition: **you must have verified the result yourself**, with the commands
-above, and you are answerable for it.
+Most of the implementation code was produced with assistance from Anthropic
+Claude and was reviewed and integrated by the author. The author is responsible
+for the physical prescription, for the tests and for the released data. **AI
+assistance is not treated as independent validation** — the reproducible checks,
+the external comparisons and the known unresolved discrepancies are what carry
+the claim, and they are documented on the Verification page.
+
+Contributions written the same way are welcome, under the same condition:
+**you must have verified the result yourself**, with the commands above, and you
+are answerable for it.

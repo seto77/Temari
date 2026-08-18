@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-title: "Temari: atomic scattering and excitation factors from first principles"
+title: "Temari: relativistic off-diagonal inner-shell ionization form factors for STEM-EDX and ALCHEMI"
 message: "If you use this software or the tables it generates, please cite it."
 type: software
 authors:
@@ -18,17 +18,25 @@ keywords:
   - electron microscopy
   - EELS
   - STEM-EDX
+  - ALCHEMI
   - inner-shell ionization
+  - ionization form factor
+  - mixed dynamic form factor
   - generalized oscillator strength
   - atomic form factor
+  - electron scattering
   - Dirac-Hartree-Fock-Slater
   - Julia
 abstract: >-
-  Temari solves an isolated atom from scratch — self-consistent field, bound
-  orbitals and distorted continuum waves — and derives the scattering and
-  excitation factors used by electron microscopy, spectroscopy and transport
-  simulation: the inner-shell ionization form factor F(s, E0) for STEM-EDX, the
-  EELS differential cross section, the generalized oscillator strength, X-ray
+  Temari computes and publishes the off-diagonal inner-shell ionization form
+  factor F(s, E0) that quantitative STEM-EDX and ALCHEMI need: the mixed
+  dynamic form factor contracted over the ejected electron's energy and
+  direction, for two Bloch waves separated by K = 4*pi*s*a0, then normalized at
+  K = 0. It solves an isolated atom from scratch — self-consistent field, bound
+  orbitals and distorted continuum waves — and derives from that one atom the
+  scattering and excitation factors used by electron microscopy, spectroscopy
+  and transport simulation: besides F(s, E0), the EELS differential cross
+  section, the generalized oscillator strength, X-ray
   and electron atomic scattering factors, and Mott elastic cross sections. It
   depends on the Julia standard library only and contains no fitted parameter
   tables, with one declared exception (the public-domain Bote–Salvat ionization
