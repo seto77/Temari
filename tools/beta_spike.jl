@@ -51,12 +51,15 @@ end
 
 """θ ≤ β に切った K=0 の角度積分 (部分角。**既存経路は触らない**)。
 
-`stable=true` は Q² を `(k_i−k_f)² + 4k_i k_f t` で組む G6 用の異式。
-値は数学的に同じだが**浮動小数点では別物**なので、既定は既存と同じ式にする。"""
+`form` は Q² の組み方 (G6/G11。数学的には同値、浮動小数点では別物):
+
+  `:naive`   `k_i² + k_f² − 2k_i k_f cosθ`   … **既定**。既存 K=0 分岐と 1 文字同じ
+  `:stable`  `(k_i−k_f)² + 4k_i k_f t`       … 相殺が dq に限られる
+  `:exactx`  `(k_i−k_f)²·exp(x)`             … 変数変換の定義そのもの"""
 function partial_angular(k_i::Float64, k_f::Float64, rl::RlTable, occ::Float64,
                          beta::Float64; n_x::Int=64,
                          tr::Union{Nothing,Transverse}=nothing,
-                         stable::Bool=false)
+                         form::Symbol=:naive)
     dq = k_i - k_f
     a = 4.0 * k_i * k_f / (dq * dq)            # AngWS と同一の係数
     xb = beta_x_upper(a, beta)
@@ -68,7 +71,8 @@ function partial_angular(k_i::Float64, k_f::Float64, rl::RlTable, occ::Float64,
     Q2 = zeros(nx); Q = zeros(nx)
     @inbounds for i in 1:nx
         # ★既定は AngWS/K=0 分岐と 1 文字同じ式 (G1 のビット同一性の担保)
-        Q2[i] = stable ? (dq * dq + 4.0 * k_i * k_f * tt[i]) :
+        Q2[i] = form === :stable ? (dq * dq + 4.0 * k_i * k_f * tt[i]) :
+                form === :exactx ? (dq * dq * exp(x[i])) :
                 (k_i^2 + k_f^2 - 2.0 * k_i * k_f * cth[i])
         Q[i] = sqrt(Q2[i])
     end
@@ -88,7 +92,7 @@ end
 張り直すので本数が増え、1 ノードあたりの余計な仕事を減らしたい)。"""
 function eps_node_probe(ch, r_core::Float64, e::Float64, k_i::Float64, T0::Float64,
                         settings, betas::Vector{Float64}, transverse::Bool;
-                        light::Bool=false, n_x_mult::Int=1)
+                        light::Bool=false, n_x_mult::Int=1, form::Symbol=:naive)
     z = ch.z
     kf = kin_k(max(T0 - ch.E_th - e, 0.0))
     kappa = ch.dirac === nothing ? sqrt(2.0 * e) : krel(e, ch.dirac.c)
@@ -113,7 +117,7 @@ function eps_node_probe(ch, r_core::Float64, e::Float64, k_i::Float64, T0::Float
     if light
         for (ib, b) in enumerate(betas)
             vals[ib] = partial_angular(k_i, kf, rl, ch.occ_init, b;
-                                       n_x=nx_use, tr=tr)
+                                       n_x=nx_use, tr=tr, form=form)
         end
         return (full=0.0, closure=0.0, vals=ps .* vals, vals2=vals2,
                 vals_st=vals_st, t_setup=t_setup, t_full=0.0, t_beta=0.0, nb=nb)
@@ -131,7 +135,7 @@ function eps_node_probe(ch, r_core::Float64, e::Float64, k_i::Float64, T0::Float
         vals2[ib] = partial_angular(k_i, kf, rl, ch.occ_init, b;
                                     n_x=2 * settings.n_x, tr=tr)
         vals_st[ib] = partial_angular(k_i, kf, rl, ch.occ_init, b;
-                                      n_x=settings.n_x, tr=tr, stable=true)
+                                      n_x=settings.n_x, tr=tr, form=:stable)
     end
     # β = π (全角度) を既存と同じ n_x で
     closure = partial_angular(k_i, kf, rl, ch.occ_init, Float64(pi);
@@ -191,7 +195,8 @@ end
 戻り値は β ごとの σ [nm²] のベクトル (`betas` と同じ並び)。"""
 function window_sigma(ch, r_core::Float64, k_i::Float64, T0::Float64, settings,
                       betas::Vector{Float64}, transverse::Bool,
-                      d1_eV::Float64, d2_eV::Float64, n::Int)
+                      d1_eV::Float64, d2_eV::Float64, n::Int;
+                      form::Symbol=:naive)
     e1 = d1_eV / HARTREE_EV
     e2 = d2_eV / HARTREE_EV
     x, w = gl01(n)
@@ -207,7 +212,7 @@ function window_sigma(ch, r_core::Float64, k_i::Float64, T0::Float64, settings,
     V = zeros(ne, nb)
     Threads.@threads :greedy for ie in ne:-1:1
         p = eps_node_probe(ch, r_core, eps[ie], k_i, T0, settings, betas,
-                           transverse; light=true)
+                           transverse; light=true, form=form)
         V[ie, :] = p.vals
     end
     pref = 4.0 * kin_gamma(T0)^2 * BOHR_NM^2
