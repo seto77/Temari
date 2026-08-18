@@ -193,6 +193,23 @@ Bloch 波が $K = 4\pi s\,a_0$ だけ離れたときの混合動的形状因子 
 いません**。発行されるまでは、版付きの release タグを引用し、アーカイブは公開
 している SHA-256 で同定してください。
 
+!!! warning "v1.0.0 アーカイブへの正誤表 (2026-08-19)"
+    アーカイブに同梱した `README.md` の中に、誤った記述が 2 つあります。
+    アーカイブはそのために組み直しては**いません** — バイト列とその SHA-256 は
+    正本のままです。表の数値は 1 つも変わりません。
+
+    - この系統が「独立した版**と DOI**」を持つ、と書いてあります。持っているのは
+      独立した版の系列だけで、上記のとおり DOI は発行していません。
+    - 交換を「exact exchange in the KLI approximation」、1 箇所では
+      「KLI exact exchange」と書いています。どちらも **OEP に対する交換のみの
+      KLI 近似**と読み替えてください。この区別はこの表自身で測れるものです —
+      後述の [表は KLI であって Dirac–Hartree–Fock ではない](#tables-are-kli-not-dhf)
+      を参照してください。
+
+    どちらも次の dataset-factors の release で修正します。同じ正誤表を
+    [release ページ](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0)
+    にも掲載しています。
+
 ### 中身
 
 原子ごとに 1 ファイル、計 86 ファイル `SF_Z<zzz>.json` で、それぞれ固定格子
@@ -275,7 +292,7 @@ python tools/temari_factors_contract.py . --values-from ALT --negative   # 適�
 あり (散発的に観測、停止許容の範囲内)、公開したアーカイブのバイト列とその
 SHA-256 が正本です。中性原子のみです。
 
-#### 表は KLI であって Dirac–Hartree–Fock ではない
+#### 表は KLI であって Dirac–Hartree–Fock ではない { #tables-are-kli-not-dhf }
 
 $f_x$ は OFFV1 (Olukayode et al., 2023) の DHF 値と 8 元素で比較し (0–6 Å⁻¹ での
 最大相対差 0.07–0.26 %、軽元素で最大)、C、Si、Fe、Au については s ≤ 2 Å⁻¹ で

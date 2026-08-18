@@ -205,6 +205,23 @@ release
 yet**; until one exists, cite the versioned release tag and identify the archive
 by its published SHA-256.
 
+!!! warning "Erratum for the v1.0.0 archive (2026-08-19)"
+    Two sentences inside the archive's own `README.md` are wrong. The archive is
+    **not** rebuilt for them — its bytes and its SHA-256 stay canonical — and no
+    number in the tables changes.
+
+    - It says the family carries "an independent version **and DOI**". It carries
+      an independent version line only; no DOI has been minted, as above.
+    - It describes the exchange as "exact exchange in the KLI approximation", and
+      once as "KLI exact exchange". Read both as **the exchange-only KLI
+      approximation to the OEP** — the distinction is measurable in these very
+      tables, see [The tables are KLI, not Dirac–Hartree–Fock](#tables-are-kli-not-dhf)
+      below.
+
+    Both are corrected in the next dataset-factors release. The same erratum is
+    on the
+    [release page](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0).
+
 ### What is in it
 
 86 files `SF_Z<zzz>.json`, one per atom, each with f_x and f_e on the fixed grid
@@ -297,7 +314,7 @@ different iterate between processes (observed sporadically, within the stopping
 tolerance); the released archive bytes and their SHA-256 are canonical. Neutral
 atoms only.
 
-#### The tables are KLI, not Dirac–Hartree–Fock
+#### The tables are KLI, not Dirac–Hartree–Fock { #tables-are-kli-not-dhf }
 
 $f_x$ was compared with the DHF values of OFFV1 (Olukayode et al., 2023) on
 eight elements (maximum relative difference 0.07–0.26 % over 0–6 Å⁻¹, largest
