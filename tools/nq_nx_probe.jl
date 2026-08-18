@@ -60,8 +60,13 @@ include(joinpath(@__DIR__, "beta_spike.jl"))
 const NQ_LIST = [120, 240, 360, 540, 810, 1216]
 const NX_LIST = [32, 64, 96, 128, 192, 256, 512]
 # ⚠ π は **rad** であって mrad ではない (codex の指摘。配列に混ぜない)
-const BETA_MRAD = [30.0, 100.0, 300.0, 1000.0]
-const PROBE_SPEC = [(26, "K", 200.0), (47, "L3", 200.0), (79, "M5", 200.0)]
+# ⚠ 150 と 200 は**契約域そのもの** (β ≤ 200 mrad)。100 と 300 からの内挿は
+#   非単調性のせいで許されない (契約 §7.5 の反省)。
+const BETA_MRAD = [30.0, 100.0, 150.0, 200.0, 300.0, 1000.0]
+# ⚠ C/O の K は **q_hi = κ+15Z** の側が小さく (15Z = 90/120 対 k_i+k_f ≈ 262)、
+#   大 β で**本当に打ち切りを跨ぐ**。Fe/Ag/Au では起きない条件。
+const PROBE_SPEC = [(26, "K", 200.0), (47, "L3", 200.0), (79, "M5", 200.0),
+                    (6, "K", 200.0), (8, "K", 200.0)]
 
 """★ 継ぎ目分割オラクル — PCHIP の継ぎ目と `q_hi` の跳びを x 上で正確に割る。
 
@@ -266,10 +271,313 @@ function probe_cost(z::Int, tag::String, e0::Float64, eps_frac::Float64)
     return tt, ta
 end
 
+"""★ 項目 4 — **σ 寄与で重みづけした誤差** (codex と合意した設定選択の主指標)。
+
+⚠⚠ 最悪値だけで選ぶと、σ をほとんど運ばない隅 (Au M5, ε=0.5×ε_max, β=π) が
+設定を決めてしまう。このリポの規律 ([[count-vs-weight]]) に従い、
+**実際の ε 求積の重みで平均した誤差**を主指標にする。
+
+2 つ出す (codex の定義):
+
+    E_weighted = Σ wᵢ σᵢ rᵢ / Σ wᵢ σᵢ        rᵢ = |σ̂ᵢ − σᵢ|/σᵢ   ← 相殺を当てにしない
+    E_signed   = |Σ wᵢ (σ̂ᵢ − σᵢ)| / Σ wᵢ σᵢ                      ← 実際に返る σ の誤差
+
+⚠ `E_signed ≪ E_weighted` なら**誤差が相殺している**ということで、
+それは条件が変われば崩れる。**両方を見る。**
+
+ノードは `window_sigma` (契約が約束する側) と同じ生成則を使う。
+"""
+function probe_weighted(z::Int, tag::String, e0::Float64, n_q::Int, n_x::Int;
+                        d2_eV::Float64=100.0, nw::Int=16, transverse::Bool=false)
+    ch = prepare_channel(z, tag, e0; dirac_continuum=true)
+    T0 = ch.T0; k_i = kin_k(T0)
+    cum = cumsum(ch.u_b .^ 2 .* gradient_(ch.r_b))
+    idx = clamp(searchsortedfirst(cum, 1.0 - 1e-12), 1, length(ch.r_b))
+    r_core = clamp(ch.r_b[idx] * 1.15, 0.4, 20.0)
+    # ⚠ window_sigma の d1=0 分岐と同じノード (√ε 正則化)
+    e2 = d2_eV / HARTREE_EV
+    x, w = gl01(nw)
+    epsv = e2 .* x .^ 2
+    wev = w .* 2.0 .* e2 .* x
+    betas = vcat([b * 1e-3 for b in BETA_MRAD], [Float64(pi)])
+    labs = vcat([@sprintf("%.0f mrad", b) for b in BETA_MRAD], ["π rad"])
+    num_w = zeros(length(betas)); num_s = zeros(length(betas)); den = zeros(length(betas))
+    worst = zeros(length(betas))
+    for (ie, e) in enumerate(epsv)
+        kf = kin_k(max(T0 - ch.E_th - e, 0.0))
+        kappa = ch.dirac === nothing ? sqrt(2.0 * e) : krel(e, ch.dirac.c)
+        q_hi = min(k_i + kf, kappa + 15.0 * z)
+        q_lo = max(1e-4, 0.9 * (k_i - kf))
+        _, rl, _, _, _, _, _ = eps_setup(
+            ch.ion_pot, ch.r_b, ch.u_b, e, z, r_core, q_lo, q_hi,
+            PROD_SETTINGS.l_cap, n_q, CONT_PPW, CONT_DT_LOG, ch.l_b,
+            0.0, k_i + kf; rel=ch.rel, dirac=ch.dirac)
+        ps = kf / k_i
+        # ⚠ 穴 3 (codex, 2026-08-18): 契約の既定は **transverse on** なのに、
+        #   probe は縦成分だけを測っていた。横断核は同じ継ぎ目を通るが Q への
+        #   重みが違うので、「縦で十分なら横も十分」とは言えない。
+        tr = transverse ? Transverse(ch.E_th + e, T0) : nothing
+        for (ib, b) in enumerate(betas)
+            ours = ps * partial_angular(k_i, kf, rl, ch.occ_init, b; n_x=n_x, tr=tr)
+            orc, _, _ = knot_split_angular(k_i, kf, rl, ch.occ_init, b; tr=tr)
+            orc *= ps
+            orc <= 0.0 && continue
+            wt = wev[ie] * orc                      # 寄与の重み
+            den[ib] += wt
+            num_w[ib] += wt * abs(ours - orc) / orc
+            num_s[ib] += wev[ie] * (ours - orc)
+            worst[ib] = max(worst[ib], abs(ours - orc) / orc)
+        end
+    end
+    @printf("\n  Z=%d %s @%.0f keV  窓 [0,%.0f] eV  (n_q=%d, n_x=%d, 横断 %s)\n",
+            z, tag, e0, d2_eV, n_q, n_x, transverse ? "on" : "off")
+    @printf("  %-10s %12s %12s %12s\n", "β", "E_weighted", "E_signed", "局所最悪")
+    for (ib, lab) in enumerate(labs)
+        den[ib] <= 0 && continue
+        @printf("  %-10s %12.2e %12.2e %12.2e\n",
+                lab, num_w[ib] / den[ib], abs(num_s[ib]) / den[ib], worst[ib])
+    end
+    return nothing
+end
+
+"""★ 穴 1 (codex) — **承認値 n_q=1216 のテーブル誤差**を、より密な格子から見積もる。
+
+⚠ これまで 1216 を自己収束の**基準**にしていたので、その点では (b) が定義上 0 になり、
+承認値の総誤差に未測定の成分が残っていた。
+⚠ これも同じ族の自己収束なので**下限**。p は仮定せず、水準間の幅で見る。
+"""
+function probe_table_residual(z::Int, tag::String, e0::Float64, eps_frac::Float64)
+    ch = prepare_channel(z, tag, e0; dirac_continuum=true)
+    T0 = ch.T0; k_i = kin_k(T0)
+    cum = cumsum(ch.u_b .^ 2 .* gradient_(ch.r_b))
+    idx = clamp(searchsortedfirst(cum, 1.0 - 1e-12), 1, length(ch.r_b))
+    r_core = clamp(ch.r_b[idx] * 1.15, 0.4, 20.0)
+    e = eps_frac * (T0 - ch.E_th)
+    kf = kin_k(max(T0 - ch.E_th - e, 0.0))
+    kappa = ch.dirac === nothing ? sqrt(2.0 * e) : krel(e, ch.dirac.c)
+    q_hi = min(k_i + kf, kappa + 15.0 * z)
+    q_lo = max(1e-4, 0.9 * (k_i - kf))
+    betas = vcat([b * 1e-3 for b in BETA_MRAD], [Float64(pi)])
+    labs = vcat([@sprintf("%.0f mrad", b) for b in BETA_MRAD], ["π rad"])
+    vals = Dict{Int,Vector{Float64}}()
+    for nq in (1216, 1824, 2432)
+        _, rl, _, _, _, _, _ = eps_setup(
+            ch.ion_pot, ch.r_b, ch.u_b, e, z, r_core, q_lo, q_hi,
+            PROD_SETTINGS.l_cap, nq, CONT_PPW, CONT_DT_LOG, ch.l_b,
+            0.0, k_i + kf; rel=ch.rel, dirac=ch.dirac)
+        vals[nq] = [knot_split_angular(k_i, kf, rl, ch.occ_init, b)[1] for b in betas]
+    end
+    @printf("\n  Z=%d %s @%.0f keV  ε=%.3g×ε_max\n", z, tag, e0, eps_frac)
+    @printf("  %-10s %14s %14s\n", "β", "1216 vs 2432", "1824 vs 2432")
+    for (ib, lab) in enumerate(labs)
+        r = vals[2432][ib]
+        r == 0.0 && continue
+        @printf("  %-10s %14.2e %14.2e\n", lab,
+                abs(vals[1216][ib] - r) / abs(r), abs(vals[1824][ib] - r) / abs(r))
+    end
+    return nothing
+end
+
+"""★ 穴 5 (codex) — **契約域を密に掃く**。E₀ 固定と β 4 点が最大の標本不足だった。
+
+⚠ 契約の E₀ 範囲は **30–400 keV** (`E0_MIN` / `E0_MAX`) なのに、これまで 200 keV しか
+測っていなかった。E₀ は dq・a・x_β・θ_E・`q_hi` のどちらの分枝が選ばれるかを**同時に**動かす。
+⚠ β も契約域 (≤ 200 mrad) に 4 点しか無かった。**GL 誤差は継ぎ目との相対位相で非単調**なので、
+150 と 200 の間に悪い点が無いとは言えない。
+
+**承認値 (n_q, n_x) = (1216, 192)、横断項 on (契約の既定) のみ**を測る。
+"""
+const DOM_NQ = Ref(1216)
+const DOM_NX = Ref(192)
+const DOMAIN_E0 = [30.0, 60.0, 100.0, 200.0, 300.0, 400.0]
+const DOMAIN_BETA = [10.0, 30.0, 50.0, 75.0, 100.0, 120.0, 140.0, 160.0, 180.0, 200.0]
+
+function probe_domain(z::Int, tag::String, e0::Float64, eps_frac::Float64;
+                      n_q::Int=1216, n_x::Int=192)
+    ch = prepare_channel(z, tag, e0; dirac_continuum=true)
+    T0 = ch.T0; k_i = kin_k(T0)
+    cum = cumsum(ch.u_b .^ 2 .* gradient_(ch.r_b))
+    idx = clamp(searchsortedfirst(cum, 1.0 - 1e-12), 1, length(ch.r_b))
+    r_core = clamp(ch.r_b[idx] * 1.15, 0.4, 20.0)
+    e = eps_frac * (T0 - ch.E_th)
+    kf = kin_k(max(T0 - ch.E_th - e, 0.0))
+    kappa = ch.dirac === nothing ? sqrt(2.0 * e) : krel(e, ch.dirac.c)
+    q_hi = min(k_i + kf, kappa + 15.0 * z)
+    q_lo = max(1e-4, 0.9 * (k_i - kf))
+    _, rl, _, _, _, _, _ = eps_setup(
+        ch.ion_pot, ch.r_b, ch.u_b, e, z, r_core, q_lo, q_hi,
+        PROD_SETTINGS.l_cap, n_q, CONT_PPW, CONT_DT_LOG, ch.l_b,
+        0.0, k_i + kf; rel=ch.rel, dirac=ch.dirac)
+    tr = Transverse(ch.E_th + e, T0)
+    dq = k_i - kf
+    x_cut = 2.0 * (log(q_hi) - log(dq))
+    a = 4.0 * k_i * kf / (dq * dq)
+    out = Tuple{Float64,Float64,Bool}[]      # (β, 相対差, q_hi を跨ぐか)
+    for bm in DOMAIN_BETA
+        b = bm * 1e-3
+        orc, _, _ = knot_split_angular(k_i, kf, rl, ch.occ_init, b; tr=tr)
+        orc == 0.0 && continue
+        ours = partial_angular(k_i, kf, rl, ch.occ_init, b; n_x=n_x, tr=tr)
+        push!(out, (bm, reldiff(ours, orc), beta_x_upper(a, b) > x_cut))
+    end
+    return out
+end
+
 function main_probe(args)
     quick = "--quick" in args
+    if "--nqfinal" in args
+        # ★ 継ぎ目分割を本番規則にすると角度求積の誤差 (a) が実質消えるので、
+        #   **n_q はテーブルの内挿誤差 (b) だけで決まる**。それを契約域の難所で測る。
+        # ⚠ 角度側は継ぎ目分割 npt=12 (実質厳密) で固定し、n_q だけを動かす。
+        # ⚠ **横断項 on** (契約の既定)。⚠ 同族の自己収束なので下限。
+        println("★ 継ぎ目分割を前提にした n_q の選定")
+        println("  角度は継ぎ目分割 npt=12 で固定 ⇒ 動くのはテーブルの内挿誤差だけ")
+        println("  ⚠ 横断項 on。⚠ 最密 n_q=1824 基準の自己収束なので下限\n")
+        NQS = [240, 360, 540, 810, 1216, 1824]
+        BS = [30.0, 100.0, 150.0, 200.0]
+        worst = 0.0; worst_at = ""
+        for (z, tag) in ((6, "K"), (8, "K"), (26, "K"), (47, "L3"), (79, "M5")),
+            e0 in (200.0, 400.0), frac in (0.001, 0.05, 0.5)
+            local ch
+            try
+                ch = prepare_channel(z, tag, e0; dirac_continuum=true)
+            catch
+                continue
+            end
+            T0 = ch.T0; k_i = kin_k(T0)
+            cum = cumsum(ch.u_b .^ 2 .* gradient_(ch.r_b))
+            idx = clamp(searchsortedfirst(cum, 1.0 - 1e-12), 1, length(ch.r_b))
+            r_core = clamp(ch.r_b[idx] * 1.15, 0.4, 20.0)
+            e = frac * (T0 - ch.E_th)
+            kf = kin_k(max(T0 - ch.E_th - e, 0.0))
+            kappa = krel(e, ch.dirac.c)
+            q_hi = min(k_i + kf, kappa + 15.0 * z)
+            q_lo = max(1e-4, 0.9 * (k_i - kf))
+            tr = Transverse(ch.E_th + e, T0)
+            vals = Dict{Int,Vector{Float64}}()
+            for nq in NQS
+                _, rl, _, _, _, _, _ = eps_setup(
+                    ch.ion_pot, ch.r_b, ch.u_b, e, z, r_core, q_lo, q_hi,
+                    PROD_SETTINGS.l_cap, nq, CONT_PPW, CONT_DT_LOG, ch.l_b,
+                    0.0, k_i + kf; rel=ch.rel, dirac=ch.dirac)
+                vals[nq] = [knot_split_angular(k_i, kf, rl, ch.occ_init, b * 1e-3;
+                                               npt=12, tr=tr)[1] for b in BS]
+            end
+            @printf("  Z=%-3d %-3s @%3.0f ε=%.3g : ", z, tag, e0, frac)
+            for nq in NQS[1:end-1]
+                m = 0.0
+                for ib in eachindex(BS)
+                    r = vals[NQS[end]][ib]
+                    r == 0.0 && continue
+                    m = max(m, abs(vals[nq][ib] - r) / abs(r))
+                end
+                @printf("%d:%.1e ", nq, m)
+                if nq == 540 && m > worst
+                    worst = m
+                    worst_at = @sprintf("Z=%d %s @%.0f ε=%.3g", z, tag, e0, frac)
+                end
+            end
+            println()
+        end
+        @printf("\n★ **n_q=540 のテーブル誤差 (契約域 β≤200 mrad) の observed_max = %.2e**\n", worst)
+        @printf("  ← %s\n", worst_at)
+        return 0
+    end
+    if "--hard" in args
+        # ★ 契約域の掃引で見つかった**最悪条件**の上で (n_q, n_x) 格子を引き直す。
+        # ⚠ 200 keV で選んだ折れ点が、E₀ の上端でも折れ点かどうかは別問題である。
+        println("★ 契約域の最悪条件で (n_q, n_x) を選び直す")
+        println("  条件 = C K @400 keV (契約 E₀ の上端)、β ≤ 200 mrad")
+        println("⚠⚠ **横断項 off** — `probe_one` は `tr` を渡さない (縦 Coulomb 成分のみ)。")
+        println("   契約の既定は on なので、この表を契約の数字として使ってはいけない。")
+        println("   横断 on の測定は `--verify` と `--domain` と `--nqfinal`。")
+        println()
+        probe_one(6, "K", 400.0, 0.05)
+        probe_one(8, "K", 400.0, 0.05)
+        return 0
+    end
+    if "--domain" in args
+        i = findfirst(==("--nx"), args)
+        i !== nothing && (DOM_NX[] = parse(Int, args[i+1]))
+        i = findfirst(==("--nq"), args)
+        i !== nothing && (DOM_NQ[] = parse(Int, args[i+1]))
+        println("★ 契約域を密に掃く — E₀ 30–400 keV × β 10–200 mrad")
+        @printf("  (n_q, n_x) = (%d, %d)、**横断項 on** (契約の既定)
+", DOM_NQ[], DOM_NX[])
+        println("⚠ これまで E₀ = 200 keV 固定・β 4 点だった (codex の指摘 #5)\n")
+        worst = 0.0; worst_at = ""
+        nrun = 0; ncross = 0
+        for (z, tag, _) in PROBE_SPEC, e0 in DOMAIN_E0, frac in (0.001, 0.05, 0.5)
+            local res
+            try
+                res = probe_domain(z, tag, e0, frac; n_q=DOM_NQ[], n_x=DOM_NX[])
+            catch err
+                continue                      # 閾値以下など (E₀ が低い重元素 K)
+            end
+            isempty(res) && continue
+            nrun += 1
+            wb, wv, _ = res[argmax([r[2] for r in res])]
+            ncross += count(r -> r[3], res)
+            if wv > worst
+                worst = wv
+                worst_at = @sprintf("Z=%d %s @%.0f keV ε=%.3g β=%.0f mrad", z, tag, e0, frac, wb)
+            end
+            @printf("  Z=%-3d %-3s @%3.0f keV ε=%.3g  最悪 %.2e @β=%.0f mrad\n",
+                    z, tag, e0, frac, wv, wb)
+        end
+        @printf("\n★ 契約域 (E₀ 30–400 keV, β ≤ 200 mrad) の observed_max = **%.2e**\n", worst)
+        @printf("  ← %s\n", worst_at)
+        @printf("  条件 %d 組 / q_hi を跨いだ (β, 条件) の数 = %d\n", nrun, ncross)
+        return 0
+    end
+    if "--verify" in args
+        # ★ codex が挙げた穴 1〜3 を、承認値 (1216, 192) について埋める
+        println("★ 承認値 (n_q, n_x) = (1216, 192) の検証")
+        println("  穴 1: n_q > 1216 でテーブル誤差 (b) を推定")
+        println("  穴 2: 承認値そのものの重みづけ誤差")
+        println("  穴 3: **横断項 on** (契約の既定) でも測る")
+        println()
+        println("── 穴 2+3: 重みづけ誤差 (窓 [0,100] eV) ──")
+        for tr in (false, true)
+            println("\n########## 横断 ", tr ? "on (契約の既定)" : "off", " ##########")
+            for (z, tag, e0) in PROBE_SPEC
+                try
+                    probe_weighted(z, tag, e0, 1216, 192; transverse=tr)
+                catch err
+                    @printf("  ⚠ Z=%d %s で失敗: %s\n", z, tag, typeof(err))
+                end
+            end
+        end
+        println("\n\n── 穴 1: n_q = 1216 / 1824 / 2432 でオラクル値の動き ──")
+        println("⚠ 自己収束なので下限。p を仮定せず幅で見る")
+        for (z, tag, e0) in PROBE_SPEC
+            for frac in (0.05, 0.5)
+                try
+                    probe_table_residual(z, tag, e0, frac)
+                catch err
+                    @printf("  ⚠ Z=%d %s frac=%.3g で失敗: %s\n", z, tag, frac, typeof(err))
+                end
+            end
+        end
+        return 0
+    end
     if "--cost" in args
         probe_cost(26, "K", 200.0, 0.01)
+        return 0
+    end
+    if "--weighted" in args
+        println("★ σ 寄与で重みづけした誤差 (設定選択の主指標)")
+        println("⚠ E_signed ≪ E_weighted なら誤差が相殺している = 条件が変われば崩れる\n")
+        for (nq, nx) in ((240, 64), (360, 96), (540, 96), (540, 192), (1000, 152))
+            println("\n########## (n_q, n_x) = ($nq, $nx) ##########")
+            for (z, tag, e0) in PROBE_SPEC
+                try
+                    probe_weighted(z, tag, e0, nq, nx)
+                catch err
+                    @printf("  ⚠ Z=%d %s で失敗: %s\n", z, tag, typeof(err))
+                end
+            end
+        end
         return 0
     end
     println("角度求積: n_x と n_q の相関を測る")
