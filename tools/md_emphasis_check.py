@@ -85,7 +85,7 @@ def strip_code(line):
     return "".join(out)
 
 def runs(line):
-    """** の delimiter run を (位置, 長さ, can_open, can_close) で返す"""
+    """** の delimiter run を (位置, 長さ, can_open, can_close, 直前の文字) で返す"""
     line = strip_code(line)
     out = []
     i = 0
@@ -100,22 +100,43 @@ def runs(line):
             after = line[j] if j < n else ""
             lf = (not is_ws(after)) and ((not is_punct(after)) or is_ws(before) or is_punct(before))
             rf = (not is_ws(before)) and ((not is_punct(before)) or is_ws(after) or is_punct(after))
-            out.append((i, length, lf, rf))
+            out.append((i, length, lf, rf, before))
             i = j
         else:
             i += 1
     return out
 
+# 閉じるつもりで書かれやすい和文の約物 (この直後の ** は right-flanking になれない)
+CLOSE_INTENT_PUNCT = "。、」』）】〉》・：；！？"
+
 def unmatched(line):
-    """閉じられずリテラル表示になる ** の位置を返す (長さ>=2 のみ対象)"""
+    """閉じられずリテラル表示になる ** の位置を返す (長さ>=2 のみ対象)
+
+    ## ⚠⚠ 260819Cl 追加 — **「対応が付く」= 「正しい」ではない**
+
+    元の実装は**対応の付かない delimiter だけ**を探していた。ところが
+    `**A。**B … **C**ので … は**D**であって` のような段落では、閉じられない `。**` が
+    **開く側として吸収され**、後続の delimiter が 1 つずつずれて対応し、**リテラルの
+    `**` は 1 つも残らないのに太字の範囲が全部ずれる**。実際に本セッションで
+    `docs/host_stability_2026-08-19.md` の 1 箇所を取り逃がした (自己の負のテストで確認)。
+
+    ⇒ 「約物の直後で、かつ**開いている強調がある**位置の `**`」は、
+    **閉じるつもりで書かれたのに閉じられていない**と判定する。
+    開いている強調が無ければ (stack が空) それは正常な開始なので見逃す
+    (`正しい。**次は**効く` は正しい)。
+    """
     stack, bad = [], []
-    for pos, ln, lf, rf in runs(line):
+    for pos, ln, lf, rf, before in runs(line):
         if ln < 2:
             continue                      # * 単独 (斜体) はここでは見ない
         if rf and stack:
             stack.pop()
         elif lf:
-            stack.append(pos)
+            # ★ 閉じるつもりの ** が開く側に化けるのを捕まえる
+            if stack and before in CLOSE_INTENT_PUNCT:
+                bad.append(pos)
+            else:
+                stack.append(pos)
         else:
             bad.append(pos)               # 開くことも閉じることもできない
     bad.extend(stack)                     # 開いたまま閉じられなかったもの
