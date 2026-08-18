@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """factors_a_mode_negative_test.py — `--values-from` (主張 A のモード) の負のテスト
-(260818Cl 新設。docs/contract_conformance_split_2026-08-18.md)
+(260818Cl 新設。docs/notes/contract_conformance_split_2026-08-18.md)
 
 ⚠ 新しい検査は「効いている」と書く前に、**落ちるところを実演**してから言う (リポの掟)。
 ここで実演するのは 3 種類:

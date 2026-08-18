@@ -28,7 +28,7 @@ ReciPro 側のローカル repo `ReciPro/tools/IonizationGen/` (`mustem_*_full.j
 **OFFV1 が現時点の f_x 検証の正本。** 公開パラメータ化 (WK / Cromer–Mann / Peng /
 Kirkland) は全てこれ相当の DHF 計算への**フィット**なので、フィット残差が我々の
 残差と同程度になった時点で分解能を失う。測定結果は
-`docs/exchange_diagnosis_2026-08-07.md` §7。
+`docs/notes/exchange_diagnosis_2026-08-07.md` §7。
 
 より細かい **OFFV2** (s = 0–8 Å⁻¹、Δs = 0.01、801 点、10 桁) は Thorkildsen (2023)
 の記述では **Volkov からの private communication** で、公開されていない。必要なら
@@ -94,7 +94,7 @@ Temari が使うのは主に `01_原子構造・弾性散乱因子` と `02_内�
 ⚠ **Zhang らの Dirac GOS は既に手元にある** (この表から 260812Cl に移した)。
 `data/Dirac_GOS_database.zip` (108 元素) と、展開済みの `data/database/{Fe,Au,H}.hdf5`。
 DOI 10.5281/zenodo.7729585、CC-BY。**格子の実測**
-(`docs/literature_findings_2026-08-12.md` §2):
+(`docs/notes/literature_findings_2026-08-12.md` §2):
 
 - HDF5 属性 `file_format = "GOS5"`、`<元素>/<辺>/{data (128×256), free_energy (128), q (256)}`
 - **q = 0.05 → 50 Å⁻¹ の等比 256 点** (比 1.0275)、**ΔE = 0.01 → 4000 eV の等比 128 点** (比 1.107)

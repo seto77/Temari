@@ -123,9 +123,9 @@ julia -e 'include("src/ionization.jl"); exit(refcheck() < 1e-5 ? 0 : 1)'
 
 v4 の連続状態がスカラー相対論的なものを置き換えたのは、後者の 1 成分還元が相殺を
 1 つ落とし、近似しようとしている相対論効果そのものの 5–20 倍大きい偽の項を残す
-からです (`docs/src_defect_2026-08-07.md`)。測定は
-`docs/frozen_core_and_transverse_2026-08-07.md`、
-`docs/kappa_dirac_continuum_2026-08-07.md`、`docs/speedup_v4_2026-08-08.md`
+からです (`docs/notes/src_defect_2026-08-07.md`)。測定は
+`docs/notes/frozen_core_and_transverse_2026-08-07.md`、
+`docs/notes/kappa_dirac_continuum_2026-08-07.md`、`docs/notes/speedup_v4_2026-08-08.md`
 にあります。
 
 **1 つの model id** が、F(s)・`edge`・`gos` の各実行の冒頭に印字され、JSON 出力にも

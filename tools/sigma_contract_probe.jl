@@ -2,7 +2,7 @@
 sigma_contract_probe.jl — S1 (`σ(β, Δ)` の契約) を書く前に測っておく 4 軸
 (260818Cl 追加)
 
-`docs/beta_spike_2026-08-18.md` §5 の (a)–(d)。codex の助言 (2026-08-18) が出所。
+`docs/notes/beta_spike_2026-08-18.md` §5 の (a)–(d)。codex の助言 (2026-08-18) が出所。
 ⚠ **src は 1 行も触らない。**
 
   (a) Q² の式の違いが **σ と k-factor まで**でどう出るか

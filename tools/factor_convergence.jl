@@ -1,7 +1,7 @@
 #=====================================================================
 factor_convergence.jl — f_x の収束試験 (X6・X7)
 
-計画は `docs/scattering_factor_dataset_plan_2026-08-10.md` §4.2。誤差源を
+計画は `docs/notes/scattering_factor_dataset_plan_2026-08-10.md` §4.2。誤差源を
 **分離して**測る。まとめて測ると、どれを締めれば効くのかが分からない。
 
   X6  動径格子と SCF   dt/2・定義域拡大・収束閾値の厳格化で f_x がどれだけ動くか

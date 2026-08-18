@@ -5,7 +5,7 @@ F(s,E₀) 側の `check_tables.jl` に相当するもの。⚠ **まだ出荷形
 検査対象はファイルではなく `compute_fx` の出力そのもの。形式が決まったら
 ファイルを読む口へ差し替える (検査の中身は変わらない)。
 
-実装した検査 (計画は `docs/scattering_factor_dataset_plan_2026-08-10.md`):
+実装した検査 (計画は `docs/notes/scattering_factor_dataset_plan_2026-08-10.md`):
 
   X3  規格化補正**前**の電子数誤差       品質ゲート (格子の質)
   X4  補正**後**の f_x(0) = N            配線の検査 (補正が実際に効いたか)

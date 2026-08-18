@@ -4,7 +4,7 @@
     実験 E1: プロセス並列 vs スレッド並列の公平ベンチマークのドライバ。
 
 .DESCRIPTION
-    docs/speedup_audit_2026-08-05.md P4-1 の再実験。同一のジョブ表 (plan.json、
+    docs/notes/speedup_audit_2026-08-05.md P4-1 の再実験。同一のジョブ表 (plan.json、
     本番 e0_grid 由来の (Z, tag, E0) 行) を 4 つのプロセス×スレッド構成で流し、
     バリア同期後の壁時計時間を比較する。詳細は README.md。
 

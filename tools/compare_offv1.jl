@@ -1,7 +1,7 @@
 #=====================================================================
 compare_offv1.jl — f_x を OFFV1 (DHF) と突き合わせる (X12 = model validation)
 
-計画は `docs/scattering_factor_dataset_plan_2026-08-10.md` §1.2・§3・§4。
+計画は `docs/notes/scattering_factor_dataset_plan_2026-08-10.md` §1.2・§3・§4。
 
 **参照**: Olukayode, Froese Fischer & Volkov, *Acta Cryst.* **A79**, 59–79 (2023)
 の補足資料 sup4 (Table S3)。DHF = 相対論的 Dirac–Hartree–Fock (DBSR_HF)。
@@ -27,7 +27,7 @@ Z = 2–118、STL = sinθ/λ の IUCr グリッド、f_x(0) = Z が厳密、精�
 
 ⚠ **これは「実在との一致」ではない。**DHF は交換厳密・**相関なし**で、
   我々の KLI も相関を持たない。一致は「同じ近似の階層に居る」ことの確認であって、
-  実験値への近さではない (`docs/exchange_diagnosis_2026-08-07.md` §221)。
+  実験値への近さではない (`docs/notes/exchange_diagnosis_2026-08-07.md` §221)。
 
 使い方:
 

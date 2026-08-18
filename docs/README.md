@@ -2,6 +2,16 @@
 
 Two different things live here.
 
+| Path | What it is |
+| --- | --- |
+| `src/`, `mkdocs.yml`, `overrides/`, `requirements.txt` | **The published site**, <https://seto77.github.io/Temari/>. |
+| [`architecture.md`](architecture.md), [`bibliography.md`](bibliography.md) | Shared references used by both the site and the working documents. |
+| `notes/`, `handover/`, `release/` | **Working documents.** Not part of the site. |
+
+Reorganized on 2026-08-19: the working documents used to sit flat in `docs/`.
+Filenames did not change, only the directory — see the **Old paths** section below for
+what still points at the flat layout and why it was left alone.
+
 ## 1. The published site (`src/`, `mkdocs.yml`, `overrides/`)
 
 MkDocs Material sources for <https://seto77.github.io/Temari/>, deployed by
@@ -42,32 +52,167 @@ text as "Olukayode et al. (2023)" and listed under `## References` /
 identical on the English and Japanese pages; the comparison page publishes
 ratios and deviations only, never reference values.
 
-## 2. Working documents (`*.md`, `*.json` in this directory)
-
-Not part of the site. These are development records, kept next to the code
-rather than in a wiki:
+## 2. Shared references (`docs/*.md`)
 
 | File | Contents |
 | --- | --- |
-| `architecture.md` | The layer structure L0–L5 and which file holds what. Also published as the Architecture page. |
-| `speedup_audit_2026-08-05.md` / `.json` | The optimization ledger: 43 candidates, verdicts and measurements. Items without a verdict are still open. |
-| `speedup_v4_2026-08-08.md` | **The v4 optimization record**: 3.9× on a production row, every step bit-identical, with the profile before and after and the reason the next lever was declined. Japanese. |
-| `src_defect_2026-08-07.md` | **Why v4 exists**: the scalar-relativistic continuum used by v3 carries a spurious term 5–20× larger than the relativistic effect it approximates. Mechanism identified. Japanese. |
-| `kappa_dirac_continuum_2026-08-07.md` | The v4 continuum: coupled radial Dirac per κ, small component in the matrix element, Wigner 6j angular factor. Japanese. |
-| `release_readiness_2026-08-07.md` | The M shell, σ against experiment, and the exchange prescription decision. Japanese. |
-| `fs_external_validation_2026-08-07.md` | How F(s) compares against external references, and how to pick a yardstick. Rankings only — no numbers derived from restricted sources. Japanese. |
-| `frozen_core_and_transverse_2026-08-07.md` / `mott_elastic_2026-08-07.md` / `exchange_diagnosis_2026-08-07.md` | The frozen core and transverse interaction, the Mott elastic exit, and the exchange diagnosis. Japanese. |
-| `scattering_factor_dataset_plan_2026-08-10.md` | **Plan, not a record**: what the f_x/f_e dataset needs before it can be published to the same standard as F — the prescription decision (Dirac + KLI), the X1–X15 verification suite, and the checks that must *not* be used as gates. Japanese. |
-| `handoff_scattering_factor_2026-08-11.md` | Handover for the f_x/f_e track: current position, the next tasks in order, and the traps already stepped in. The plan above is authoritative; this is the entry point. Japanese. |
-| `next_phase_2026-08-*.md`, `next_chat_2026-08-*.md` | Handover: current state, settled decisions, remaining work in priority order. **The highest-numbered `next_phase` is current** (`2026-08-18`, which sets the direction for the release after this one; `2026-08-13` remains authoritative for what is still open in the F(s, E₀) track). The `next_chat` files are the day-by-day handovers of the scattering-factor track. Japanese. |
+| [`architecture.md`](architecture.md) | The layer structure L0–L5 and which file holds what. Also published as the Architecture page through a snippet. |
+| [`bibliography.md`](bibliography.md) | The citation style and the canonical form of every work cited anywhere on the site. Consult it before adding a reference to a page. |
+
+## 3. Working documents
+
+Not part of the site. Development records kept next to the code rather than in
+a wiki. Three kinds, one directory each.
+
+### `notes/` — measurements and decisions that stay true
+
+The record of what was measured, what was decided and why. These are meant to
+outlive the day they were written; when a later measurement overturns one, the
+retraction is written **into** the document rather than the document being
+deleted.
+
+#### The engine and its physics
+
+| File | Contents |
+| --- | --- |
+| [`src_defect_2026-08-07.md`](notes/src_defect_2026-08-07.md) | **Why v4 exists**: the scalar-relativistic continuum used by v3 carries a spurious term 5–20× larger than the relativistic effect it approximates. Mechanism identified. |
+| [`kappa_dirac_continuum_2026-08-07.md`](notes/kappa_dirac_continuum_2026-08-07.md) | The v4 continuum: coupled radial Dirac per κ, small component in the matrix element, Wigner 6j angular factor. |
+| [`frozen_core_and_transverse_2026-08-07.md`](notes/frozen_core_and_transverse_2026-08-07.md) | The exact frozen core and the transverse (Møller) interaction — including the missing $1/q^2$ in the printed Eq. 38 of the Zhang preprint. |
+| [`exchange_diagnosis_2026-08-07.md`](notes/exchange_diagnosis_2026-08-07.md) | The exchange potential: Xα against KLI, and why the shipping default is split by exit. |
+| [`mott_elastic_2026-08-07.md`](notes/mott_elastic_2026-08-07.md) | The Mott elastic exit: phase shifts, Sherman function, and why the target's exchange must *not* be added to the scattering potential. |
+| [`release_readiness_2026-08-07.md`](notes/release_readiness_2026-08-07.md) | The M shell, σ against experiment (Llovet 2014 / NSRDS 164), and the exchange prescription decision. |
+| [`fs_external_validation_2026-08-07.md`](notes/fs_external_validation_2026-08-07.md) | How F(s) compares against external references, and how to pick a yardstick. Rankings only — no numbers derived from restricted sources. |
+| [`literature_findings_2026-08-12.md`](notes/literature_findings_2026-08-12.md) | What the re-read of the literature produced, including what the Dirac GOS database does and does not contain. |
+
+#### The F(s, E₀) dataset
+
+| File | Contents |
+| --- | --- |
+| [`dataset_contract_2026-08-09.md`](notes/dataset_contract_2026-08-09.md) | The dataset contract and completeness: canonical is JSON, why F must not go into GOSH/GOS5, and the executable contract. |
+| [`tail_contract_2026-08-09.md`](notes/tail_contract_2026-08-09.md) | The s > s_max contract: why the exponential tail was withdrawn, and what `s_cert` and ε mean. |
+| [`basis_s_requirement_2026-08-10.md`](notes/basis_s_requirement_2026-08-10.md) | What s a Bloch-wave basis actually demands, measured — and the two wrong exponents it corrected. |
+| [`format_and_sampling_2026-08-12.md`](notes/format_and_sampling_2026-08-12.md) | Why the shipping format was left alone: counted nodes and weighted contribution differ by four orders of magnitude. |
+| [`observable_propagation_2026-08-13.md`](notes/observable_propagation_2026-08-13.md) | How an error in F propagates to an observable, measured through ReciPro's ALCHEMI path. |
+
+#### The f_x / f_e dataset
+
+| File | Contents |
+| --- | --- |
+| [`scattering_factor_dataset_plan_2026-08-10.md`](notes/scattering_factor_dataset_plan_2026-08-10.md) | **Plan, not a record**: what the f_x/f_e dataset needed before publication — the prescription decision (Dirac + KLI), the X1–X15 verification suite, and the checks that must *not* be used as gates. |
+| [`grid_certification_preregistration_2026-08-11.md`](notes/grid_certification_preregistration_2026-08-11.md) | Preregistration of the dt/16 grid certification. Kept as written. |
+| [`grid_certification_run_2026-08-12.md`](notes/grid_certification_run_2026-08-12.md) | Its execution report. |
+| [`grid_certification_preregistration_v2_2026-08-12.md`](notes/grid_certification_preregistration_v2_2026-08-12.md) | Preregistration v2 — the density L¹ bound. |
+| [`grid_certification_preregistration_v2.1_2026-08-14.md`](notes/grid_certification_preregistration_v2.1_2026-08-14.md) | v2.1 — the correction to H's classification order. |
+| [`grid_certification_l1_run_2026-08-14.md`](notes/grid_certification_l1_run_2026-08-14.md) | The L¹ certification run report, all Z. |
+| [`repr_measurement_2026-08-14.md`](notes/repr_measurement_2026-08-14.md) | The representation error B_repr measured on all 86 elements. |
+| [`endpoint_truncation_2026-08-14.md`](notes/endpoint_truncation_2026-08-14.md) | Endpoint truncation screening: sensitivity to the extensions tried, not a bound on the infinite domain. |
+| [`sample14_diagnostics_2026-08-16.md`](notes/sample14_diagnostics_2026-08-16.md) | The extra diagnostics on the 14-element sample. |
+| [`contract_conformance_split_2026-08-18.md`](notes/contract_conformance_split_2026-08-18.md) | Splitting the contract test into conformance to the interpolation convention (A) and identity of values (B). |
+
+#### σ(β, Δ) — the release being prepared
+
+| File | Contents |
+| --- | --- |
+| [`sigma_beta_delta_contract_2026-08-18.md`](notes/sigma_beta_delta_contract_2026-08-18.md) | The σ(β, Δ) and k-factor contract, draft v2. **Not frozen.** |
+| [`candidate_j_2026-08-18.md`](notes/candidate_j_2026-08-18.md) | The rejected wider framing (an EELS response engine) and why it collapses back to publishing the GOS. |
+| [`beta_spike_2026-08-18.md`](notes/beta_spike_2026-08-18.md) | The technical spike: angular quadrature cut at the collection semi-angle β. |
+| [`external_gate_2026-08-19.md`](notes/external_gate_2026-08-19.md) | The external gate: the σ ratio obtained by integrating Zhang's GOS under the same conditions. |
+| [`certification_2026-08-19.md`](notes/certification_2026-08-19.md) | The internal certification of σ(β, Δ) over the shipping grid. |
+| [`nq_nx_2026-08-19.md`](notes/nq_nx_2026-08-19.md) | Which of n_x and n_q limits the angular quadrature — and the breakpoint split that removed the knob. |
+
+#### Operations and outside views
+
+| File | Contents |
+| --- | --- |
+| [`speedup_audit_2026-08-05.md`](notes/speedup_audit_2026-08-05.md) / `.json` | The optimization ledger: 43 candidates, verdicts and measurements. Items without a verdict are still open. |
+| [`speedup_v4_2026-08-08.md`](notes/speedup_v4_2026-08-08.md) | **The v4 optimization record**: 3.9× on a production row, every step bit-identical, with the profile before and after and the reason the next lever was declined. |
+| [`host_stability_2026-08-19.md`](notes/host_stability_2026-08-19.md) | The BSODs that stopped the full-grid certification, and what was changed on the machine. |
+| [`recipro_requests_2026-08-18.md`](notes/recipro_requests_2026-08-18.md) | What ReciPro wants next, in ReciPro's own priority order. Requests, not specifications. |
+| [`evaluation_report_2026-08-19.md`](notes/evaluation_report_2026-08-19.md) | **Where Temari sits and what it is for**: the novelty claim, the competing codes and datasets it must be told apart from, what is honestly still missing, and the priority order that follows. This is the positioning document the 2026-08-19 messaging overhaul was executed against — the narrowed headline (off-diagonal F(s, E₀)) comes from its priority A. |
+
+### `handover/` — the dated chain
+
+One document per working session: where things stood, what was settled, what
+comes next in what order. **The newest is the one to read**; the older ones are
+kept because they record what was decided when, not because they are still
+instructions to follow.
+
+| File | Role |
+| --- | --- |
+| [`next_chat_2026-08-20.md`](handover/next_chat_2026-08-20.md) | **Current.** Written 2026-08-19. Read this first. |
+| [`next_chat_2026-08-19.md`](handover/next_chat_2026-08-19.md) | The plan for 2026-08-19; superseded by the above, which reports what executing it produced. |
+| [`next_phase_2026-08-18.md`](handover/next_phase_2026-08-18.md) | Sets the direction for the release after this one (σ(β, Δ)). Still the statement of direction. |
+| [`next_phase_2026-08-13.md`](handover/next_phase_2026-08-13.md) | Still authoritative for what remains open in the F(s, E₀) track. Absorbed [`next_phase_2026-08-12.md`](handover/next_phase_2026-08-12.md) and [`claude_handoff_remaining_work_2026-08-09.md`](handover/claude_handoff_remaining_work_2026-08-09.md). |
+| [`handoff_scattering_factor_2026-08-11.md`](handover/handoff_scattering_factor_2026-08-11.md) | Entry point for the f_x/f_e track (updated 2026-08-16). [`notes/scattering_factor_dataset_plan_2026-08-10.md`](notes/scattering_factor_dataset_plan_2026-08-10.md) is the authoritative plan; this is the way in. |
+| [`next_chat_2026-08-16.md`](handover/next_chat_2026-08-16.md) | f_x/f_e: the day dataset-factors v1.0.0 was finished. Executed. |
+| [`next_chat_2026-08-15.md`](handover/next_chat_2026-08-15.md) | f_x/f_e: written mid-fleet, to be updated after it finished. Executed. |
+| [`next_chat_2026-08-14.md`](handover/next_chat_2026-08-14.md) | f_x/f_e: the L¹ certification handover. Executed. |
+| [`next_chat_2026-08-13.md`](handover/next_chat_2026-08-13.md) | f_x/f_e: the evening revision of the day before. Executed. |
+| [`next_chat_2026-08-12.md`](handover/next_chat_2026-08-12.md) | f_x/f_e: the first of the day-by-day chain. Executed. |
+| [`next_phase_2026-08-12.md`](handover/next_phase_2026-08-12.md) | F(s, E₀): what was still open after v5 shipped. Absorbed into [`next_phase_2026-08-13.md`](handover/next_phase_2026-08-13.md). |
+| [`next_phase_2026-08-11.md`](handover/next_phase_2026-08-11.md) | F(s, E₀): the handover written while v5 was generating. Executed. |
+| [`next_phase_2026-08-10.md`](handover/next_phase_2026-08-10.md) | F(s, E₀): the plan to extend the s grid to 16 Å⁻¹. Executed. |
+| [`next_phase_2026-08-09.md`](handover/next_phase_2026-08-09.md) | F(s, E₀): publication, and deploying v4 into ReciPro. Executed. |
+| [`next_phase_2026-08-08.md`](handover/next_phase_2026-08-08.md) | F(s, E₀): the v4 generation instructions. Executed. |
+| [`next_phase_2026-08-07.md`](handover/next_phase_2026-08-07.md) | F(s, E₀): the frozen core, the transverse term and the κ-resolved continuum. Executed. |
+| [`next_phase_2026-08-06.md`](handover/next_phase_2026-08-06.md) | F(s, E₀): the oldest one, at the point P1 completed. Executed. |
+| [`claude_handoff_remaining_work_2026-08-09.md`](handover/claude_handoff_remaining_work_2026-08-09.md) | Absorbed into [`next_phase_2026-08-13.md`](handover/next_phase_2026-08-13.md). |
+
+⚠ Every one of these mixes **measurement**, **author decision** and **the
+assistant's interpretation**, and each says so at the top. Read the marker
+before quoting a number out of one.
+
+### `release/` — what goes into a distributed archive
+
+| File | Contents |
+| --- | --- |
+| [`dataset_release_README.md`](release/dataset_release_README.md) / [`dataset_release_LICENSE.md`](release/dataset_release_LICENSE.md) | Copied verbatim into the F(s, E₀) archive as its `README.md` / `LICENSE.md` by `tools/make_dataset_release.sh`. |
+| [`factors_release_README.md`](release/factors_release_README.md) / [`factors_release_LICENSE.md`](release/factors_release_LICENSE.md) | The same for the f_x/f_e archive, via `tools/make_factors_release.sh`. |
+| [`zenodo_deposit.md`](release/zenodo_deposit.md) | The Zenodo deposit procedure. |
+
+⚠ The four `*_release_*.md` files are **packaged byte-for-byte** into archives
+whose SHA-256 is published. Editing one changes the archive and breaks the
+deterministic-rebuild claim for the release that shipped it. Change them only
+alongside a new dataset version.
+
+## Old paths
+
+Before 2026-08-19 every working document sat directly in `docs/`. The move was
+mechanical — **filenames are unchanged**, so `docs/foo.md` is now one of
+`docs/notes/foo.md`, `docs/handover/foo.md` or `docs/release/foo.md`, and the
+table above says which.
+
+Four places still spell the old flat paths, deliberately:
+
+| Where | Why it was not updated |
+| --- | --- |
+| `src/*.jl` comments and provenance strings (33 references) | Every byte of `src/` feeds the source fingerprint recorded in generated datasets, and `physics_pointer` is written verbatim into the shipped JSON. Editing them would make a regenerated table differ from the released one. |
+| Released dataset trees under `src/prod_*` — the JSON files **and** their `MANIFEST.md` (12 references) | Published data, frozen by SHA-256. |
+| `schema/temari_dataset_v2.schema.json` | Packaged into the release archive; see the warning above. |
+| `tools/temari_factors_contract.py` | Likewise packaged. |
+
+**Released artifacts stay as they are, permanently.** A pointer recorded in one
+of them is a historical path: check out the generator commit it names and the
+flat layout is there, so the provenance is not wrong. On current `main`, use the
+mapping above. New generator output should carry the reorganized paths from the
+next intentional dataset generation onward — which is the repository's standing
+rule anyway: a change that touches shipping bytes is either bit-identical or
+bundled with a full regeneration (`CONTRIBUTING.md`).
+
+Two statements inside the **frozen** [`factors_release_README.md`](release/factors_release_README.md) are known to be
+wrong and are corrected in the release description rather than in the file:
+dataset-factors v1.0.0 has **no DOI** (the text promises one), and its exchange
+is the **exchange-only KLI approximation to the OEP**, not "exact exchange in
+the KLI approximation". Fix both in the next dataset-factors release.
+
+## Working rules
 
 The published statement of the working rules is `CONTRIBUTING.md` (the
 verification a change is expected to show) together with the Reproducibility and
 Verification pages of the site.
 
-> **Note.** The handover documents above were written for the author, and refer
-> in places to two internal working documents — the planning document and the
-> Claude Code instruction file.
+> **Note.** The handover documents refer in places to two internal working
+> documents — the planning document and the Claude Code instruction file.
 > **Neither is part of this repository.**
 > Those references are left as written rather than edited out, because these
 > files are a record of what was decided when. Nothing a reader needs is only in

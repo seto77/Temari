@@ -127,7 +127,7 @@ function main_probe(args)
     n_pairs = 0
     # ⚠⚠ 床の上でだけ判定する ([[signal-below-tolerance]])。
     # この engine は両経路が互いに **1e-08 で頭打ち**になることが分かっている
-    # (`docs/next_chat_2026-08-19.md` §3 の 3 番。原因未特定)。
+    # (`docs/handover/next_chat_2026-08-19.md` §3 の 3 番。原因未特定)。
     # 1e-08 どうしの比は**比ではなく雑音**なので、床の上の対だけを集計する。
     FLOOR = 1e-7
     above = Tuple{Float64,String}[]      # (比, どこ)

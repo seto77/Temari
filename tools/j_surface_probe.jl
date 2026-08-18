@@ -5,7 +5,7 @@ j_surface_probe.jl — 看板候補 J (角度–エネルギー EELS 応答面) 
 ## 何を決めたいのか
 
 J は「`σ(β, Δ)` という 1 つの数」ではなく「**面** `C(β, ε) = dσ(β)/dε` を返す」案
-(`docs/beta_spike_2026-08-18.md` §6、codex 提案)。B はその縮約なので**上位互換**に見える。
+(`docs/notes/beta_spike_2026-08-18.md` §6、codex 提案)。B はその縮約なので**上位互換**に見える。
 
 **判断の分かれ目は物理ではなく容量と格子である。**
 
@@ -142,7 +142,7 @@ end
 ⚠ **重みで測ること** ([[count-vs-weight]])。「ρ の最大値が 0.4」ではなく
 「σ の何 % が各帯から来るか」を出す。
 
-戻り値は帯ごとの寄与比 (合計 1)。帯は `docs/next_phase_2026-08-13.md` §2 P3 と同じ
+戻り値は帯ごとの寄与比 (合計 1)。帯は `docs/handover/next_phase_2026-08-13.md` §2 P3 と同じ
 区切り: ρ<0.3 (双極子) / 0.3–0.8 / 0.8–1.5 (尾根) / ≥1.5。"""
 function rho_bands_of_sigma(ch, r_core::Float64, k_i::Float64, T0::Float64, settings,
                             beta::Float64, d2_eV::Float64, transverse::Bool;

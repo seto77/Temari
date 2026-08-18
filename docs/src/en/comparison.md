@@ -248,7 +248,7 @@ they agree with each other to 1.5 % up to $s = 2.5$, so there Temari differs
 from two references that agree with each other — which still does not say
 which is right). What is known is how much it matters
 for the quantity the tables are used for: the
-[propagation study](https://github.com/seto77/Temari/blob/main/docs/observable_propagation_2026-08-13.md)
+[propagation study](https://github.com/seto77/Temari/blob/main/docs/notes/observable_propagation_2026-08-13.md)
 found that STEM-EDX/ALCHEMI observables are sensitive to $s < 2$ Å⁻¹ only, with
 $s > 4$ contributing at the 10⁻⁹ level — for the one crystal and one orientation
 tested. The region where the curves part is, for those observables, the region

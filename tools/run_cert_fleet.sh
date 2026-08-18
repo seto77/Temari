@@ -10,7 +10,7 @@
 # **10 回**の BSOD 履歴を持つ (0x4E PFN_LIST_CORRUPT / 0x101 CLOCK_WATCHDOG_TIMEOUT /
 # 0xBE / 0x1E c0000005 ×3 …)。**⇒ 負荷は下げる。**
 # 詳細と、これが「Julia の GC クラッシュ」の説明になりうることは
-# `docs/host_stability_2026-08-19.md`。
+# `docs/notes/host_stability_2026-08-19.md`。
 #
 #   - **同時スレッドを 12 本に**する (論理 32 の 37 %、物理 16 の 75 %)
 #   - **起動をずらす** — 8 プロセスが同時に JIT を回すのが急性の引き金。
@@ -37,7 +37,7 @@
 # ⚠ 直列 8.1 s の正体は行ごとの `prepare_channel` (束縛状態は E₀ に依らないのに
 #   E₀ 行ごとに解き直している)。**これを直せばさらに 2.6 時間縮むが、
 #   `certify_sigma.jl` を編集すると走行中の認証の指紋が変わって全行が無効になる**
-#   ので、走り始めてからは触らない (`docs/certification_2026-08-19.md` §2.1)。
+#   ので、走り始めてからは触らない (`docs/notes/certification_2026-08-19.md` §2.1)。
 #
 # ⚠ 各レーンは**別の JSONL** へ書く。集計は
 #   julia +1.11 --project=. tools/certify_sigma.jl ../cert_sigma_v1_lane*.jsonl --summary

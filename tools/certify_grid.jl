@@ -7,7 +7,7 @@ dt = GRID_DT/16 = 6.25e-05** (n_r = 323,400) で生成する。本ツールは�
 
 ⚠⚠ **これは「上界を証明する」道具ではない。**有限段の観測 + 事前に宣言した
 保守的な尾の仮定に基づく **事前登録済みの経験的数値認証**である。
-言い換えの規約は `docs/grid_certification_preregistration_2026-08-11.md` §6。
+言い換えの規約は `docs/notes/grid_certification_preregistration_2026-08-11.md` §6。
 
 ## 判定の骨格 (codex 2026-08-11 第 2 ラウンドの設計)
 
@@ -560,7 +560,7 @@ function main(args)
     end
     isempty(zs) && error("Z を指定すること (例: julia tools/certify_grid.jl 26)")
 
-    println("採用格子 dt/16 の認証 (計画書 §4.22 / 事前登録 docs/grid_certification_preregistration_2026-08-11.md)")
+    println("採用格子 dt/16 の認証 (計画書 §4.22 / 事前登録 docs/notes/grid_certification_preregistration_2026-08-11.md)")
     @printf("水準 = stage %s (dt = %s)\n", string(stages),
             join([@sprintf("%.4e", GRID_DT / 2^(k - 1)) for k in stages], ", "))
     @printf("判定 = 出荷 7681 節点 (s=0 を除く) と中点 7680 点の両方で B_grid=%.1e 以下\n",

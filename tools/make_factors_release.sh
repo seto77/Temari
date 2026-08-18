@@ -38,8 +38,8 @@ build_once() {
   cp schema/temari_factors_v1.schema.json schema/factors_golden_v1.json "$stage/schema/"
   cp tools/temari_factors_contract.py "$stage/tools/"
   cp licenses/CC-BY-4.0.txt licenses/MIT.txt "$stage/licenses/"
-  cp docs/factors_release_LICENSE.md "$stage/LICENSE.md"
-  cp docs/factors_release_README.md "$stage/README.md"
+  cp docs/release/factors_release_LICENSE.md "$stage/LICENSE.md"
+  cp docs/release/factors_release_README.md "$stage/README.md"
   mt=$(python -c "
 import re
 m=open('$prod/MANIFEST.md',encoding='utf-8').read()

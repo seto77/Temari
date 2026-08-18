@@ -6,7 +6,7 @@ rho_weight_probe.jl — **F(s) の被積分関数の重みを ρ = Q/q_ridge で
 我々の GOS を Zhang らの Dirac GOS DB と比べると、双極子域 (ρ<0.3) では比 0.98–1.06 に
 締まるのに、Bethe ridge 帯 (0.8≤ρ<1.5) で 1.12–1.36 に開く。**原因は未特定。**
 原因究明を続ける前に「その食い違いは**出荷している量にどれだけの重みを持つか**」を測る
-— 数と害が 4 桁違った前例があるため ([[count-vs-weight]]、`format_and_sampling_2026-08-12.md`)。
+— 数と害が 4 桁違った前例があるため ([[count-vs-weight]]、`docs/notes/format_and_sampling_2026-08-12.md`)。
 
 ## ⚠⚠ 最重要の性質 — 一様な誤差は**厳密に**打ち消える
 
@@ -240,7 +240,7 @@ function main_probe(args)
 
     # ---- 実測 r(ρ) を当てる (帯ごとの中央値。⚠ モデル仮定) ----
     # ⚠ 帯ごとの実測比は**チャネルごとに違う**ので CLI から渡せるようにする。
-    #   既定は Fe K の `--align omega` 実測値 (docs/next_phase_2026-08-13.md §2 P3)。
+    #   既定は Fe K の `--align omega` 実測値 (docs/handover/next_phase_2026-08-13.md §2 P3)。
     #   ρ>1.5 は重なりが無いチャネルが多いので ridge 値を延長する (⚠ 外挿)
     rb = [0.975, 1.011, 1.225, 1.225]
     if "--r" in args

@@ -28,7 +28,7 @@ ReciPro 側の `check_tables.py` (v3 の QC に使ったもの) を Julia へ移
       s_cert_A_inv と valid_to が一致
       ⚠ 旧 (schema 1) は「有効なら a,b>0 かつ F(s_max)=a·e^{−b·s_max}」だった。
         **指数 tail は撤去**した — 上界でも近似でもなかったため
-        (docs/tail_contract_2026-08-09.md §1)
+        (docs/notes/tail_contract_2026-08-09.md §1)
   C6  E0 ノードを 1 つ抜いて PCHIP(ln(u−1)) を再構築し、抜いた点での誤差を測る
       (leave-one-out)。ゲートは絶対 5e-3。**補間器は出荷と同じ `Pchip`**
       260810Cl: ノードを s≤16 まで広げ、**s_cert < s_j の行を基底から外す**

@@ -126,9 +126,9 @@ prescriptions. The transverse term is on by default, in the `edge` exit only.
 The v4 continuum replaces the scalar-relativistic one because the latter's
 one-component reduction drops a cancellation and leaves a spurious term 5–20×
 larger than the relativistic effect it approximates
-(`docs/src_defect_2026-08-07.md`). Measurements live in
-`docs/frozen_core_and_transverse_2026-08-07.md`,
-`docs/kappa_dirac_continuum_2026-08-07.md` and `docs/speedup_v4_2026-08-08.md`.
+(`docs/notes/src_defect_2026-08-07.md`). Measurements live in
+`docs/notes/frozen_core_and_transverse_2026-08-07.md`,
+`docs/notes/kappa_dirac_continuum_2026-08-07.md` and `docs/notes/speedup_v4_2026-08-08.md`.
 
 **One model id** is printed at the start of every F(s), `edge` and `gos` run
 and stored in the JSON output (`phase`, `mott` and `fx` print their field and

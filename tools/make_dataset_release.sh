@@ -44,8 +44,8 @@ cp tools/temari_contract.py "$stage/tools/"
 # `LICENSE.md` に明記する — 1 枚の LICENSE を置くと、混在パッケージでは
 # **どちらの条件で配られたのか読み手が判断できない**。
 cp licenses/CC-BY-4.0.txt licenses/MIT.txt "$stage/licenses/"
-cp docs/dataset_release_LICENSE.md "$stage/LICENSE.md"
-cp docs/dataset_release_README.md "$stage/README.md"
+cp docs/release/dataset_release_LICENSE.md "$stage/LICENSE.md"
+cp docs/release/dataset_release_README.md "$stage/README.md"
 
 n=$(ls "$stage"/F_*.json | wc -l)
 echo "  チャネル $n / schema・manifest・contract・README 同梱"

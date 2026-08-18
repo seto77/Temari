@@ -229,7 +229,7 @@ $F_{2s}(0)/F_{2p}(0)$ は 0.189 です。)
 Temari は互いに一致する 2 つの参照から離れていることになります — それでも、どちらが
 正しいかは言えません)。分かっているのは、テーブルが使われる量にとって、それが
 どれだけ効くかです:
-[伝播の測定](https://github.com/seto77/Temari/blob/main/docs/observable_propagation_2026-08-13.md)
+[伝播の測定](https://github.com/seto77/Temari/blob/main/docs/notes/observable_propagation_2026-08-13.md)
 によれば、STEM-EDX/ALCHEMI の観測量が感じるのは $s < 2$ Å⁻¹ だけで、$s > 4$ の寄与は
 10⁻⁹ の水準でした — 試した 1 結晶 1 方位についてです。曲線が離れる領域は、それらの
 観測量にとっては効かない領域であり、効く領域は一致している領域です。

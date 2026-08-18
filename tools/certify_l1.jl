@@ -194,7 +194,7 @@ q34_class(l1_4::Float64, q34::Float64) =
     (q34 <= Q_TAIL_L1 ? "supports" : "exceeds_tail")
 
 """status の五値判定 (事前登録 **v2.1** の順序 —
-`docs/grid_certification_preregistration_v2.1_2026-08-14.md`)。
+`docs/notes/grid_certification_preregistration_v2.1_2026-08-14.md`)。
 
 ⚠ v2 からの変更は **low_signal を model_violated より先に評価する**ことだけ。
 v2 の順序では H (D₃ = 7.4e-14 = 床の 4 桁下の明白な低信号) が**雑音の比**
@@ -250,7 +250,7 @@ function certify_l1(z::Int; outdir::String)
 
     doc = Dict{String,Any}(
         "tool" => "certify_l1.jl", "schema" => 4,
-        "preregistration" => "v2.1 (docs/grid_certification_preregistration_v2.1_2026-08-14.md)",
+        "preregistration" => "v2.1 (docs/notes/grid_certification_preregistration_v2.1_2026-08-14.md)",
         "z" => z,
         "n_orbitals_dirac" => length(dirac_occupancy(ORBITALS[z])),
         "stages" => L1_STAGES,

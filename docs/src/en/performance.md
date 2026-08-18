@@ -36,7 +36,7 @@ machine above.
 Measured on a production row (Fe K at 200 keV, `HIGH` quadrature) under the
 **v4 prescription**, single-threaded, after the optimizations below, on the
 161-point s grid of the v3/v4 datasets. v5 ships 321 points, and only the
-angular integral grows with the s grid (`docs/tail_contract_2026-08-09.md`), so
+angular integral grows with the s grid (`docs/notes/tail_contract_2026-08-09.md`), so
 at 321 points its share is larger than shown here:
 
 | Region | Share | Character |
@@ -98,7 +98,7 @@ only" to "this is what ships", **its optimizations do not come with it**. Look
 for the ones it never received.
 
 The full record, including what was measured and rejected, is
-`docs/speedup_v4_2026-08-08.md`.
+`docs/notes/speedup_v4_2026-08-08.md`.
 
 ## Parallelism: processes beat threads
 
@@ -211,7 +211,7 @@ Recorded because they look plausible and cost time to disprove:
   values by about 10⁻¹³ relative), so it is held for a generation that already
   changes the quadrature.
 - **Sixteen further audited candidates** without a verdict yet, catalogued in
-  `docs/speedup_audit_2026-08-05.json`.
+  `docs/notes/speedup_audit_2026-08-05.json`.
 
 Measured and **rejected**: pre-filtering the insignificant partial waves before
 building them. 95–99 % of them survive the significance filter, so there is
