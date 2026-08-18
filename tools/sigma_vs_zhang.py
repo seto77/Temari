@@ -153,24 +153,93 @@ class Surface:
         return math.exp(v)
 
 
+def inner_logx(surf, eps_eV, scale, dq, kk, tb, n_t=64):
+    """角度積分 ∫₀^{t_β} GOS(Q(t))/Q² dt を **log-x 変換**で。出荷経路と同じ変数。
+
+    Q² = dq² + kk·t = dq²(1+a t),  a = kk/dq²
+    x  = ln(1+a t)  ⇒  dt = e^x/a dx  ⇒  GOS/Q² dt = GOS/kk dx
+
+    戻り値 = (値, clamp 点の寄与)。
+    """
+    xt, wt = leggauss(n_t)
+    a = kk / (dq * dq)
+    x_hi = math.log1p(a * tb)
+    tot = 0.0
+    cl = 0.0
+    for b, wb in zip(xt, wt):
+        x = x_hi * b
+        t = math.expm1(x) / a
+        Q = math.sqrt(dq * dq + kk * t)
+        term = x_hi * wb * surf(eps_eV, Q) * scale
+        tot += term
+        if surf.last_clamped:
+            cl += term
+    return tot / kk, cl / kk
+
+
+def inner_tanhsinh(surf, eps_eV, scale, dq, kk, tb, level=7, hmax=3.6):
+    """同じ角度積分を **tanh-sinh (二重指数型)** で、変換せずに t 上で。
+
+    ## ⚠⚠ なぜこれが要るのか (codex の指摘、2026-08-18)
+
+    `inner_logx` に替えたら検算が 200 倍良くなったが、**Julia 側の出荷経路も
+    log-x を使っている**。同じ変数・同じ求積族へ寄せただけで差が消えた可能性が残る。
+    このリポには「自己収束テストが誤差を 26 倍過小評価した」前例があり、
+    **同じ族の一致を収束の証拠にしない**規律がある ([[self-convergence-underestimates]])。
+
+    tanh-sinh は t 上で直接積分し、節点は `u_k = tanh((π/2)sinh(kh))` で**端点へ
+    二重指数的に寄る**。log-x の固定 GL とは節点も重みも生成則も無関係である。
+    ⚠ ただしこれも求積なので、**閉じた式に当てる検査 (`--selftest`) が本命**。
+    """
+    tot = 0.0
+    h = hmax / (2 ** level)
+    k = 0
+    while True:
+        kh = k * h
+        s = math.sinh(kh)
+        c = math.cosh(kh)
+        arg = 0.5 * math.pi * s
+        if arg > 350.0:                        # cosh(arg) が overflow する手前で止める
+            break
+        u = math.tanh(arg)
+        w = 0.5 * math.pi * h * c / (math.cosh(arg) ** 2)
+        for sgn in ((1,) if k == 0 else (1, -1)):
+            uu = sgn * u
+            t = tb * 0.5 * (uu + 1.0)
+            if t <= 0.0:
+                continue
+            Q2 = dq * dq + kk * t
+            tot += w * (tb * 0.5) * surf(eps_eV, math.sqrt(Q2)) * scale / Q2
+        k += 1
+        if k > 2000:
+            break
+    return tot
+
+
 def sigma_from_gos(surf, E_th_eV, T0_ha, beta_rad, d1_eV, d2_eV,
                    n_eps=48, n_t=64, scale=1.0):
     """GOS 面から σ(β, [Δ₁,Δ₂]) [nm²] を組む。窓は**端相対**。
 
     ε 側は u = √ε の変数変換 (閾値端の √ 立ち上がりを吸収)。
 
-    戻り値 = (σ [nm²], **面の外を clamp した点が σ に持つ重みの割合**)。
-    ⚠ 2 つ目が本命の指標 — clamp の**回数**は誤読のもとで、実際に効くのは重み
+    戻り値 = (σ [nm²], **面の外を clamp した点が σ に持つ重みの割合**,
+              a·t_β の最小, a·t_β の最大)。
+
+    ⚠ 2 つ目は本命の指標 — clamp の**回数**は誤読のもとで、実際に効くのは重み
     ([[count-vs-weight]])。
+    ⚠ 4 つ目の a·t_β = kk·t_β/dq² は**角度求積の難しさそのもの**である
+    (`--selftest` で、旧実装が a·t_β ≳ 1e4 で崩れることを解析解に対して示した)。
+    どの条件がどれだけ難しい領域にいたのかを残す。
     """
     k_i = kin_k(T0_ha)
     g2 = kin_gamma(T0_ha) ** 2
     xu, wu = leggauss(n_eps)
-    xt, wt = leggauss(n_t)
     lo = math.sqrt(d1_eV)
     hi = math.sqrt(d2_eV)
     acc = 0.0
     acc_clamped = 0.0
+    atb_min = float("inf")
+    atb_max = 0.0
     for a, wa in zip(xu, wu):
         u = lo + (hi - lo) * a
         eps_eV = u * u
@@ -193,25 +262,17 @@ def sigma_from_gos(surf, E_th_eV, T0_ha, beta_rad, d1_eV, d2_eV,
         # ⚠ 旧実装 (t 上の 64 点 GL) は Fe/Au では検算 ≤1.4e-03 に収まっていたが、
         #   **軽元素 × β=100 mrad で 6.3e-02 まで悪化していた** (C K で実測)。
         #   Q の走る幅が dq に対して桁で広がるほど悪くなる。
-        a = 4.0 * k_i * k_f / (dq * dq)
-        x_hi = math.log1p(a * tb)
-        inner = 0.0
-        inner_cl = 0.0
-        for b, wb in zip(xt, wt):
-            x = x_hi * b
-            t = math.expm1(x) / a
-            Q = math.sqrt(dq * dq + 4.0 * k_i * k_f * t)
-            gos = surf(eps_eV, Q) * scale       # [1/Ha]
-            term = x_hi * wb * gos
-            inner += term
-            if surf.last_clamped:
-                inner_cl += term
-        pre = we / HARTREE_EV * (k_f / k_i) / (2.0 * dE_ha) / (4.0 * k_i * k_f)
+        kk = 4.0 * k_i * k_f
+        atb = kk * tb / (dq * dq)
+        atb_min = min(atb_min, atb)
+        atb_max = max(atb_max, atb)
+        inner, inner_cl = inner_logx(surf, eps_eV, scale, dq, kk, tb, n_t=n_t)
+        pre = we / HARTREE_EV * (k_f / k_i) / (2.0 * dE_ha)
         acc += pre * inner
         acc_clamped += pre * inner_cl
     pref = 4.0 * g2 * BOHR_NM**2 * 4.0 * math.pi
     frac = abs(acc_clamped) / abs(acc) if acc != 0.0 else 0.0
-    return pref * acc, frac
+    return pref * acc, frac, atb_min, atb_max
 
 
 def load_entries(path):
@@ -294,16 +355,17 @@ def compare_entry(h5py, ent, align):
         for ib, bm in enumerate(ent["betas_mrad"]):
             b = bm * 1e-3
             direct = svals[ib]
-            mine, fr_mine = sigma_from_gos(ours, E_th, T0, b, d1, d2)
+            mine, fr_mine, _, atb_hi = sigma_from_gos(ours, E_th, T0, b, d1, d2)
             if align == "abs":
                 # 先方も**我々の閾値**を基準に同じ絶対損失域を取る
                 zd1 = E_th + d1 - z_eth
                 zd2 = E_th + d2 - z_eth
-                theirs, fr_th = sigma_from_gos(zsurf, z_eth, T0, b, max(zd1, 1e-6),
-                                               zd2, scale=z_scale)
+                theirs, fr_th, _, _ = sigma_from_gos(zsurf, z_eth, T0, b,
+                                                     max(zd1, 1e-6), zd2,
+                                                     scale=z_scale)
             else:
-                theirs, fr_th = sigma_from_gos(zsurf, z_eth, T0, b, d1, d2,
-                                               scale=z_scale)
+                theirs, fr_th, _, _ = sigma_from_gos(zsurf, z_eth, T0, b, d1, d2,
+                                                     scale=z_scale)
             if direct <= 0.0 or mine <= 0.0:
                 continue                        # 比の取れない条件は落とす (数える)
             recs.append(dict(elem=elem, tag=ent["tag"], z=int(ent["z"]),
@@ -311,7 +373,8 @@ def compare_entry(h5py, ent, align):
                              direct=direct, mine=mine, theirs=theirs,
                              check=abs(mine - direct) / direct,
                              ratio=theirs / mine,
-                             clamp_ours=fr_mine, clamp_theirs=fr_th))
+                             clamp_ours=fr_mine, clamp_theirs=fr_th,
+                             atb=atb_hi))
     note = dict(norm_ok=norm_ok, E_th=E_th, z_eth=z_eth, z_scale=z_scale,
                 cl_ours=(ours.n_eps_lo, ours.n_eps_hi, ours.n_q_lo, ours.n_q_hi),
                 cl_theirs=(zsurf.n_eps_lo, zsurf.n_eps_hi,
@@ -361,6 +424,12 @@ def summarize(recs, skipped, n_bad, n_err, norm_bad, align):
     print(f"\n検算(1) |GOS 経由 − 直接求積|/直接求積:")
     print(f"  中央値 {pct(chk,0.5):.2e} / p90 {pct(chk,0.9):.2e} / "
           f"p99 {pct(chk,0.99):.2e} / **最悪 {chk[-1]:.2e}**")
+
+    atb = sorted(r["atb"] for r in recs)
+    print(f"\n角度求積の難しさ a·t_β = 4k_i k_f t_β/(k_i−k_f)²:")
+    print(f"  中央値 {pct(atb,0.5):.2e} / p90 {pct(atb,0.9):.2e} / **最大 {atb[-1]:.2e}**")
+    print("  ⚠ `--selftest` で、**旧実装 (t 上の単一 GL) は a·t_β ≳ 1e4 で崩れる**")
+    print("     ことを解析解に対して示した (最悪 相対誤差 1.00)。log-x は 5e-15")
 
     cl_o = sorted(r["clamp_ours"] for r in recs)
     cl_t = sorted(r["clamp_theirs"] for r in recs)
@@ -423,7 +492,102 @@ def summarize(recs, skipped, n_bad, n_err, norm_bad, align):
               f"β {r['beta']:5.0f} mrad   検算 {r['check']:.2e}   比 {r['ratio']:.4f}")
 
 
+class PowerLawSurface:
+    """GOS(ε,Q) = A·Q^m の合成面。**log-log 双 1 次内挿はべき乗則を厳密に再現する**
+    (log g が log Q の 1 次式になるため) ので、この面では
+
+        ∫₀^{t_β} GOS/Q² dt = (A/kk)·(2/m)[(dq²+kk·t_β)^{m/2} − (dq²)^{m/2}]   (m ≠ 0)
+        ∫₀^{t_β} GOS/Q² dt = (A/kk)·ln(1 + kk·t_β/dq²)                        (m = 0)
+
+    という**閉じた式**が使える。⇒ 求積を「別の求積」ではなく**解析解**に当てられる。
+
+    ⚠ これがこの検査の要点である。`inner_logx` と `inner_tanhsinh` が一致しても
+    それは 2 つの求積が一致しただけで、正しさの証明にはならない。
+    """
+
+    def __init__(self, A, m, q_lo=1e-4, q_hi=1e3, n=64):
+        self.A = A
+        self.m = m
+        self.lq = [math.log(q_lo) + (math.log(q_hi) - math.log(q_lo)) * i / (n - 1)
+                   for i in range(n)]
+        self.last_clamped = False
+        self.n_lo = 0
+        self.n_hi = 0
+
+    def __call__(self, eps_eV, q_au):
+        lq = math.log(q_au)
+        if lq < self.lq[0]:
+            self.n_lo += 1
+        elif lq > self.lq[-1]:
+            self.n_hi += 1
+        self.last_clamped = False
+        return self.A * q_au ** self.m
+
+
+def analytic_inner(A, m, dq, kk, tb):
+    lo = dq * dq
+    hi = dq * dq + kk * tb
+    if m == 0:
+        return (A / kk) * math.log(hi / lo)
+    return (A / kk) * (2.0 / m) * (hi ** (0.5 * m) - lo ** (0.5 * m))
+
+
+def selftest():
+    """角度求積を**閉じた式**に当てる。⚠ 合格を主張する前に、負のテストも実演する。"""
+    print("角度求積の自己検査 — GOS = A·Q^m の合成面で閉じた式と突き合わせる")
+    print("⚠ 一致は「求積どうしの一致」ではなく **解析解との一致** である\n")
+    print(f"{'m':>5} {'a·t_β':>10} {'log-x GL64':>13} {'tanh-sinh':>13} "
+          f"{'厳密':>13}   {'log-x 相対差':>12} {'t-s 相対差':>12}")
+    worst_lx = 0.0
+    worst_ts = 0.0
+    A = 3.7
+    # dq と t_β を振って a·t_β = kk·t_β/dq² を 1e0 〜 1e8 まで動かす
+    kk = 4.0 * 90.0 * 90.0
+    for m in (0, -2, -4, -6):
+        for atb in (1e0, 1e2, 1e4, 1e6, 1e8):
+            tb = 2.5e-3                      # sin²(β/2), β ≒ 100 mrad
+            dq = math.sqrt(kk * tb / atb)
+            surf = PowerLawSurface(A, m)
+            v_lx, _ = inner_logx(surf, 100.0, 1.0, dq, kk, tb)
+            v_ts = inner_tanhsinh(surf, 100.0, 1.0, dq, kk, tb)
+            ex = analytic_inner(A, m, dq, kk, tb)
+            r_lx = abs(v_lx - ex) / abs(ex)
+            r_ts = abs(v_ts - ex) / abs(ex)
+            worst_lx = max(worst_lx, r_lx)
+            worst_ts = max(worst_ts, r_ts)
+            print(f"{m:>5} {atb:>10.0e} {v_lx:>13.6e} {v_ts:>13.6e} {ex:>13.6e}   "
+                  f"{r_lx:>12.2e} {r_ts:>12.2e}")
+    print(f"\n最悪: log-x {worst_lx:.2e} / tanh-sinh {worst_ts:.2e}")
+
+    # --- 負のテスト: 旧実装 (t 上の単一 GL) を同じ土俵に載せる -----------
+    print("\n負のテスト — **旧実装 (t 上の単一 GL 64 点) は同じ検査で落ちる**")
+    print(f"{'m':>5} {'a·t_β':>10} {'旧 t-GL64':>13} {'厳密':>13}   {'相対差':>12}")
+    worst_old = 0.0
+    for m in (0, -4):
+        for atb in (1e0, 1e2, 1e4, 1e6, 1e8):
+            tb = 2.5e-3
+            dq = math.sqrt(kk * tb / atb)
+            surf = PowerLawSurface(A, m)
+            xt, wt = leggauss(64)
+            acc = 0.0
+            for b, wb in zip(xt, wt):
+                t = tb * b
+                Q2 = dq * dq + kk * t
+                acc += tb * wb * surf(100.0, math.sqrt(Q2)) / Q2
+            ex = analytic_inner(A, m, dq, kk, tb)
+            r = abs(acc - ex) / abs(ex)
+            worst_old = max(worst_old, r)
+            print(f"{m:>5} {atb:>10.0e} {acc:>13.6e} {ex:>13.6e}   {r:>12.2e}")
+    print(f"\n旧実装の最悪: {worst_old:.2e}")
+    ok = worst_lx < 1e-10 and worst_ts < 1e-8 and worst_old > 1e-3
+    print("\n" + ("**合格** — 新実装は解析解と一致し、旧実装は同じ検査で落ちる"
+                  if ok else "⚠⚠ **不合格** — 上の数字を読むこと"))
+    return 0 if ok else 1
+
+
 def main(argv):
+    if "--selftest" in argv:
+        return selftest()
     if len(argv) < 2:
         print(__doc__)
         return 1
