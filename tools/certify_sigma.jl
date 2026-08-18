@@ -29,6 +29,18 @@ certify_sigma.jl — `σ(β, Δ)` の内部認証を**出荷格子の全行**で
 実行:
   julia +1.11 --project=. -t auto tools/certify_sigma.jl out.jsonl [--limit N] [--tags K,L1]
   julia +1.11 --project=. -t auto tools/certify_sigma.jl out.jsonl --summary
+
+## ★ 260819Cl: レーン分割 (`--lane i/n`)
+
+**単一プロセス 32 スレッドは波の量子化で 1.5 倍損する** — 既定の窓は GL 16 点しか
+無いので 32 スレッドのうち 16 本が遊ぶ (オラクルの 48 点も 2 波)。ノード評価の総数は
+1 行あたり 16 窓 × (16 + 48) = 1024 で固定なので、**16 物理コアに 8 プロセス × 4
+スレッドで敷き詰める**方が理想 (32 ノード時間/行) に近い。分割は**チャネル単位**。
+
+  bash tools/run_cert_fleet.sh          # 8 レーン + watchdog
+  julia ... tools/certify_sigma.jl cert_sigma_v1_lane*.jsonl --summary
+
+⚠ 各レーンは**別ファイル**へ書く (同一ファイルへの追記を複数プロセスでやらない)。
 =====================================================================#
 
 # ⚠ 順序が重要 — `gen_production.jl` が `src/ionization.jl` を読むので、こちらを先に。
@@ -175,6 +187,10 @@ end
 "既に済んだ行の鍵 (再開用)"
 rowkey(z, tag, e0) = @sprintf("%d|%s|%.6f", z, tag, e0)
 
+"""既に済んだ行の鍵を集める (再開用)。
+
+⚠ 260819Cl: **例外で落ちた行 (`error`) は「済」に数えない** — 数えると、GC クラッシュ
+由来の一過性の失敗が**黙って認証済みの扱いになる**。再実行のたびに引き直させる。"""
 function load_done(path::String)
     done = Set{String}()
     isfile(path) || return done
@@ -182,19 +198,41 @@ function load_done(path::String)
         isempty(strip(line)) && continue
         d = try _json_value(Vector{UInt8}(line), 1)[1] catch; continue end
         haskey(d, "z") || continue
+        haskey(d, "error") && continue
+        haskey(d, "worst_window") || continue
         push!(done, rowkey(Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"])))
     end
     return done
 end
 
-function summarize(path::String)
+"""集計。**複数のレーン出力をまとめて読む** (260819Cl)。
+
+⚠ レーンは行集合が互いに素なので単純連結でよいが、**重複が来ても落とさず数える** —
+再開の取りこぼしを黙って平均に混ぜないため。"""
+function summarize(paths::Vector{String})
     rows = Any[]
     n_bad = 0        # ⚠ 沈黙する catch を作らない — 読めなかった行を数える
-    for line in eachline(path)
-        isempty(strip(line)) && continue
-        d = try _json_value(Vector{UInt8}(line), 1)[1] catch; n_bad += 1; continue end
-        haskey(d, "worst_window") ? push!(rows, d) : (n_bad += 1)
+    n_dup = 0
+    n_err = 0
+    seen = Set{String}()
+    for path in paths
+        isfile(path) || (@printf("⚠ 無い: %s\n", path); continue)
+        for line in eachline(path)
+            isempty(strip(line)) && continue
+            d = try _json_value(Vector{UInt8}(line), 1)[1] catch; n_bad += 1; continue end
+            if haskey(d, "error")
+                n_err += 1
+                continue
+            end
+            haskey(d, "worst_window") || (n_bad += 1; continue)
+            k = rowkey(Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"]))
+            k in seen && (n_dup += 1; continue)
+            push!(seen, k)
+            push!(rows, d)
+        end
     end
+    n_dup > 0 && @printf("⚠ 重複した行 (集計から除外): %d\n", n_dup)
+    n_err > 0 && @printf("⚠⚠ **例外で落ちた行: %d** — 中身を見ること\n", n_err)
     n_bad > 0 && @printf("⚠ 読めなかった/未完の行: %d
 ", n_bad)
     isempty(rows) && (println("行がまだ無い"); return 0)
@@ -236,18 +274,31 @@ end
 
 function main_certify(args)
     isempty(args) && (println("出力先 (.jsonl) を指定"); return 1)
+    if "--summary" in args
+        return summarize(String[a for a in args if !startswith(a, "--")])
+    end
     path = args[1]
-    "--summary" in args && return summarize(path)
     settings = PROD_SETTINGS
     tags = copy(TAGS_V4)
     limit = typemax(Int)
+    lane_i, lane_n = 0, 1
     i = 2
     while i <= length(args)
         args[i] == "--tags" && (tags = String.(split(args[i+1], ",")); i += 1)
         args[i] == "--limit" && (limit = parse(Int, args[i+1]); i += 1)
+        if args[i] == "--lane"
+            m = match(r"^(\d+)/(\d+)$", args[i+1])
+            m === nothing && error("--lane は i/n 形式 (例: 0/8)")
+            lane_i, lane_n = parse(Int, m[1]), parse(Int, m[2])
+            i += 1
+        end
         i += 1
     end
     chans = all_channels(Tuple(tags))
+    # ⚠ 分割は**チャネル単位** (行単位ではない) — 同じチャネルの全 E₀ 行を同じレーンに
+    # 置くと、プロセス内 SCF キャッシュ (`_cache`) がそのまま効く。
+    # `gen_production.jl --lane` と同じ round-robin。
+    chans = [c for (k, c) in enumerate(chans) if (k - 1) % lane_n == lane_i]
     rows = Tuple{Int,String,Float64}[]
     for (z, tag) in chans
         e0s, _ = e0_grid(z, tag)
@@ -258,8 +309,8 @@ function main_certify(args)
     done = load_done(path)
     todo = [r for r in rows if !(rowkey(r...) in done)]
     length(todo) > limit && (todo = todo[1:limit])
-    @printf("認証: 全 %d 行 / 済 %d / 今回 %d   スレッド %d   窓 %d 種 × β %d 本\n",
-            length(rows), length(done), length(todo), Threads.nthreads(),
+    @printf("認証 (lane %d/%d): 全 %d 行 / 済 %d / 今回 %d   スレッド %d   窓 %d 種 × β %d 本\n",
+            lane_i, lane_n, length(rows), length(done), length(todo), Threads.nthreads(),
             length(CERT_STARTS_EV) * length(CERT_WIDTHS_EV), length(CERT_BETAS_MRAD))
     t_start = time()
     open(path, "a") do io
