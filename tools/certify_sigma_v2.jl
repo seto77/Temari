@@ -37,7 +37,7 @@ ang_eps_eV[], ang_long_rel[], ang_trans_rel[] (行に 1 回だけ)
    指紋は規則ごとに違う。事前登録 v2 = docs/notes/certification_v2b_preregistration_2026-08-19.md)
   julia +1.11 --project=. tools/certify_sigma_v2.jl ../cert_v2_deep_lane*.jsonl --summary
 
-⚠ 走行中は本ファイル・sigma_beta_delta.jl・angular_split_v2.jl・beta_spike.jl を触らない (指紋)。
+⚠ 走行中は本ファイル・sigma_beta_delta.jl・angular_split_v2.jl・angular_sweep.jl・beta_spike.jl を触らない (指紋)。
 =====================================================================#
 
 include(joinpath(@__DIR__, "sigma_beta_delta.jl"))
@@ -274,7 +274,7 @@ function certify_row_v2(z::Int, tag::String, e0::Float64; sentinel_only::Bool=fa
             "n_panels" => P.n_panels, "n_nodes" => P.n_nodes,
             "angular_panels_max" => P.angular_panels_max, "panel_edges_sha" => P.panel_edges_sha,
             "n_q" => rule.n_q, "ppw" => rule.ppw, "rule" => P.rule, "rule_version" => rule_version(rule),
-            "l_max_policy" => string(rule.l_max_policy),
+            "l_max_policy" => string(rule.l_max_policy), "rule_config" => rule_config(rule),
             "oracle" => sentinel_only ? "none" : "sqrt-eps-geo$(V2_ORACLE_NPAN)xGL$(V2_ORACLE_NPT)-epsc",
             "window_index" => iw, "elapsed_s" => time() - tw,
             "cert_fp" => cert_fp, "state_sha" => state_hash_v2(ch),
@@ -334,9 +334,11 @@ function sibling_files_v2(path::String)
     return [joinpath(dir, f) for f in readdir(dir) if startswith(f, pre) && endswith(f, ".jsonl")]
 end
 
-"済み判定: 行 (z,tag,e0) の**全窓**が同じ指紋で揃っているものだけ済み (⚠ 例外行は済みに数えない)"
+"""済み判定: 行 (z,tag,e0) の**全窓**が**同じ指紋で**揃っているものだけ済み (⚠ 例外行は済みに数えない)。
+⚠ 集合は (指紋, 行) ごとに持つ — 2 つの受理指紋がそれぞれ同じ行の別の半分を持っていても、合わせて済みに
+しない (codex 2026-08-19 深夜のレビュー。`--accept-fp` で部分走行を混ぜる事故の防止)。"""
 function load_done_v2(paths::Vector{String}, accept::Set{String})
-    have = Dict{String,Set{String}}(); need = Dict{String,Int}(); stale = 0
+    have = Dict{Tuple{String,String},Set{String}}(); need = Dict{Tuple{String,String},Int}(); stale = 0
     for p in paths
         isfile(p) || continue
         for line in eachline(p)
@@ -346,13 +348,13 @@ function load_done_v2(paths::Vector{String}, accept::Set{String})
             haskey(d, "error") && continue
             fp = haskey(d, "cert_fp") ? String(d["cert_fp"]) : ""
             if !(fp in accept); stale += 1; continue; end
-            k = rowkey_v2(Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"]))
+            k = (fp, rowkey_v2(Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"])))
             # ⚠ 件数ではなく **window_id の集合** で数える (重複行が欠落を偽装しない。codex)
             push!(get!(have, k, Set{String}()), String(d["window_id"]))
             need[k] = max(get(need, k, 0), Int(d["n_windows_in_row"]))
         end
     end
-    done = Set{String}(k for (k, s) in have if length(s) >= get(need, k, typemax(Int)))
+    done = Set{String}(k[2] for (k, s) in have if length(s) >= get(need, k, typemax(Int)))
     return done, stale
 end
 
@@ -416,7 +418,7 @@ end
 # ---------------------------------------------------------------------
 # 集計
 # ---------------------------------------------------------------------
-function summarize_v2(paths::Vector{String})
+function summarize_v2(paths::Vector{String}; allow_mixed::Bool=false, only_fp::String="")
     recs = Dict{String,Any}[]
     for p in paths, line in eachline(p)
         isempty(strip(line)) && continue
@@ -424,11 +426,21 @@ function summarize_v2(paths::Vector{String})
         haskey(d, "z") && !haskey(d, "error") && push!(recs, d)
     end
     isempty(recs) && (println("記録なし"); return 1)
+    if !isempty(only_fp)
+        recs = [d for d in recs if String(get(d, "cert_fp", "")) == only_fp]
+        isempty(recs) && (println("指紋 $only_fp の記録なし"); return 1)
+    end
     rows = Set(rowkey_v2(Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"])) for d in recs)
     fps = Set(String(d["cert_fp"]) for d in recs)
     rvs = Set(String(get(d, "rule", "?")) for d in recs)
     @printf("記録 %d 窓 / %d 行 / 指紋 %d 種 %s\n", length(recs), length(rows), length(fps), join(fps, ","))
     @printf("規則: %s\n", join(rvs, " | "))
+    # ⚠ 指紋が混ざった集計は正式な値にならない (規則・版が違う窓を一緒に数えてしまう)。
+    #   既定では拒否し、--fp <指紋> で 1 種に絞るか、--allow-mixed で明示的に許す (codex 2026-08-19 深夜)
+    if length(fps) > 1 && !allow_mixed
+        println("⚠⚠ 指紋が $(length(fps)) 種混在。--fp <指紋> で絞るか --allow-mixed を付けること (集計しない)")
+        return 2
+    end
     rels = Float64[]; scal = Float64[]; inds = Float64[]
     worst = (0.0, ""); npass = 0; nfail = 0
     per = Dict{String,Vector{Float64}}()
@@ -474,7 +486,14 @@ end
 # ---------------------------------------------------------------------
 function main_v2(args)
     isempty(args) && (println("出力先 (.jsonl) を指定"); return 1)
-    "--summary" in args && return summarize_v2(String[a for a in args if !startswith(a, "--")])
+    if "--summary" in args
+        only_fp = ""; allow_mixed = "--allow-mixed" in args
+        for (i, a) in enumerate(args)
+            a == "--fp" && (only_fp = args[i+1])
+        end
+        files = String[a for (i, a) in enumerate(args) if !startswith(a, "--") && !(i > 1 && args[i-1] == "--fp")]
+        return summarize_v2(files; allow_mixed=allow_mixed, only_fp=only_fp)
+    end
     path = args[1]
     profile = "pilot"; tags = copy(TAGS_V4); custom = ""; lane_i, lane_n = 0, 1; limit = typemax(Int)
     rule_s = "v2"

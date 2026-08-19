@@ -23,6 +23,11 @@ lkin_sweep.jl — ★ src の部分波打ち切り l_kin の感度を**出荷格
   --tags M1,M2,...     対象タグ (既定 = TAGS_V4 全部)
   --conv-tags M1,...   krc32c256 も回すタグ (既定 = M1..M5)
   --conv-e0 max|all    krc32c256 を回す E₀ (既定 max = その格子の最大 E₀ の行だけ。κ が最大で cap が最も効く)
+  --policies src,krc12            全行で回す policy (既定)
+  --conv-policies krc32c256       conv 行で追加する policy (既定。cap と margin を分けるなら krc12c256,krc20c256,krc32c256)
+
+⚠ 最初の走行 (2026-08-19 22:53、HEAD 334c35b、3 レーン × 6 スレッド、接頭辞 lkin_sweep) は既定の
+  src,krc12 (+ M の max E₀ で krc32c256)。cap と margin を分けた追加走行は別の接頭辞で回す。
 
 ⚠ 出力はリポの外 (`../qcamp/`)。済み判定は (z, tag, E₀) のキーで、同じ接頭辞の兄弟ファイルを読む。
 =====================================================================#
@@ -33,8 +38,13 @@ using Printf
 const LKS_POLICIES = Dict(
     "src"       => (policy=:src,      l_cap=128, margin=12),
     "krc12"     => (policy=:kappa_rc, l_cap=128, margin=12),
-    "krc32c256" => (policy=:kappa_rc, l_cap=256, margin=32),
+    "krc12c256" => (policy=:kappa_rc, l_cap=256, margin=12),   # cap の効果だけ (krc12 と比べる)
+    "krc20c256" => (policy=:kappa_rc, l_cap=256, margin=20),   # マージンの効果 (krc12c256 と比べる)
+    "krc32c256" => (policy=:kappa_rc, l_cap=256, margin=32),   # 同上 (2 段目)。⚠ krc12 との差は cap と margin が混ざる
 )
+# ⚠ 走行の来歴 (codex 2026-08-19 深夜): JSONL に src 指紋・HEAD・Julia 版・policies を書く。
+#   済み判定は (z, tag, E₀) のみなので、policies を変えて同じ接頭辞で再開しない (接頭辞を分ける)
+const LKS_GIT_HEAD = try strip(read(`git -C $(joinpath(@__DIR__, "..")) rev-parse --short HEAD`, String)) catch; "?" end
 
 function _lks_jv(io, v)
     if v isa AbstractString
@@ -114,7 +124,8 @@ function lks_row(z::Int, tag::String, e0::Float64, pols::Vector{String})
     ch = prepare_channel(z, tag, e0; dirac_continuum=true)
     rec = Dict{String,Any}("z" => z, "tag" => tag, "e0_keV" => e0, "eth_keV" => ch.eth_keV,
                            "l_init" => ch.l_b, "s_grid" => LK_S, "settings" => "HIGH",
-                           "policies" => pols)
+                           "policies" => pols, "src_fp" => CACHE_SOURCE_FINGERPRINT,
+                           "git_head" => LKS_GIT_HEAD, "julia" => string(VERSION))
     res = Dict{String,Any}()
     r_core_out = NaN
     for p in pols
@@ -139,9 +150,13 @@ function lks_row(z::Int, tag::String, e0::Float64, pols::Vector{String})
             res[p]["dF_abs"] = res[p]["F"] .- Fs
         end
     end
-    if haskey(res, "krc12") && haskey(res, "krc32c256")
-        res["krc32c256"]["dN0_rel_vs_krc12"] = res["krc32c256"]["N0"] / res["krc12"]["N0"] - 1.0
-        res["krc32c256"]["dF_abs_vs_krc12"] = res["krc32c256"]["F"] .- res["krc12"]["F"]
+    # 収束の検査: cap の効果 (krc12 → krc12c256) と margin の効果 (krc12c256 → krc20c256 → krc32c256) を分けて持つ
+    for (a, b) in (("krc12", "krc32c256"), ("krc12", "krc12c256"), ("krc12c256", "krc20c256"),
+                   ("krc12c256", "krc32c256"), ("krc20c256", "krc32c256"))
+        if haskey(res, a) && haskey(res, b)
+            res[b]["dN0_rel_vs_" * a] = res[b]["N0"] / res[a]["N0"] - 1.0
+            res[b]["dF_abs_vs_" * a] = res[b]["F"] .- res[a]["F"]
+        end
     end
     rec["elapsed_s"] = time() - t0
     return rec
@@ -185,20 +200,27 @@ function lks_summary(paths::Vector{String})
                 tag, length(v), q(dn, 0.5), q(dn, 0.9), dn[iw], Int(v[iw]["z"]), Float64(v[iw]["e0_keV"]),
                 maximum(dF05), Int(v[iw05]["z"]), Float64(v[iw05]["e0_keV"]), maximum(dF2), maximum(dFa))
     end
-    println("\n## krc32c256 − krc12 (κ·r_core+12 / cap128 の収束): 殻別 (n / |ΔN0/N0| 中央値 / 最悪 / max|ΔF| s≤0.5 / s≤2 / all)")
-    for tag in TAGS_V4
-        haskey(bytag, tag) || continue
-        v = [d for d in bytag[tag] if haskey(d["res"], "krc32c256")]
-        isempty(v) && continue
-        dn = [abs(Float64(d["res"]["krc32c256"]["dN0_rel_vs_krc12"])) for d in v]
-        iw = argmax(dn)
-        dF05 = [maximum(abs.([Float64(x) for x in d["res"]["krc32c256"]["dF_abs_vs_krc12"]][i05])) for d in v]
-        dF2 = [maximum(abs.([Float64(x) for x in d["res"]["krc32c256"]["dF_abs_vs_krc12"]][i2])) for d in v]
-        dFa = [maximum(abs.([Float64(x) for x in d["res"]["krc32c256"]["dF_abs_vs_krc12"]][iall])) for d in v]
-        ncap = count(d -> Int(d["res"]["krc12"]["n_at_cap"]) > 0, v)
-        @printf("  %-3s n=%3d  ΔN0: med %.2e max %.2e [Z=%d @%.0f]   |ΔF|max: s≤0.5 %.2e / s≤2 %.2e / all %.2e   (krc12 が cap128 に張り付く行 %d)\n",
-                tag, length(v), q(dn, 0.5), dn[iw], Int(v[iw]["z"]), Float64(v[iw]["e0_keV"]),
-                maximum(dF05), maximum(dF2), maximum(dFa), ncap)
+    for (a, b, what) in (("krc12", "krc32c256", "cap128/+12 → cap256/+32 (cap と margin が混ざる)"),
+                         ("krc12", "krc12c256", "cap の効果だけ (+12 固定、128 → 256)"),
+                         ("krc12c256", "krc20c256", "margin の効果 (cap256 固定、+12 → +20)"),
+                         ("krc20c256", "krc32c256", "margin の効果 (cap256 固定、+20 → +32)"))
+        key_n = "dN0_rel_vs_" * a; key_f = "dF_abs_vs_" * a
+        any(d -> haskey(d["res"], b) && haskey(d["res"][b], key_n), recs) || continue
+        println("\n## $b − $a : $what — 殻別 (n / |ΔN0/N0| 中央値 / 最悪 / max|ΔF| s≤0.5 / s≤2 / all; ⚠ s の最大は LK_S 上)")
+        for tag in TAGS_V4
+            haskey(bytag, tag) || continue
+            v = [d for d in bytag[tag] if haskey(d["res"], b) && haskey(d["res"][b], key_n)]
+            isempty(v) && continue
+            dn = [abs(Float64(d["res"][b][key_n])) for d in v]
+            iw = argmax(dn)
+            dF05 = [maximum(abs.([Float64(x) for x in d["res"][b][key_f]][i05])) for d in v]
+            dF2 = [maximum(abs.([Float64(x) for x in d["res"][b][key_f]][i2])) for d in v]
+            dFa = [maximum(abs.([Float64(x) for x in d["res"][b][key_f]][iall])) for d in v]
+            ncap = count(d -> Int(d["res"][a]["n_at_cap"]) > 0, v)
+            @printf("  %-3s n=%3d  ΔN0: med %.2e max %.2e [Z=%d @%.0f]   |ΔF|max: s≤0.5 %.2e / s≤2 %.2e / all %.2e   (%s が cap に張り付く行 %d)\n",
+                    tag, length(v), q(dn, 0.5), dn[iw], Int(v[iw]["z"]), Float64(v[iw]["e0_keV"]),
+                    maximum(dF05), maximum(dF2), maximum(dFa), a, ncap)
+        end
     end
     println("\n## 最悪 12 行 (krc12 − src、|ΔF| s≤0.5)")
     allv = [d for d in recs if haskey(d["res"], "krc12")]
@@ -231,6 +253,7 @@ function main_lks(args)
     "--summary" in args && return lks_summary(String[a for a in args if !startswith(a, "--")])
     path = args[1]
     tags = copy(TAGS_V4); conv_tags = ["M1", "M2", "M3", "M4", "M5"]; conv_e0 = "max"
+    base_pols = ["src", "krc12"]; conv_pols = ["krc32c256"]
     e0sel = Dict{String,Vector{String}}()
     lane_i, lane_n = 0, 1; limit = typemax(Int)
     i = 2
@@ -238,6 +261,8 @@ function main_lks(args)
         args[i] == "--tags" && (tags = String.(split(args[i+1], ",")); i += 1)
         args[i] == "--conv-tags" && (conv_tags = String.(split(args[i+1], ",")); i += 1)
         args[i] == "--conv-e0" && (conv_e0 = args[i+1]; i += 1)
+        args[i] == "--policies" && (base_pols = String.(split(args[i+1], ",")); i += 1)
+        args[i] == "--conv-policies" && (conv_pols = String.(split(args[i+1], ",")); i += 1)
         args[i] == "--limit" && (limit = parse(Int, args[i+1]); i += 1)
         if args[i] == "--e0"
             sel = String.(split(args[i+1], ","))
@@ -263,7 +288,8 @@ function main_lks(args)
     open(path, "a") do io
         for (k, (z, tag, e0, ismax)) in enumerate(todo)
             conv = tag in conv_tags && (conv_e0 == "all" || ismax)
-            pols = conv ? ["src", "krc12", "krc32c256"] : ["src", "krc12"]
+            pols = conv ? vcat(base_pols, conv_pols) : copy(base_pols)
+            all(p -> haskey(LKS_POLICIES, p), pols) || error("未知の policy: $pols")
             try
                 rec = lks_row(z, tag, e0, pols)
                 write(io, lks_jsonl_line(rec), "\n")

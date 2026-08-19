@@ -93,6 +93,11 @@ end
 "規則の版名 (model_id の接尾辞)。v1/v2 と一致しなければ custom"
 rule_version(r::SigmaRule) = r == SIGMA_RULE_V1 ? "v1" : r == SIGMA_RULE_V2 ? "v2" : "custom"
 
+"""規則の**全フィールド**を構造化して返す (JSON 用)。`rule_name` は互換のための短い文字列で、
+`transverse` と v1 既定の連続状態設定を省くので、自己記述には**こちら**を使う (codex 2026-08-19 深夜)。"""
+rule_config(r::SigmaRule) = Dict{String,Any}(String(f) => (getfield(r, f) isa Symbol ? string(getfield(r, f)) : getfield(r, f))
+                                             for f in fieldnames(SigmaRule))
+
 # ---------------------------------------------------------------------
 # 参照関数の切替点 ε_c (⚠ 定数を埋め込まない — 切替条件そのものから解く)
 # ---------------------------------------------------------------------
@@ -121,8 +126,11 @@ const EPS_C_HA = eps_c_reference_switch()
 # β=200 mrad で実測。l_cap=12 で l_max を定数にすると 16 vs 32 パネルの差が 1.4e-06 → 9.8e-09 に潰れ、
 # ppw・dt_log・n_q・sig_thresh は効かない = 負のテスト込みで帰属済)。β ≤ 60 mrad では高 l′ が効かないので
 # 見えない (window_quadrature §2.6 の 2.66e-16 はそのため)。
-# ⇒ 候補 v2 では **窓の中で l_max を一定にする** (`l_max_policy = :window_max`: 窓の上端 ε で src の式が
-#   与える l_max を全ノードに使う)。src は凍結なので、eps_setup の写し `eps_setup_lmax` を tools に置く。
+# ⇒ 候補 v2 は **l_max を κ に比例させる** (`l_max_policy = :kappa_rc`: min(l_cap, ⌈κ·r_core⌉ + 12)。
+#   `:window_max` (窓の上端の値で一定) は診断用 — 低 ε に高 l を強いると src の Coulomb 関数が DomainError
+#   で落ちる (Fe K、l=42、pilot §3))。⚠ 階段そのものは :kappa_rc でも残る (⌈κ·r_core⌉ が 1 増えるたび) が、
+#   足される波は κ·r_core より 12 波外側なので 1 段の大きさは床 (1e-08 級) の下に落ちる**はず** — pilot v2 で測る。
+#   src は凍結なので、eps_setup の写し `eps_setup_lmax` を tools に置く。
 #   ⚠ 写しの式は src と同じでなければならない — `:src` 経路では eps_setup の返す l_max と突き合わせて assert。
 # ---------------------------------------------------------------------
 "src の eps_setup と同じ l_max の式 (⚠ src が変われば追従が要る。`:src` 経路で毎ノード検算する)"
@@ -531,6 +539,8 @@ function sigma_beta_delta(z::Int, tag::String, e0_keV::Float64;
                           beta_mrad, delta1_eV::Float64, delta2_eV::Float64,
                           beta_in_mrad::Float64=0.0, clip::Bool=false,
                           normalize::Symbol=:bote, rule::SigmaRule=SIGMA_RULE_V1)
+    # ⚠ 既定の rule は v1 のまま (v2 は認証中。採否は作者判断。採ったらここを SIGMA_RULE_V2 に)。
+    #   利用者が rule= を省くと v1 になる — 出力の numerical.rule / rule_config で必ず分かる
     normalize in (:own, :bote) || error("normalize は :own か :bote ($normalize)")
     betas = Float64[b * 1e-3 for b in (beta_mrad isa Number ? [beta_mrad] : beta_mrad)]
     ch, r_core = sigma_channel(z, tag, e0_keV)
@@ -554,6 +564,8 @@ function sigma_beta_delta(z::Int, tag::String, e0_keV::Float64;
                                 "Legendre modal tail ratio (diagnostic only; not an error bound)",
                             "panel_edges_sha" => r.panel_edges_sha,
                             "angular_panels_max" => r.angular_panels_max,
+                            "rule_version" => rule_version(rule),
+                            "rule_config" => rule_config(rule),
                             "zero_reason" => r.zero_reason))
     # 契約 §1/§3: own と bote の**両方を常に返す** (`normalize` は主値 `sigma_nm2` の選択だけ)。
     # 分母 σ_own,total は**同じ規則**で窓 [0, ε_max]・β = π (横断の設定も同じ)。
