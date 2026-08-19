@@ -5,7 +5,7 @@ lkin_rule_study.jl — ★ F v6 の部分波規則を選ぶための要因計画
 **src を直して再生成する**。その規則を選ぶために、出荷 F(s) 経路の写し (`run_NK_policy`、HIGH 設定) で
 
   半径の定義 r_eff ∈ {r_core (1−1e-12 含有 ×1.15) / r(1−1e-8) / r(0.999) / r(0.99) / r(0.9)}
-  × margin ∈ {8, 12, 20} × cap ∈ {128, 160 (rcore のみ)}
+  × margin ∈ {8, 12, 20} × cap ∈ {128, 160 (rcore のみ), 256 (r99/r999 のみ)}
 
 を、**2 段の参照** refA = (r_core, +32, cap 256) と refB = (r_core, +32, cap 320) に対して比べる
 (refA−refB が小さいことが参照自身の安定の証拠。codex 2026-08-20 の手順)。
@@ -49,6 +49,11 @@ function lrs_rules(ch)
     for (rn, r) in sort(collect(radii); by=first), m in (8, 12, 20), cap in (128, 160)
         (cap == 160 && rn != "rcore") && continue          # cap の効果は rcore でだけ見る (費用)
         push!(rules, ("$(rn)+$(m)c$(cap)", :kappa_r, r, m, cap))
+    end
+    # cap が律速 (2026-08-20 03:10 の最初の 3 行: cap 128 では半径・margin に依らず ΔF 1.1e-05) なので、
+    #   安い半径 × cap 256 も入れる (精度 vs 費用の最有力候補)
+    for (rn, m) in (("r99", 12), ("r99", 20), ("r999", 12))
+        push!(rules, ("$(rn)+$(m)c256", :kappa_r, radii[rn], m, 256))
     end
     push!(rules, ("refA:rcore+32c256", :kappa_r, rc, 32, 256))
     # ⚠ margin +48 は低 ε (κ→0) で l ≫ κr となり src の Coulomb 関数が DomainError (sqrt の負引数 −2e-16) で落ちる
@@ -121,7 +126,7 @@ function lrs_summary(paths::Vector{String})
         b = d["res"]["refB:rcore+32c320"]; Fb = _lfv(b["F"])
         cells = String[]
         haskey(b, "error") && continue
-        for nm in ("src", "rcore+12c128", "r99+12c128", "r90+12c128", "refA:rcore+32c256")
+        for nm in ("src", "rcore+12c128", "r99+12c128", "r99+12c256", "r99+20c256", "refA:rcore+32c256")
             haskey(d["res"], nm) || continue
             r = d["res"][nm]
             haskey(r, "error") && (push!(cells, nm * " ERR"); continue)
