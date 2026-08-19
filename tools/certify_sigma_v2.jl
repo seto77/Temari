@@ -34,7 +34,7 @@ ang_eps_eV[], ang_long_rel[], ang_trans_rel[] (行に 1 回だけ)
 実行:
   julia +1.11 --project=. -t 1 tools/certify_sigma_v2.jl ../cert_v2_<profile>_lane0.jsonl --profile deep --lane 0/16 [--rule v1|v2]
   (--rule の既定は v2 = HIGH の連続状態 + l_max = ⌈κ·r_core⌉+12。v1 = pilot 2026-08-19 の規則。
-   v3 = v2 + 窓 24 パネル (オラクルは 32 パネル)。指紋は規則ごとに違う。
+   v3 = v2 + 窓 24 パネル (オラクルは 32 パネル)。v4 = src の部分波規則 (:src、LKIN_RULE v6) + 24 パネル。指紋は規則ごとに違う。
    事前登録 v2 = docs/notes/certification_v2b_preregistration_2026-08-19.md / v3 = certification_v3_preregistration_2026-08-20.md)
   julia +1.11 --project=. tools/certify_sigma_v2.jl ../cert_v2_deep_lane*.jsonl --summary
 
@@ -55,7 +55,7 @@ const V2_EPSC_HALFWIDTHS_EV = [100.0, 0.01]             # ε_c を跨ぐ窓 [ε_
 const V2_ORACLE_NPAN = 24
 const V2_ORACLE_NPT  = 16
 # v3 (窓 24 パネル) のオラクルは 32 パネル (本番とパネル数が同じにならないように。事前登録 v3 §0-3)
-oracle_npan(rule::SigmaRule) = rule == SIGMA_RULE_V3 ? 32 : V2_ORACLE_NPAN
+oracle_npan(rule::SigmaRule) = (rule == SIGMA_RULE_V3 || rule == SIGMA_RULE_V4) ? 32 : V2_ORACLE_NPAN
 const V2_ANG_EPS_EV  = [50.0]                           # + 0.05·ε_max を足す
 const V2_RTOL = 1.0e-7                                  # 事前登録: 合否 |P−O| ≤ rtol|O| + atol σ_ref
 const V2_ATOL = 1.0e-9                                  # σ_ref = 同じ行の最も広い窓 [0, ε_max] の O
@@ -517,7 +517,7 @@ function main_v2(args)
         i += 1
     end
     rule = rule_s == "v1" ? SIGMA_RULE_V1 : rule_s == "v2" ? SIGMA_RULE_V2 : rule_s == "v3" ? SIGMA_RULE_V3 :
-           error("--rule は v1 / v2 / v3 ($rule_s)")
+           rule_s == "v4" ? SIGMA_RULE_V4 : error("--rule は v1 / v2 / v3 / v4 ($rule_s)")
     set_cert_rule!(rule)
     accept = Set{String}(vcat([CERT_FP_V2_REF[]], extra_accept))
     rows = profile_rows(profile, tags, custom)

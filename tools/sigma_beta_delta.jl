@@ -70,16 +70,23 @@ const SIGMA_RULE_V1 = SigmaRule()
 #   (ppw 30 / dt_log 1e-3 / l_cap 128 / sig_thresh 1e-13) に揃え、部分波数を κ·r_core に比例させる
 #   (src の l_kin = ⌈κ·min(r_core, 6/Z)⌉+12 は 3p/3d の高 ε で収束していない — `lkin_truncation_2026-08-19.md`)。
 #   窓・角度・n_q は v1 と同じ。事前登録 = `docs/notes/certification_v2b_preregistration_2026-08-19.md`
-const SIGMA_RULE_V2 = SigmaRule(ppw=HIGH_SETTINGS.ppw, dt_log=HIGH_SETTINGS.dt_log,
-                                l_cap=HIGH_SETTINGS.l_cap, sig_thresh=HIGH_SETTINGS.sig_thresh,
+# ⚠ 値は登録時の HIGH (v5 世代: ppw 30 / dt 1e-3 / l_cap 128 / sig 1e-13) を**リテラルで固定** — HIGH_SETTINGS は
+#   2026-08-20 に v6 (l_cap 256 …) へ動いたので、参照すると登録済みの規則が黙って変わる (指紋だけが変わり値の意味がずれる)
+const SIGMA_RULE_V2 = SigmaRule(ppw=30.0, dt_log=1.0e-3, l_cap=128, sig_thresh=1.0e-13,
                                 l_max_policy=:kappa_rc, l_max_margin=12)
 
 # ★ 候補 v3 (2026-08-20 未明、pilot v2 の結果を受けて): v2 + 窓の等比パネル数 24 (β = 200 mrad × 広がった軌道 × 高 ε の
 #   窓で 16 パネルが 3e-07〜4e-06 外れ、2×2 で純粋な窓求積の不足と帰属、パネル数掃引で 24 が足りた)。
 #   事前登録 = `docs/notes/certification_v3_preregistration_2026-08-20.md`
-const SIGMA_RULE_V3 = SigmaRule(n_panel=24, ppw=HIGH_SETTINGS.ppw, dt_log=HIGH_SETTINGS.dt_log,
-                                l_cap=HIGH_SETTINGS.l_cap, sig_thresh=HIGH_SETTINGS.sig_thresh,
-                                l_max_policy=:kappa_rc, l_max_margin=12)
+const SIGMA_RULE_V3 = SigmaRule(n_panel=24, ppw=30.0, dt_log=1.0e-3, l_cap=128, sig_thresh=1.0e-13,
+                                l_max_policy=:kappa_rc, l_max_margin=12)      # リテラル固定 (V2 と同じ理由)
+
+# ★ 候補 v4 (2026-08-20 早朝): **src の部分波規則 (LKIN_RULE :v6 = ⌈κ·r(0.999)⌉+12, HIGH l_cap 256) をそのまま使う**
+#   (`l_max_policy = :src`) + 窓 24 パネル。F(s) と σ(β,Δ) が 1 つの部分波処方を共有する (codex 2026-08-20)。
+#   n_q は σ 独自の 1216 のまま (src の 720 に合わせない — 出口ごとの数値設定。事前登録 v4 に差を明記)。
+#   事前登録 = `docs/notes/certification_v4_preregistration_2026-08-20.md`
+const SIGMA_RULE_V4 = SigmaRule(n_panel=24, ppw=30.0, dt_log=1.0e-3, l_cap=256, sig_thresh=1.0e-13,
+                                l_max_policy=:src)     # l_cap 256 = HIGH v6 (リテラル固定。src の LKIN_RULE は名前に入る)
 
 "規則の名前 (認証の指紋に入る)。⚠ v1 の文字列は事前登録 v1 §1 のまま (追加項目は v1 既定と違うときだけ付く)"
 function rule_name(r::SigmaRule)
@@ -91,14 +98,18 @@ function rule_name(r::SigmaRule)
     end
     if r.l_max_policy === :kappa_rc
         s *= "/lmax:kappa_rc+$(r.l_max_margin)"
-    elseif r.l_max_policy !== :src
+    elseif r.l_max_policy === :src
+        # src の規則の版も名前に入れる (v1 の文字列を変えないよう、v5 規則のときは何も付けない)
+        LKIN_RULE === :v5 || (s *= "/lmax:src-$(LKIN_RULE)-r$(LKIN_RADIUS_FRAC)+$(LKIN_MARGIN)")
+    else
         s *= "/lmax:$(r.l_max_policy)"
     end
     return s
 end
 
 "規則の版名 (model_id の接尾辞)。v1/v2 と一致しなければ custom"
-rule_version(r::SigmaRule) = r == SIGMA_RULE_V1 ? "v1" : r == SIGMA_RULE_V2 ? "v2" : r == SIGMA_RULE_V3 ? "v3" : "custom"
+rule_version(r::SigmaRule) = r == SIGMA_RULE_V1 ? "v1" : r == SIGMA_RULE_V2 ? "v2" : r == SIGMA_RULE_V3 ? "v3" :
+                             r == SIGMA_RULE_V4 ? "v4" : "custom"
 
 """規則の**全フィールド**を構造化して返す (JSON 用)。`rule_name` は互換のための短い文字列で、
 `transverse` と v1 既定の連続状態設定を省くので、自己記述には**こちら**を使う (codex 2026-08-19 深夜)。"""
