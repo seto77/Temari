@@ -132,16 +132,36 @@ consumer, and each is checked by `temari_contract.py`.
    in every channel; the per-channel overvoltage nodes are what differ.)
 5. **`eps` is an upper bound and must not be interpolated in E₀.** Take the
    maximum of the two bracketing rows — an interpolated bound is not a bound.
+   **When E₀ lands exactly on a row, use that row's `eps` alone**: there is no
+   bracketing pair, and pairing it with a neighbour anyway changes the answer
+   wherever `eps` is not monotonic in E₀. It is not monotonic in general — for
+   Rn M5 at 30 keV the two readings give 1.29×10⁻⁴ and 1.51×10⁻⁴. The same
+   applies to `s_cert`: on a node it is that row's value, and between rows take
+   the smaller of the pair.
 6. **E₀ interpolation runs in x = ln(u−1), with y = log F for the s columns
    whose values are all positive** and raw F otherwise, over the rows whose
    `s_cert` reaches that column. Interpolating in raw E₀ over raw F gives
    different answers from the shipping consumer — up to 2.9×10⁻³, with the sign
    reversed in places.
+   **The s basis is then built only from columns at or below `s_cert` for that
+   E₀** — not from every column some row reaches. The wider reading pulls in
+   high-s columns that exist at this E₀ only by extrapolation along the E₀ axis,
+   and just below `s_cert` that is worth up to 3.3×10⁻³ — the same order as the
+   worst E₀ interpolation error anywhere in the dataset.
 7. **Past `s_cert` there are two distinct regions.** Between `s_cert` and
    `s_kin` = 1/λ(E₀) the value is unrecorded and carries the bound `eps`. Above
    `s_kin` no such beam pair exists on the Ewald sphere at all, so the request
    itself does not stand — attaching a bound there would be guaranteeing
    something about a configuration that cannot occur.
+
+!!! tip "Checking a port against fixed vectors"
+    Items 5 and 6 above gained their second sentence in August 2026, after a
+    second, independently written evaluator disagreed with the reference loader
+    in exactly those two places. Both readings are now pinned by
+    [50 reference vectors](https://github.com/seto77/Temari/blob/main/verification/f_v5_postrelease_vectors.json)
+    covering all three regions, agreed to 10⁻¹² by both evaluators.
+    ⚠ They are **post-release**: derived without changing the published archive,
+    which does not contain them.
 
 `s_kin` is the geometric limit — two beams on the Ewald sphere of radius
 $1/\lambda$ can be at most a diameter $2/\lambda$ apart, and since
