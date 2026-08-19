@@ -1,3 +1,8 @@
+---
+description: >-
+  What is done, what is planned and in what order, and what is deliberately out of scope -- each with an effort estimate relative to the existing engine.
+---
+
 # Roadmap
 
 The physics of an isolated atom is **one engine with several exits**. Every

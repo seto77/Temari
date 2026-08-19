@@ -1,3 +1,8 @@
+---
+description: >-
+  What to do when a long batch stops making progress on Windows: the GC crash, the wedged process that keeps its handles, the watchdog, and the SCF cache.
+---
+
 # Troubleshooting
 
 Each entry below is one symptom — what is going on, what to check, the

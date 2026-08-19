@@ -1,3 +1,8 @@
+---
+description: >-
+  Run Temari once and understand what it printed: no installation, the first command, the fields of the output, and the flags that trade accuracy for time.
+---
+
 # Getting started
 
 This page takes you from a fresh clone to a first number: install no

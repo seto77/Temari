@@ -1,3 +1,8 @@
+---
+description: >-
+  Why bit-identical output outranks speed here: which optimizations were refused, how a dataset is pinned to a commit and a Julia release, and what regeneration does and does not guarantee.
+---
+
 # Reproducibility
 
 A generated table is a scientific product. **The same input must produce the

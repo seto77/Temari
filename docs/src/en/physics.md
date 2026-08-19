@@ -1,3 +1,8 @@
+---
+description: >-
+  The prescription actually implemented: the mixed dynamic form factor, the Dirac self-consistent atom, the kappa-resolved continuum, the exchange choice, and the limits each one carries.
+---
+
 # The physics
 
 !!! abstract "Where the authoritative statement lives"

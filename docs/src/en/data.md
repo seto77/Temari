@@ -1,3 +1,8 @@
+---
+description: >-
+  The two published datasets, where to get them, and the contract their numbers carry: F is signed, the momentum convention is q = 4*pi*s, and values past each row's s_cert are padding rather than physics.
+---
+
 # Data
 
 Two datasets are **published in their own right**, each with its own version

@@ -1,3 +1,8 @@
+---
+description: >-
+  What each exit costs and where the time goes, with the speedups that were adopted, the ones that were measured and declined, and the reason in each case.
+---
+
 # Performance
 
 Everything on this page is measured on the same workload — generating inner-shell

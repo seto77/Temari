@@ -1,3 +1,8 @@
+---
+description: >-
+  The published off-diagonal inner-shell ionization form factors F(s, E0) for quantitative STEM-EDX and ALCHEMI, and the zero-dependency Julia engine that derives them from one relativistic atom.
+---
+
 # Temari
 
 **Open, relativistic, reproducible off-diagonal ionization form factors for

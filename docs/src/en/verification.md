@@ -1,3 +1,8 @@
+---
+description: >-
+  How far the numbers are trusted and why: the analytic ladder, an independent Python implementation, external references where they exist, and the discrepancies still unexplained.
+---
+
 # Verification
 
 How far the numbers are trusted, and on what evidence. Three tiers, from the

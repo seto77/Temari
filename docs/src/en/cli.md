@@ -1,3 +1,8 @@
+---
+description: >-
+  Every subcommand and flag of src/ionization.jl -- the six exits, the prescription switches, the model-id grammar, and what each run costs in time.
+---
+
 # Command-line reference
 
 Everything runs from the repository root with a plain `julia` invocation — no

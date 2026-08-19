@@ -1,3 +1,8 @@
+---
+description: >-
+  Temari's tables set against the literature as curves -- f_x against numerical Dirac-Hartree-Fock, f_e against Kirkland and Peng, F(s) against Oxley-Allen and muSTEM. Ratios and deviations only.
+---
+
 # Against the literature
 
 The [Verification](verification.md) page states, in numbers, how far the shipped

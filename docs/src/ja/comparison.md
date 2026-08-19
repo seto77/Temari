@@ -1,3 +1,8 @@
+---
+description: >-
+  Temari の表を文献と曲線で突き合わせた結果。f_x は数値 Dirac–Hartree–Fock と、f_e は Kirkland・Peng と、F(s) は Oxley–Allen・µSTEM と。載せるのは比と偏差だけです。
+---
+
 # 文献との比較
 
 [検証](verification.md) のページは、出荷テーブルが公表された参照からどれだけ
