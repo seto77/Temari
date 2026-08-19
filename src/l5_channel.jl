@@ -41,11 +41,35 @@ function eps_nodes(E_th::Float64, eps_max::Float64, n1::Int, n2::Int, n3::Int)
     return vcat(e1, e2, e3), vcat(we1, we2, we3)
 end
 
+"""束縛軌道の含有半径 r(frac): u_b² の累積が全体の frac に達する r (`r_core` と同じ cumsum。×1.15 は掛けない)"""
+function bound_containment_radius(r_b, u_b, frac::Float64)
+    cum = cumsum(u_b .^ 2 .* gradient_(r_b))
+    i = clamp(searchsortedfirst(cum, frac * cum[end]), 1, length(r_b))
+    return r_b[i]
+end
+
+"""部分波数の運動学的上限 l_kin (`LKIN_RULE`、l0_numerics.jl)。
+:v5 = ⌈κ·min(r_core, 6/Z)⌉ + 12 (dataset v5 までの式、M 殻で未収束) /
+:v6 = ⌈κ·r_eff⌉ + LKIN_MARGIN、r_eff = 含有率 LKIN_RADIUS_FRAC の半径 (260820Cl)。
+⚠ tools/sigma_beta_delta.jl `src_lmax` と tools/lkin_truncation_probe.jl はこの式の写しを持つ — 変えたら追従する
+(`:src` 経路は毎ノード突き合わせて assert する)。"""
+function lkin_partial_waves(kappa::Float64, z::Int, r_core::Float64, r_b, u_b)
+    if LKIN_RULE === :v5
+        return ceil(Int, kappa * min(r_core, 6.0 / z)) + 12
+    elseif LKIN_RULE === :v6
+        r_eff = bound_containment_radius(r_b, u_b, LKIN_RADIUS_FRAC)
+        return ceil(Int, kappa * r_eff) + LKIN_MARGIN
+    else
+        error("LKIN_RULE は :v5 か :v6 ($LKIN_RULE)")
+    end
+end
+
 """ε ノード 1 点分の**運動学に依らない**準備 (260806Cl 分離、P3 の出口共通部)。
 
 手順 (式は全て Python 版と同一):
- 1. 部分波上限 l_max = min(l_cap, 運動学 κr + 余裕, 遠心障壁の転回点が
-    r_core 内に入る l) — それより高い l' は行列要素領域に届かない
+ 1. 部分波上限 l_max = min(l_cap, 運動学 κ·r_eff + 余裕 (`lkin_partial_waves`、LKIN_RULE)、
+    遠心障壁の転回点が r_core 内に入る l) — それより高い l' は行列要素領域に届かない。
+    ⚠ 260820Cl: v5 までの r = min(r_core, 6/Z) は M 殻で未収束だった (l0_numerics.jl LKIN_RULE のコメント)
  2. マッチ半径 = ポテンシャルが Coulomb 尾 −z_a/r に一致し (r_match_for)、
     かつ最高部分波の転回点 + 3 波長より外 — Coulomb フィットの正当化条件
  3. 連続状態を解き (ContinuumSet)、l'=l_init を束縛軌道と直交化
@@ -81,7 +105,7 @@ function eps_setup(pot_ion, r_b, u_b, e::Float64, z::Int, r_core::Float64,
     r_c = r_core + 2.0
     L_cut = 2.0 * r_c + 2.0 * e * r_c * r_c    # 障壁の転回点 = r_c となる l(l+1)
     l_barrier = floor(Int, sqrt(L_cut))
-    l_kin = ceil(Int, kappa * min(r_core, 6.0 / z)) + 12
+    l_kin = lkin_partial_waves(kappa, z, r_core, r_b, u_b)
     l_max = min(l_cap, max(6, min(l_kin, l_barrier)))
     r_t = (sqrt(1.0 + 2.0 * e * l_max * (l_max + 1.0)) - 1.0) / (2.0 * e)
     lam = 2.0 * pi / kappa                     # 放出電子の波長

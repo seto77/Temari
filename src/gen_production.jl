@@ -584,8 +584,17 @@ dataset_version と model_id が**一致すること**しか見ないので、�
 「処方 **かつ** 出荷形式」で決まるので、両方を版キーに含める。
 ⚠ v3/v4 は s グリッドが違う (161 点) ので、このコードからは**もう名乗れない** —
 過去世代を再現したいときは S_GRID ごと戻す必要がある (意図的にそうしてある)。"""
-presc_dataset_version(p) =
-    (is_shipping_format() && p == PRESC_V4) ? "5.0.0" : "0.0.0-dev"
+# 260820Cl: 部分波打ち切りの規則 (LKIN_RULE) と l_cap も版キーに入れる — v5 (lkin v5 / l_cap 128) と
+#   v6 (lkin v6: 含有率 0.999・margin 12 / l_cap 256) は処方 NamedTuple も出荷形式も同じで、数値の主要つまみだけが違う。
+#   QUICK/PROD で作った一式も "5.0.0" を名乗れていた (l_cap を見ていなかった) 弱点も同時に塞ぐ。
+#   `tools/check_tables.jl` C16 は JSON の settings から同じ引数で引き直す (lkin_rule が無い旧ファイル = v5)。
+function presc_dataset_version(p; lkin_rule::AbstractString=string(LKIN_RULE), l_cap::Integer=HIGH_SETTINGS.l_cap,
+                               lkin_radius_frac=LKIN_RADIUS_FRAC, lkin_margin::Integer=LKIN_MARGIN)
+    (is_shipping_format() && p == PRESC_V4) || return "0.0.0-dev"
+    lkin_rule == "v5" && l_cap == 128 && return "5.0.0"
+    (lkin_rule == "v6" && l_cap == 256 && lkin_radius_frac == 0.999 && lkin_margin == 12) && return "6.0.0"
+    return "0.0.0-dev"
+end
 
 """JSON の `prescription` ブロック。**処方から引く** — ここを固定文字列にすると、
 つまみを変えたのに説明文が古いまま出る (v3 の provenance で実際に起きた)。"""
@@ -752,7 +761,7 @@ function run_channel(z::Int, tag::String, outdir::String;
         "j_lower" => j_lower, "occ_init" => occ_init,
         "s_grid_A_inv" => S_GRID,
         "model_id" => presc_model_id(presc),
-        "dataset_version" => presc_dataset_version(presc),
+        "dataset_version" => presc_dataset_version(presc; l_cap=settings.l_cap),
         "schema_version" => SCHEMA_VERSION,
         "generator" => "ionization.jl (Julia)",
         "generator_commit" => _git_head(),
@@ -760,7 +769,8 @@ function run_channel(z::Int, tag::String, outdir::String;
         "generation_context_sha256" => context_sha256,
         "cache_provenance" => cache_provenance(),
         "validated" => note, "validation_summary" => note,
-        "settings" => Dict{String,Any}(String(k) => v for (k, v) in pairs(settings)),
+        # 260820Cl: settings_dict で部分波打ち切りの規則 (lkin_rule / lkin_radius_frac / lkin_margin) も残す
+        "settings" => settings_dict(settings),
         "rel_continuum" => presc.rel_continuum,
         # 260808Cl 追加: v4 の連続状態を JSON からも読めるようにする
         # (`rel_continuum` だけだと v2 と v4 が同じ false になって区別できない)
@@ -991,7 +1001,7 @@ function main_gen(args)
             "(lane $lane_i/$lane_n, tags=$(join(tags,",")), " *
             (quick ? "QUICK" : "HIGH") * ", スレッド $(Threads.nthreads()))")
     println("処方: ", presc_model_id(presc),
-            "  dataset_version=", presc_dataset_version(presc))
+            "  dataset_version=", presc_dataset_version(presc; l_cap=settings.l_cap))
     println("出力: $outdir\n")
     warn_if_dirty()                            # 260809Cl 追加 (指示書 §1.3)
     n_done = n_skip = 0

@@ -13,7 +13,8 @@ lkin_truncation_probe.jl — ★★★ src の部分波打ち切り l_kin が出
 出荷経路 `compute_NK` を tools に写し (ε ノード・重み・r_core・AngWS・angular_integral は src のもの)、
 `eps_setup` だけを `eps_setup_lmax` (tools/sigma_beta_delta.jl) に替えて、l_max の方針を
 
-  :src       … src の式そのまま (= 出荷)
+  :src       … src の式そのまま (⚠ 260820Cl から src は LKIN_RULE に従う。:v6 既定では出荷 v5 と**違う**)
+  :src_v5    … v5 の式 ⌈κ·min(r_core, 6/Z)⌉+12 (= 出荷 v5。ビット一致の基準)
   :kappa_rc  … l_max = min(l_cap, ⌈κ·r_core⌉ + 12)  (6/Z の上限を外す。κ に比例するので低 ε で高 l を強いない)
 
 の 2 通りで N(K) を出し、N(0) と F(s) = N(K)/N(0) の差を s ごとに印字する。設定は出荷の HIGH。
@@ -53,7 +54,8 @@ function run_NK_policy(ch, policy::Symbol; settings=HIGH_SETTINGS, l_cap::Int=se
         kappa = nonrel ? sqrt(2.0 * e) : krel(e, c_light)
         q_hi = min(k_i + kf, kappa + 15.0 * ch.z + 2.0 * maximum(K_nodes))
         q_lo = max(1e-4, 0.9 * (k_i - kf))
-        lm = policy === :src ? src_lmax(e, ch.z, r_core, l_cap, c_light; nonrel=nonrel) :
+        lm = policy === :src ? src_lmax(e, ch.z, r_core, l_cap, c_light; nonrel=nonrel, r_b=ch.r_b, u_b=ch.u_b) :
+             policy === :src_v5 ? src_lmax(e, ch.z, r_core, l_cap, c_light; nonrel=nonrel) :
              policy === :kappa_rc ? min(l_cap, ceil(Int, kappa * r_core) + margin) :
              policy === :kappa_r ? (isfinite(r_eff) || error(":kappa_r は r_eff が要る");
                                     min(l_cap, ceil(Int, kappa * r_eff) + margin)) :

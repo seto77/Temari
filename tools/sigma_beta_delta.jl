@@ -140,14 +140,18 @@ const EPS_C_HA = eps_c_reference_switch()
 #   src は凍結なので、eps_setup の写し `eps_setup_lmax` を tools に置く。
 #   ⚠ 写しの式は src と同じでなければならない — `:src` 経路では eps_setup の返す l_max と突き合わせて assert。
 # ---------------------------------------------------------------------
-"src の eps_setup と同じ l_max の式 (⚠ src が変われば追従が要る。`:src` 経路で毎ノード検算する)"
+"""src の eps_setup と同じ l_max の式 (`:src` 経路で毎ノード検算する)。
+260820Cl: src の l_kin は `lkin_partial_waves` (LKIN_RULE :v5/:v6) になった — `r_b`, `u_b` を渡せば src の関数を
+そのまま呼ぶ (:v6 の含有半径に要る)。渡さなければ v5 の式 (旧出荷) を返す。"""
 function src_lmax(e::Float64, z::Int, r_core::Float64, l_cap::Int, c_light::Float64;
-                  nonrel::Bool=false)
+                  nonrel::Bool=false, r_b=nothing, u_b=nothing)
     kappa = nonrel ? sqrt(2.0 * e) : krel(e, c_light)
     r_c = r_core + 2.0
     L_cut = 2.0 * r_c + 2.0 * e * r_c * r_c
     l_barrier = floor(Int, sqrt(L_cut))
-    l_kin = ceil(Int, kappa * min(r_core, 6.0 / z)) + 12
+    l_kin = (r_b === nothing || !isdefined(Main, :lkin_partial_waves)) ?
+            ceil(Int, kappa * min(r_core, 6.0 / z)) + 12 :
+            lkin_partial_waves(kappa, z, r_core, r_b, u_b)
     return min(l_cap, max(6, min(l_kin, l_barrier)))
 end
 
@@ -230,7 +234,7 @@ function node_rl(ch, r_core::Float64, e::Float64, k_i::Float64, kf::Float64, rul
             q_lo, q_hi, rule.l_cap, rule.n_q, rule.ppw, rule.dt_log, ch.l_b,
             rule.sig_thresh, k_i + kf; rel=ch.rel, dirac=ch.dirac)
         # ⚠ tools の写し (src_lmax) が src と同じ式であることを毎ノード検算する
-        lm_chk = src_lmax(e, z, r_core, rule.l_cap, c_light; nonrel=nonrel)
+        lm_chk = src_lmax(e, z, r_core, rule.l_cap, c_light; nonrel=nonrel, r_b=ch.r_b, u_b=ch.u_b)
         lm == lm_chk || error("src_lmax が eps_setup と食い違う (ε=$(e) Ha): $(lm) vs $(lm_chk)")
         return rl, lm
     end
@@ -459,7 +463,7 @@ function sigma_window_v1(ch, r_core::Float64, betas::Vector{Float64},
     # ★ l_max の方針: :window_max は窓の上端 ε (= 最大の κ) で src の式が与える値を全ノードに使う
     #   (診断用。低 ε に高 l を強いるので Fe K で DomainError — pilot §3)。本番候補 v2 は :kappa_rc
     l_fixed = rule.l_max_policy === :window_max ?
-              src_lmax(e2, z, r_core, rule.l_cap, c_light; nonrel=nonrel) : -1
+              src_lmax(e2, z, r_core, rule.l_cap, c_light; nonrel=nonrel, r_b=ch.r_b, u_b=ch.u_b) : -1
     LMAX_USED = zeros(Int, n)
     Threads.@threads :greedy for k in n:-1:1
         e = EPS[k]

@@ -404,9 +404,16 @@ function provenance_consistency(files::Vector{String})
             ok = false
         end
         dv = String(d["dataset_version"])
-        if presc_dataset_version(pr) != dv
+        # 260820Cl: 版キーに部分波規則と l_cap が入った — JSON の settings から同じ引数で引き直す
+        #   (lkin_rule が無い旧ファイル = v5 の式、l_cap は settings のもの)
+        st = get(d, "settings", Dict{String,Any}())
+        dv_calc = presc_dataset_version(pr; lkin_rule=String(get(st, "lkin_rule", "v5")),
+                                        l_cap=Int(get(st, "l_cap", HIGH_SETTINGS.l_cap)),
+                                        lkin_radius_frac=(x = get(st, "lkin_radius_frac", nothing); x === nothing ? LKIN_RADIUS_FRAC : Float64(x)),
+                                        lkin_margin=Int(get(st, "lkin_margin", 12)))
+        if dv_calc != dv
             println("[NG] C16 $(basename(p)): 処方から引いた dataset_version " *
-                    "$(presc_dataset_version(pr)) がファイルの $dv と違う")
+                    "$dv_calc がファイルの $dv と違う")
             ok = false
         end
     end

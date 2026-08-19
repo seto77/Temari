@@ -50,8 +50,11 @@ const QUICK_SETTINGS = (n1=8, n2=16, n3=8, l_cap=72, n_x=32, n_phi=16,
 # PROD との差 = PROD の打ち切り誤差の実測値 (audit コマンドで測る)
 # dt_log=1e-3: 監査で K 殻の残差が dt_log 支配 (PROD 2e-3 で ~3e-5) かつ
 # 細分のコスト増がほぼゼロと判明したため、当初案 1.6e-3 からさらに締めた
-const HIGH_SETTINGS = (n1=20, n2=56, n3=20, l_cap=128, n_x=96, n_phi=48,
-                       n_q=360, sig_thresh=1e-13, ppw=30.0, dt_log=1.0e-3)
+# 260820Cl: l_cap 128 → 256 (LKIN_RULE :v6 では cap が律速 — M1 @400 keV は l ≈ 280 まで効く。
+#   cap 128 では ΔF 1.1e-05 / cap 256 で ≤ 1e-06 (要因計画)。費用は v5 生成の ≈ 4 倍を見込む)
+#   ⚠ 環境変数 TEMARI_HIGH_LCAP=128 で v5 の値に戻せる (検証ゲート専用、LKIN_RULE と同じ扱い)
+const HIGH_SETTINGS = (n1=20, n2=56, n3=20, l_cap=parse(Int, get(ENV, "TEMARI_HIGH_LCAP", "256")),
+                       n_x=96, n_phi=48, n_q=360, sig_thresh=1e-13, ppw=30.0, dt_log=1.0e-3)
 
 # 単発出口の JSON 契約。model_id は物理処方を表すが、求積プリセットは意図的に
 # 含めないため、再現に必要な数値設定を別フィールドで必ず保存する。
@@ -67,6 +70,10 @@ function settings_dict(settings)
     d = Dict{String,Any}(String(k) => v for (k, v) in pairs(settings))
     get!(d, "ppw", CONT_PPW)
     get!(d, "dt_log", CONT_DT_LOG)
+    # 260820Cl: 部分波打ち切りの規則も明示する (LKIN_RULE は ENV で戻せるので、出力に残さないと区別できない)
+    get!(d, "lkin_rule", string(LKIN_RULE))
+    get!(d, "lkin_radius_frac", LKIN_RULE === :v6 ? LKIN_RADIUS_FRAC : nothing)
+    get!(d, "lkin_margin", LKIN_RULE === :v6 ? LKIN_MARGIN : 12)
     return d
 end
 
@@ -83,6 +90,19 @@ const SCF_RETRY = (beta=0.08, max_iter=400)   # 未収束時の再試行
 
 const CONT_DT_LOG = 2e-3     # 連続状態 log セグメントの刻み
 const CONT_PPW = 25.0        # 1 波長あたりの点数
+# ★ 260820Cl: 部分波打ち切りの規則 (l5_channel.jl `eps_setup` の l_kin)。
+#   :v5 = ⌈κ·min(r_core, 6/Z)⌉ + 12 (dataset v5 までの式)。**3s/3p/3d (r_core ≫ 6/Z) の高 ε で未収束** —
+#        出荷 v5 の M 殻 F(s) に絶対 1.65e-03 (3s, s ≈ 0.2)、σ_own に 5.7e-03、軽元素 L 殻に 1.6e-04 の処方感度
+#        (docs/notes/lkin_truncation_2026-08-19.md §6、全 525 チャネルの実測)
+#   :v6 = ⌈κ·r_eff⌉ + LKIN_MARGIN、r_eff = 束縛軌道 (u_b²) の含有率 LKIN_RADIUS_FRAC の半径、上限は l_cap
+#        (要因計画 tools/lkin_rule_study.jl 2026-08-20 で選択: cap が律速なので HIGH の l_cap は 128 → 256)。
+#   ⚠ 作者指示 (2026-08-20): 資産保護より正確な物理量 ⇒ 既定は :v6。:v5 は検証ゲート
+#   (意図した変化と副作用の切り分け: :v5 で旧スナップショットとビット同一であることを確認する) のために残す。
+#   ⚠ 環境変数 TEMARI_LKIN_RULE=v5 で旧式に戻せる (検証ゲート専用。出力 JSON の settings に `lkin_rule` が入るので
+#   どちらで作ったかは必ず分かる。**生成に使わない**)
+const LKIN_RULE = Symbol(get(ENV, "TEMARI_LKIN_RULE", "v6"))
+const LKIN_RADIUS_FRAC = 0.999   # r_eff = 含有率 99.9 % の半径 (× 1.0。r_core の ×1.15 は掛けない)
+const LKIN_MARGIN = 12
 const N_FIT = 8              # Coulomb マッチ窓の点数
 # ⚠ 260818Cl 訂正: 下の「(テスト用)」は成り立たない。イオン化経路 (z_asym = 1) では
 #   確かに通らないが、phase / mott 出口は中性場 (z_asym = 0) で走るのでこの枝が本番
