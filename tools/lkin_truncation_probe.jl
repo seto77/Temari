@@ -29,7 +29,8 @@ using Printf
 
 const LK_S = [0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0]
 
-function run_NK_policy(ch, policy::Symbol; settings=HIGH_SETTINGS, l_cap::Int=settings.l_cap, margin::Int=12)
+function run_NK_policy(ch, policy::Symbol; settings=HIGH_SETTINGS, l_cap::Int=settings.l_cap, margin::Int=12,
+                       s_nodes::Vector{Float64}=LK_S)
     T0 = ch.T0; E_th = ch.E_th
     eps_max = T0 - E_th
     eps, we = eps_nodes(E_th, eps_max, settings.n1, settings.n2, settings.n3)
@@ -37,7 +38,7 @@ function run_NK_policy(ch, policy::Symbol; settings=HIGH_SETTINGS, l_cap::Int=se
     cum = cumsum(ch.u_b .^ 2 .* gradient_(ch.r_b))
     idx = clamp(searchsortedfirst(cum, 1.0 - 1e-12), 1, length(ch.r_b))
     r_core = clamp(ch.r_b[idx] * 1.15, 0.4, 20.0)
-    K_nodes = 4.0 * pi .* LK_S .* BOHR_ANG
+    K_nodes = 4.0 * pi .* s_nodes .* BOHR_ANG
     # ⚠ 運動学的上限: 出荷は s_cert = min(16, 0.98/λ) の先を 0 埋めにする (K ≥ 2k_i は `angular_integral` が拒否)。
     #   ここでは K ≥ 0.98·2k_i のノードを評価せず NaN にする (E₀ ≤ 35 keV で s=16 が該当。2026-08-19 深夜の実測)
     K_ok = K_nodes .< 0.98 * 2.0 * k_i

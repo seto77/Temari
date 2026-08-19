@@ -25,6 +25,8 @@ lkin_sweep.jl — ★ src の部分波打ち切り l_kin の感度を**出荷格
   --conv-e0 max|all    krc32c256 を回す E₀ (既定 max = その格子の最大 E₀ の行だけ。κ が最大で cap が最も効く)
   --policies src,krc12            全行で回す policy (既定)
   --conv-policies krc32c256       conv 行で追加する policy (既定。cap と margin を分けるなら krc12c256,krc20c256,krc32c256)
+  --sgrid lk|full                 s 格子 (既定 lk = LK_S の 10 点 / full = 出荷 S_GRID 321 点。「s ≤ 2 の最大」を
+                                  出荷格子上で言うなら full。⚠ 接頭辞を分ける)
 
 ⚠ 最初の走行 (2026-08-19 22:53、HEAD 334c35b、3 レーン × 6 スレッド、接頭辞 lkin_sweep) は既定の
   src,krc12 (+ M の max E₀ で krc32c256)。cap と margin を分けた追加走行は別の接頭辞で回す。
@@ -119,11 +121,11 @@ function lks_rows(tags::Vector{String}, e0sel::Dict{String,Vector{String}})
     return rows
 end
 
-function lks_row(z::Int, tag::String, e0::Float64, pols::Vector{String})
+function lks_row(z::Int, tag::String, e0::Float64, pols::Vector{String}; s_nodes::Vector{Float64}=LK_S)
     t0 = time()
     ch = prepare_channel(z, tag, e0; dirac_continuum=true)
     rec = Dict{String,Any}("z" => z, "tag" => tag, "e0_keV" => e0, "eth_keV" => ch.eth_keV,
-                           "l_init" => ch.l_b, "s_grid" => LK_S, "settings" => "HIGH",
+                           "l_init" => ch.l_b, "s_grid" => s_nodes, "settings" => "HIGH",
                            "policies" => pols, "src_fp" => CACHE_SOURCE_FINGERPRINT,
                            "git_head" => LKS_GIT_HEAD, "julia" => string(VERSION))
     res = Dict{String,Any}()
@@ -131,7 +133,7 @@ function lks_row(z::Int, tag::String, e0::Float64, pols::Vector{String})
     for p in pols
         pp = LKS_POLICIES[p]
         tp = time()
-        N, lused, eps, r_core = run_NK_policy(ch, pp.policy; l_cap=pp.l_cap, margin=pp.margin)
+        N, lused, eps, r_core = run_NK_policy(ch, pp.policy; l_cap=pp.l_cap, margin=pp.margin, s_nodes=s_nodes)
         r_core_out = r_core
         res[p] = Dict{String,Any}("N0" => N[1], "F" => N ./ N[1],
                                   "l_max_min" => minimum(lused), "l_max_max" => maximum(lused),
@@ -183,9 +185,11 @@ function lks_summary(paths::Vector{String})
     end
     isempty(recs) && (println("記録なし"); return 1)
     s = [Float64(x) for x in recs[1]["s_grid"]]
+    all(d -> length(d["s_grid"]) == length(s), recs) || error("s 格子が混在している (接頭辞を分けること)")
     i05 = findall(x -> 0.0 < x <= 0.5, s); i2 = findall(x -> 0.0 < x <= 2.0, s); iall = findall(x -> x > 0.0, s)
     keys_ = Set(lks_key(Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"])) for d in recs)
-    @printf("記録 %d 行 (unique %d、error %d)\n", length(recs), length(keys_), nerr)
+    @printf("記録 %d 行 (unique %d、error %d)  s 格子 %d 点 (%s)\n", length(recs), length(keys_), nerr, length(s),
+            length(s) == length(LK_S) ? "LK_S の標本点 — 最大はこの点上" : "出荷 S_GRID")
     q(v, p) = (t = sort(v); isempty(t) ? NaN : t[clamp(round(Int, p * (length(t) - 1)) + 1, 1, length(t))])
     println("\n## krc12 − src (出荷処方との差): 殻別 (n / |ΔN0/N0| 中央値 / p90 / 最悪 [Z@E0] / max|ΔF| s≤0.5 / s≤2 / 全 s)")
     bytag = Dict{String,Vector{Dict{String,Any}}}()
@@ -232,13 +236,16 @@ function lks_summary(paths::Vector{String})
     allv = [d for d in recs if haskey(d["res"], "krc12")]
     sc = [_maxfin(abs.(_lfv(d["res"]["krc12"]["dF_abs"])[i05])) for d in allv]
     ord = sortperm(sc; rev=true)
+    js = [argmin(abs.(s .- t)) for t in (0.25, 0.5, 1.0, 2.0)]        # 格子上で最も近い s
     for k in ord[1:min(12, length(ord))]
         d = allv[k]; r = d["res"]["krc12"]
         dF = _lfv(r["dF_abs"])
-        @printf("  Z=%2d %-3s @%3.0f keV  r_core %5.2f 6/Z %.3f  l_max src %d..%d krc12 %d..%d  ΔN0 %+.2e  ΔF(0.25) %+.2e ΔF(0.5) %+.2e ΔF(1) %+.2e ΔF(2) %+.2e\n",
+        jmax = i05[argmax(abs.(dF[i05]))]
+        @printf("  Z=%2d %-3s @%3.0f keV  r_core %5.2f 6/Z %.3f  l_max src %d..%d krc12 %d..%d  ΔN0 %+.2e  ΔF(%.2g) %+.2e ΔF(%.2g) %+.2e ΔF(%.2g) %+.2e ΔF(%.2g) %+.2e  max|ΔF|(s≤0.5) %.2e @s=%.2f\n",
                 Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"]), Float64(d["r_core"]), Float64(d["six_over_z"]),
                 Int(d["res"]["src"]["l_max_min"]), Int(d["res"]["src"]["l_max_max"]),
-                Int(r["l_max_min"]), Int(r["l_max_max"]), Float64(r["dN0_rel"]), dF[2], dF[3], dF[4], dF[5])
+                Int(r["l_max_min"]), Int(r["l_max_max"]), Float64(r["dN0_rel"]),
+                s[js[1]], dF[js[1]], s[js[2]], dF[js[2]], s[js[3]], dF[js[3]], s[js[4]], dF[js[4]], abs(dF[jmax]), s[jmax])
     end
     println("\n## 最悪 8 行 (krc12 − src、|ΔN0/N0|)")
     sn = [abs(Float64(d["res"]["krc12"]["dN0_rel"])) for d in allv]
@@ -259,7 +266,7 @@ function main_lks(args)
     "--summary" in args && return lks_summary(String[a for a in args if !startswith(a, "--")])
     path = args[1]
     tags = copy(TAGS_V4); conv_tags = ["M1", "M2", "M3", "M4", "M5"]; conv_e0 = "max"
-    base_pols = ["src", "krc12"]; conv_pols = ["krc32c256"]
+    base_pols = ["src", "krc12"]; conv_pols = ["krc32c256"]; sgrid = "lk"
     e0sel = Dict{String,Vector{String}}()
     lane_i, lane_n = 0, 1; limit = typemax(Int)
     i = 2
@@ -268,7 +275,8 @@ function main_lks(args)
         args[i] == "--conv-tags" && (conv_tags = String.(split(args[i+1], ",")); i += 1)
         args[i] == "--conv-e0" && (conv_e0 = args[i+1]; i += 1)
         args[i] == "--policies" && (base_pols = String.(split(args[i+1], ",")); i += 1)
-        args[i] == "--conv-policies" && (conv_pols = String.(split(args[i+1], ",")); i += 1)
+        args[i] == "--conv-policies" && (conv_pols = filter(!isempty, String.(split(args[i+1], ","))); i += 1)
+        args[i] == "--sgrid" && (sgrid = args[i+1]; i += 1)
         args[i] == "--limit" && (limit = parse(Int, args[i+1]); i += 1)
         if args[i] == "--e0"
             sel = String.(split(args[i+1], ","))
@@ -281,6 +289,7 @@ function main_lks(args)
         end
         i += 1
     end
+    s_nodes = sgrid == "lk" ? LK_S : sgrid == "full" ? copy(S_GRID) : error("--sgrid は lk か full")
     rows = lks_rows(tags, e0sel)
     chans = unique([(z, t) for (z, t, _, _) in rows])
     mine = Set(c for (k, c) in enumerate(chans) if (k - 1) % lane_n == lane_i)
@@ -297,7 +306,7 @@ function main_lks(args)
             pols = conv ? vcat(base_pols, conv_pols) : copy(base_pols)
             all(p -> haskey(LKS_POLICIES, p), pols) || error("未知の policy: $pols")
             try
-                rec = lks_row(z, tag, e0, pols)
+                rec = lks_row(z, tag, e0, pols; s_nodes=s_nodes)
                 write(io, lks_jsonl_line(rec), "\n")
             catch err
                 write(io, lks_jsonl_line(Dict{String,Any}("z" => z, "tag" => tag, "e0_keV" => e0,
