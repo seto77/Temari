@@ -43,4 +43,12 @@ pilot: v3 と同程度か 1.3 倍 (cap 256 で高 ε が重い)。deep: 作者�
 
 ## 7. 実施記録 (走らせたあとに追記)
 
-### 7.1 pilot (v4) — 未起動 (2026-08-20 06:1x 時点)
+### 7.1 pilot (v4) — 起動記録 (2026-08-20 朝)
+
+- 起動 **2026-08-20 07:5x–08:0x** (9 レーン × 2 スレッド、`CERT_RULE=v4 STAGGER=20 bash tools/run_cert_v2_fleet.sh pilot 9 2 cert_v4_pilot`)。
+  起動直前の HEAD = 本記録の commit (dirty 0、`git status --porcelain -uno` 空を確認)。コードは `aa07112`
+  (SIGMA_RULE_V4 実装) から不変。Julia 1.11.9。指紋は起動後にレーンログから転記する。
+  出力 = `../cert_v4_pilot_lane*.jsonl` (リポ外)
+- 並走: **pilot v3 の残り 3 レーン** (lane 0 = Xe M4 @400 / lane 2 / lane 5、各 2 スレッド、03:24–03:26 起動) が
+  まだ走行中 (07:54 時点)。合計 24 スレッド < 32 論理コア。⚠ atom_cache/ は 05:32 の事故で空 —
+  v4 の各レーンが SCF を再計算して再作成する (結果への影響は SCF の停止許容内)
