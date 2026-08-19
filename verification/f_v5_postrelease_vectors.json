@@ -1,0 +1,662 @@
+{
+  "dataset_doi": "10.5281/zenodo.21872050",
+  "dataset_version": "5.0.0",
+  "fixture_kind": "post-release-loader-conformance",
+  "julia_oracle_sha256": "a98ab617a4f9b9e4a33e7f5bfcca9a0cd634b797c0e442a47644a0e20eb13c9c",
+  "limitations": ["Both evaluators were written under the same author's direction.", "This is not third-party or scientific validation.", "Agreement between them shows the prose contract was read the same way twice, not that the reading is correct."],
+  "not_a_contract_addendum": "Post-release reference vectors for dataset v5.0.0, derived without changing the published archive. The published archive does not contain them.",
+  "python_loader_sha256": "28a012ff1126b5d98f64a256ea9e1fa607878698a798be2a36bc954aa8edbca5",
+  "selection_spec": "docs/notes/b8_preregistration_2026-08-19.md",
+  "tolerance_rel": 1.0e-12,
+  "vectors": [{
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C1 node x node",
+    "channel_id": "K_Z6",
+    "e0_keV": 40.0,
+    "expected": {
+      "F": 0.07476962809798293,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 1.9929120124322305e-16,
+    "case": "C2 first interval",
+    "channel_id": "K_Z6",
+    "e0_keV": 32.402830854151894,
+    "expected": {
+      "F": 0.2785429104996451,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 0.5
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C3 interior interval",
+    "channel_id": "K_Z6",
+    "e0_keV": 114.89097679224002,
+    "expected": {
+      "F": 0.00704395030834716,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 2.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C4 last interval",
+    "channel_id": "K_Z6",
+    "e0_keV": 374.16508933935273,
+    "expected": {
+      "F": 0.06238557488267319,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C5 all-positive column (log F)",
+    "channel_id": "K_Z6",
+    "e0_keV": 37.41591994377684,
+    "expected": {
+      "F": 0.9215735084548473,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 0.05
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C7 between s nodes",
+    "channel_id": "K_Z6",
+    "e0_keV": 40.0,
+    "expected": {
+      "F": 0.07003584821882317,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.025
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C8 exactly s_cert",
+    "channel_id": "K_Z6",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 2.5487342891207734e-6,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 14.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C9 node below s_cert",
+    "channel_id": "K_Z6",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 2.5918994355846775e-6,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 13.95
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C10 unrecorded",
+    "channel_id": "K_Z6",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 0.0,
+      "bound": 1.0386111011518708e-5,
+      "bound_assertion": "value",
+      "region": "unrecorded"
+    },
+    "s_A_inv": 14.15
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C11 impossible",
+    "channel_id": "K_Z6",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 0.0,
+      "bound": null,
+      "bound_assertion": "is_nan",
+      "region": "impossible"
+    },
+    "s_A_inv": 14.998947765640448
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C13 between nodes below s_cert",
+    "channel_id": "K_Z6",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 2.570216751053468e-6,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 13.975
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C12 overvoltage node",
+    "channel_id": "K_Z6",
+    "e0_keV": 35.0,
+    "expected": {
+      "F": 0.07585086883851232,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C1 node x node",
+    "channel_id": "K_Z26",
+    "e0_keV": 40.0,
+    "expected": {
+      "F": 0.8561301816257066,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C2 first interval",
+    "channel_id": "K_Z26",
+    "e0_keV": 32.37674963661283,
+    "expected": {
+      "F": 0.9635941358177,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 0.5
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C3 interior interval",
+    "channel_id": "K_Z26",
+    "e0_keV": 127.26620874631527,
+    "expected": {
+      "F": 0.5043325084770639,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 2.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C4 last interval",
+    "channel_id": "K_Z26",
+    "e0_keV": 374.149639825324,
+    "expected": {
+      "F": 0.7385628460471404,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C5 all-positive column (log F)",
+    "channel_id": "K_Z26",
+    "e0_keV": 37.39708567320227,
+    "expected": {
+      "F": 0.9995976002164283,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 0.05
+  }, {
+    "accepted": true,
+    "agreement_rel": 1.306390962868367e-16,
+    "case": "C7 between s nodes",
+    "channel_id": "K_Z26",
+    "e0_keV": 40.0,
+    "expected": {
+      "F": 0.8498397923600941,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.025
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C8 exactly s_cert",
+    "channel_id": "K_Z26",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 0.0029482858183672274,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 14.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C9 node below s_cert",
+    "channel_id": "K_Z26",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 0.0029483850085442378,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 13.95
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C10 unrecorded",
+    "channel_id": "K_Z26",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 0.0,
+      "bound": 0.005896770017088475,
+      "bound_assertion": "value",
+      "region": "unrecorded"
+    },
+    "s_A_inv": 14.15
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C11 impossible",
+    "channel_id": "K_Z26",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 0.0,
+      "bound": null,
+      "bound_assertion": "is_nan",
+      "region": "impossible"
+    },
+    "s_A_inv": 14.998947765640448
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C13 between nodes below s_cert",
+    "channel_id": "K_Z26",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 0.0029483695142440303,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 13.975
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C12 overvoltage node",
+    "channel_id": "K_Z26",
+    "e0_keV": 35.0,
+    "expected": {
+      "F": 0.8628957523173708,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C1 node x node",
+    "channel_id": "L2_Z20",
+    "e0_keV": 40.0,
+    "expected": {
+      "F": 0.05199919199006971,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C2 first interval",
+    "channel_id": "L2_Z20",
+    "e0_keV": 32.40262445092125,
+    "expected": {
+      "F": 0.2627959788272579,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 0.5
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C3 interior interval",
+    "channel_id": "L2_Z20",
+    "e0_keV": 114.89091200002825,
+    "expected": {
+      "F": 0.0004049163386425348,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 2.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C4 last interval",
+    "channel_id": "L2_Z20",
+    "e0_keV": 374.16493731119573,
+    "expected": {
+      "F": 0.04201821340566053,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C5 all-positive column (log F)",
+    "channel_id": "L2_Z20",
+    "e0_keV": 37.41576550527013,
+    "expected": {
+      "F": 0.9369094801163994,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 0.05
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C6 sign-changing column (raw F)",
+    "channel_id": "L2_Z20",
+    "e0_keV": 37.41576550527013,
+    "expected": {
+      "F": -0.00010737376309909984,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 2.1
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C7 between s nodes",
+    "channel_id": "L2_Z20",
+    "e0_keV": 40.0,
+    "expected": {
+      "F": 0.04763774193321503,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.025
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C8 exactly s_cert",
+    "channel_id": "L2_Z20",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": -3.960152026183624e-7,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 14.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C9 node below s_cert",
+    "channel_id": "L2_Z20",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": -4.077441571044923e-7,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 13.95
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C10 unrecorded",
+    "channel_id": "L2_Z20",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 0.0,
+      "bound": 1.6351602429615813e-6,
+      "bound_assertion": "value",
+      "region": "unrecorded"
+    },
+    "s_A_inv": 14.15
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C11 impossible",
+    "channel_id": "L2_Z20",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 0.0,
+      "bound": null,
+      "bound_assertion": "is_nan",
+      "region": "impossible"
+    },
+    "s_A_inv": 14.998947765640448
+  }, {
+    "accepted": true,
+    "agreement_rel": 1.3181899687056884e-16,
+    "case": "C13 between nodes below s_cert",
+    "channel_id": "L2_Z20",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": -4.0160796592447414e-7,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 13.975
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C12 overvoltage node",
+    "channel_id": "L2_Z20",
+    "e0_keV": 35.0,
+    "expected": {
+      "F": 0.052929991247432015,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C1 node x node",
+    "channel_id": "M5_Z86",
+    "e0_keV": 40.0,
+    "expected": {
+      "F": 0.5235301342541394,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C2 first interval",
+    "channel_id": "M5_Z86",
+    "e0_keV": 32.394276585275726,
+    "expected": {
+      "F": 0.8349423126642725,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 0.5
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C3 interior interval",
+    "channel_id": "M5_Z86",
+    "e0_keV": 127.27409305868476,
+    "expected": {
+      "F": 0.11093736732145491,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 2.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C4 last interval",
+    "channel_id": "M5_Z86",
+    "e0_keV": 374.1592472900039,
+    "expected": {
+      "F": 0.39097946410216616,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C5 all-positive column (log F)",
+    "channel_id": "M5_Z86",
+    "e0_keV": 37.40959302355153,
+    "expected": {
+      "F": 0.9978672702882545,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 0.05
+  }, {
+    "accepted": true,
+    "agreement_rel": 1.926363564174268e-16,
+    "case": "C6 sign-changing column (raw F)",
+    "channel_id": "M5_Z86",
+    "e0_keV": 37.40959302355153,
+    "expected": {
+      "F": -0.0005628232347460567,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 3.25
+  }, {
+    "accepted": true,
+    "agreement_rel": 2.1779695657719676e-16,
+    "case": "C7 between s nodes",
+    "channel_id": "M5_Z86",
+    "e0_keV": 40.0,
+    "expected": {
+      "F": 0.5097513950942858,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.025
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C8 exactly s_cert",
+    "channel_id": "M5_Z86",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 6.318360556343335e-5,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 14.0
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C9 node below s_cert",
+    "channel_id": "M5_Z86",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 6.312836440782097e-5,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 13.95
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C10 unrecorded",
+    "channel_id": "M5_Z86",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 0.0,
+      "bound": 0.00012899156717449968,
+      "bound_assertion": "value",
+      "region": "unrecorded"
+    },
+    "s_A_inv": 14.15
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C11 impossible",
+    "channel_id": "M5_Z86",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 0.0,
+      "bound": null,
+      "bound_assertion": "is_nan",
+      "region": "impossible"
+    },
+    "s_A_inv": 14.998947765640448
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C13 between nodes below s_cert",
+    "channel_id": "M5_Z86",
+    "e0_keV": 30.0,
+    "expected": {
+      "F": 6.31532538011449e-5,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 13.975
+  }, {
+    "accepted": true,
+    "agreement_rel": 0.0,
+    "case": "C12 overvoltage node",
+    "channel_id": "M5_Z86",
+    "e0_keV": 35.0,
+    "expected": {
+      "F": 0.5350159420362756,
+      "bound": 0.0,
+      "bound_assertion": "value",
+      "region": "tabulated"
+    },
+    "s_A_inv": 1.0
+  }]
+}
