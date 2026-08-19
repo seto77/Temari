@@ -123,6 +123,14 @@ def main(argv):
     strata("殻", lambda r: r["tag"])
     strata("starts_at_zero / ends_at_epsmax / crosses_eps_c",
            lambda r: f"z0={int(bool(r['starts_at_zero']))} emax={int(bool(r['ends_at_epsmax']))} epsc={int(bool(r['crosses_eps_c']))}")
+    # 2026-08-19 深夜 (候補 v2): l_max が l_cap に張り付いたノードを含む窓は別の層
+    #   (P−O が合格しても cap の打ち切りバイアスは制約されない — 事前登録 v2 §3.1)
+    if any("l_max_max" in r for r in good):
+        lcap = max(r.get("l_max_max", 0) for r in good)
+        strata(f"l_max が最大値 {lcap} (= l_cap に張り付いた可能性) に達した窓 / 達しない窓",
+               lambda r: f"l_max_max={'cap' if r.get('l_max_max', 0) >= lcap else '<cap'}")
+    rv = sorted({str(r.get("rule_version", "?")) for r in good})
+    w(f"\n- 規則の版: {rv}  / l_max_policy: {sorted({str(r.get('l_max_policy', '?')) for r in good})}")
     # β ごと (scaled は β ごとのベクトル)
     w("\n## β ごと (全窓)\n")
     w(HDR)
