@@ -121,6 +121,7 @@ min/max を中央値・IQR・具体条件名なしで出さない。**中央値�
 | 伝播後 | サイト比 **≤ 1.2e-04**、生の収量 ≤ 1.5e-04 | **`scenario-sensitivity`** | `docs/notes/observable_propagation_2026-08-13.md:145` |
 | 観測量の s 帯別感度 | [0,0.5) 4.1e-03 / [1,2) 1.7e-04 / [2,4) 1.1e-05 / [4,6) **1.5e-09** / [6,10) **1.0e-15** / [10,∞) **0** | `direct-measurement` | `docs/notes/observable_propagation_2026-08-13.md:101-118` |
 | 尾根差を全部我々のものと仮定した F への伝播 | max\|ΔF\| 2.2e-02…4.8e-02 | `scenario-sensitivity` | `docs/handover/next_phase_2026-08-13.md:527-537` |
+| ★★★ **部分波打ち切り `l_kin` の感度** (src の m = min(r_core, 6/Z) → κ·r_core。出荷経路の写しで実測、2026-08-19) | **M 殻: σ_own +9e-04 (Xe M4) 〜 +7.4e-03 (Ca M1)、F(s) 絶対 3.3e-04 (Xe/Ba M4) 〜 9.8e-04 (Zn M3) at s ≤ 0.5**。K 殻 1e-08、Au L3 1e-05、Ag L1 9e-05 (s=2) | **prescription sensitivity** (収束の向きは 1 ノード掃引で単調 ⇒ バイアス)。出荷データ未修正 | `docs/notes/lkin_truncation_2026-08-19.md` |
 | **v3 → v5 の処方差** (共通 246ch、内挿なし) | 最大 \|ΔF\| **1.68e-01**。s<2 帯最大の中央値 8.57e-03 | `direct-measurement` | `docs/notes/prescription_impact_2026-08-19.md` §2 |
 | 同、観測量への感度 | Al/Co 配置 **2.81e-03 / 5.67e-03**、全 246ch では **4.14e-02** (約 15 倍) | `scenario-sensitivity` | 同 §3 |
 | 同、**実経路へ通したサイト比差** (β-AlCo B2、200 keV、h00、厚み 20/50/100 nm) | **2.45e-03** (50 nm)、生の収量 3.04e-03 | `direct-measurement` (1 配置。母集団へ広げない) | 同 §3.3 (2026-08-19、`AlchemiCheck sens-v3v5`) |
