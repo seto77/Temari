@@ -50,3 +50,11 @@ pilot (11 行、9 レーン × 2 スレッド): 最長レーン 4〜6 時間 (Xe
 ## 7. 実施記録 (走らせたあとに追記)
 
 ### 7.1 pilot (v3) — (起動時に記入)
+
+- 起動 **2026-08-20 03:24–03:27** (9 レーン × 2 スレッド、`CERT_RULE=v3 STAGGER=20 bash tools/run_cert_v2_fleet.sh pilot 9 2 cert_v3_pilot`)。
+  commit **`035471a`** (dirty 0)、Julia 1.11.9、指紋 **`319f6785e4d17b27`** (fp.rule = `…geo24xGL16…/lmax:kappa_rc+12`、
+  fp.oracle = `sqrt-eps-geo32xGL16-epsc`)。出力 = `../cert_v3_pilot_lane*.jsonl` (リポ外)
+- ⚠ pilot v2 の最後の 3 行 (Xe M4 @170 / Ca M1 / Zn M3) がまだ走行中に 5 ファイルを変えた (v3 の追加)。走行中のプロセスは
+  旧コードのままなので記録の指紋は `b447496bf5c31a45` で続く。落ちて再起動した場合だけ新指紋 (`ef19212f0325f85f`) で
+  やり直しになる (その場合は `--fp` で分けて集計)
+- 並走: `tools/lkin_rule_study.jl` (3 レーン × 6 スレッド、03:12 起動) — F v6 の部分波規則の要因計画
