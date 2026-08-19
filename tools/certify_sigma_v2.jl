@@ -32,7 +32,9 @@ ang_eps_eV[], ang_long_rel[], ang_trans_rel[] (行に 1 回だけ)
   --profile custom    --rows "Z,tag,E0;..." で指定
 
 実行:
-  julia +1.11 --project=. -t 1 tools/certify_sigma_v2.jl ../cert_v2_<profile>_lane0.jsonl --profile deep --lane 0/16
+  julia +1.11 --project=. -t 1 tools/certify_sigma_v2.jl ../cert_v2_<profile>_lane0.jsonl --profile deep --lane 0/16 [--rule v1|v2]
+  (--rule の既定は v2 = HIGH の連続状態 + l_max = ⌈κ·r_core⌉+12。v1 = pilot 2026-08-19 の規則。
+   指紋は規則ごとに違う。事前登録 v2 = docs/notes/certification_v2b_preregistration_2026-08-19.md)
   julia +1.11 --project=. tools/certify_sigma_v2.jl ../cert_v2_deep_lane*.jsonl --summary
 
 ⚠ 走行中は本ファイル・sigma_beta_delta.jl・angular_split_v2.jl・beta_spike.jl を触らない (指紋)。
@@ -60,8 +62,9 @@ function _fp_bytes_v2(path::String)
     return Vector{UInt8}(replace(read(path, String), "\r\n" => "\n"))
 end
 
-"認証の版の指紋。本番候補・角度規則・オラクル・台本・src 指紋・認証域を**別々に**も返す"
-function cert_fingerprint_v2()
+"認証の版の指紋。本番候補・角度規則・オラクル・台本・src 指紋・認証域を**別々に**も返す。
+⚠ 規則 (v1 / v2) ごとに違う指紋になる (`rule` の名前が入る)"
+function cert_fingerprint_v2(rule::SigmaRule)
     parts = Dict{String,String}()
     parts["src"] = CACHE_SOURCE_FINGERPRINT
     for f in ("sigma_beta_delta.jl", "angular_split_v2.jl", "angular_sweep.jl",
@@ -71,7 +74,7 @@ function cert_fingerprint_v2()
     parts["domain"] = bytes2hex(sha256(Vector{UInt8}(string(V2_BETAS_MRAD, V2_STARTS_EV,
         V2_WIDTHS_EV, V2_EPSC_HALFWIDTHS_EV, V2_ORACLE_NPAN, V2_ORACLE_NPT, V2_ANG_EPS_EV,
         V2_RTOL, V2_ATOL))))[1:16]
-    parts["rule"] = rule_name(SIGMA_RULE_V1)
+    parts["rule"] = rule_name(rule)
     parts["prod"] = string(PROD_SETTINGS)
     io = IOBuffer()
     for k in sort(collect(keys(parts)))
@@ -79,7 +82,16 @@ function cert_fingerprint_v2()
     end
     return bytes2hex(sha256(take!(io)))[1:16], parts
 end
-const CERT_FP_V2, CERT_FP_V2_PARTS = cert_fingerprint_v2()
+# 走らせる規則は main で決める (--rule v1|v2)。既定 = v2 (候補 v2。v1 の pilot は 2026-08-19 に完了)
+const CERT_RULE_REF = Ref{SigmaRule}(SIGMA_RULE_V2)
+const CERT_FP_V2_REF = Ref{String}("")
+const CERT_FP_V2_PARTS_REF = Ref{Dict{String,String}}(Dict{String,String}())
+function set_cert_rule!(rule::SigmaRule)
+    CERT_RULE_REF[] = rule
+    CERT_FP_V2_REF[], CERT_FP_V2_PARTS_REF[] = cert_fingerprint_v2(rule)
+    return nothing
+end
+set_cert_rule!(SIGMA_RULE_V2)
 
 # ---------------------------------------------------------------------
 # 窓のオラクル — √ε 上の等比パネル (座標もパネル数も本番と違う)
@@ -118,15 +130,14 @@ function oracle_window(ch, r_core, betas::Vector{Float64}, e1::Float64, e2::Floa
     eps, we = oracle_window_nodes(e1, e2, V2_ORACLE_NPAN, V2_ORACLE_NPT)
     n = length(eps); nb = length(betas)
     V = zeros(n, nb)
+    # ⚠ オラクルのノードも本番と同じ `node_rl` (= 同じ l_max の方針) を通す — P−O は窓求積の差だけを測る
+    #   (:window_max は窓の上端の値が要るので対応しない。:src / :kappa_rc のみ)
+    rule.l_max_policy === :window_max && error("オラクルは :window_max に対応しない")
     Threads.@threads :greedy for k in n:-1:1
         e = eps[k]
         kf = kin_k(max(emax - e, 0.0))
         kf <= 0.0 && continue
-        kappa = ch.dirac === nothing ? sqrt(2.0 * e) : krel(e, ch.dirac.c)
-        q_hi = min(k_i + kf, kappa + 15.0 * ch.z); q_lo = max(1e-4, 0.9 * (k_i - kf))
-        _, rl, _, _, _, _, _ = eps_setup(ch.ion_pot, ch.r_b, ch.u_b, e, ch.z, r_core,
-            q_lo, q_hi, rule.l_cap, rule.n_q, rule.ppw, rule.dt_log, ch.l_b,
-            rule.sig_thresh, k_i + kf; rel=ch.rel, dirac=ch.dirac)
+        rl, _ = node_rl(ch, r_core, e, k_i, kf, rule)
         tr = rule.transverse ? Transverse(ch.E_th + e, T0) : nothing
         for (ib, b) in enumerate(betas)
             v, _, _ = angular_knotsplit(k_i, kf, rl, ch.occ_init, b, 0.0, rule.angular_npt, tr)
@@ -159,11 +170,7 @@ function angular_check(ch, r_core, betas::Vector{Float64}, rule::SigmaRule)
     for e_eV in eps_list
         e = e_eV / HARTREE_EV
         kf = kin_k(max(T0 - ch.E_th - e, 0.0)); kf <= 0 && continue
-        kappa = ch.dirac === nothing ? sqrt(2.0 * e) : krel(e, ch.dirac.c)
-        q_hi = min(k_i + kf, kappa + 15.0 * ch.z); q_lo = max(1e-4, 0.9 * (k_i - kf))
-        _, rl, _, _, _, _, _ = eps_setup(ch.ion_pot, ch.r_b, ch.u_b, e, ch.z, r_core,
-            q_lo, q_hi, rule.l_cap, rule.n_q, rule.ppw, rule.dt_log, ch.l_b,
-            rule.sig_thresh, k_i + kf; rel=ch.rel, dirac=ch.dirac)
+        rl, _ = node_rl(ch, r_core, e, k_i, kf, rule)
         tr = Transverse(ch.E_th + e, T0)
         wl = 0.0; wt = 0.0
         for b in betas
@@ -216,7 +223,8 @@ end
 (Ca M1 @400 keV は > 2 時間) で watchdog の STALL (2 時間) に引っ掛かって殺される — pilot で実際に起きた)。
 σ_ref (= [0, ε_max] のオラクル) が先に要るので、その窓を**最初に**計算する。"""
 function certify_row_v2(z::Int, tag::String, e0::Float64; sentinel_only::Bool=false,
-                        rule::SigmaRule=SIGMA_RULE_V1, emit::Function=(r -> nothing))
+                        rule::SigmaRule=CERT_RULE_REF[], emit::Function=(r -> nothing))
+    cert_fp = CERT_FP_V2_REF[]
     t0 = time()
     ch, r_core = sigma_channel(z, tag, e0)
     emax_eV = (ch.T0 - ch.E_th) * HARTREE_EV
@@ -237,7 +245,7 @@ function certify_row_v2(z::Int, tag::String, e0::Float64; sentinel_only::Bool=fa
                 "z" => z, "tag" => tag, "e0_keV" => e0, "eth_keV" => ch.eth_keV,
                 "u" => e0 / ch.eth_keV, "eps_max_eV" => emax_eV, "l_init" => ch.l_b,
                 "window_id" => wid, "d1_eV" => d1, "d2_eV" => d2, "out_of_domain" => true,
-                "window_index" => iw, "n_windows_in_row" => nw, "cert_fp" => CERT_FP_V2,
+                "window_index" => iw, "n_windows_in_row" => nw, "cert_fp" => cert_fp,
                 "state_sha" => state_hash_v2(ch), "elapsed_s" => 0.0, "row_elapsed_s" => time() - t0)
             push!(recs, rec); emit(rec)
             continue
@@ -265,10 +273,11 @@ function certify_row_v2(z::Int, tag::String, e0::Float64; sentinel_only::Bool=fa
             "n_degenerate_panels" => P.n_degenerate_panels,
             "n_panels" => P.n_panels, "n_nodes" => P.n_nodes,
             "angular_panels_max" => P.angular_panels_max, "panel_edges_sha" => P.panel_edges_sha,
-            "n_q" => rule.n_q, "ppw" => rule.ppw, "rule" => P.rule,
+            "n_q" => rule.n_q, "ppw" => rule.ppw, "rule" => P.rule, "rule_version" => rule_version(rule),
+            "l_max_policy" => string(rule.l_max_policy),
             "oracle" => sentinel_only ? "none" : "sqrt-eps-geo$(V2_ORACLE_NPAN)xGL$(V2_ORACLE_NPT)-epsc",
             "window_index" => iw, "elapsed_s" => time() - tw,
-            "cert_fp" => CERT_FP_V2, "state_sha" => state_hash_v2(ch),
+            "cert_fp" => cert_fp, "state_sha" => state_hash_v2(ch),
             "ang_eps_eV" => ang[1], "ang_long_rel" => ang[2], "ang_trans_rel" => ang[3],
             "n_windows_in_row" => nw, "l_max_min" => P.l_max_min, "l_max_max" => P.l_max_max,
             "row_elapsed_s" => time() - t0)
@@ -417,7 +426,9 @@ function summarize_v2(paths::Vector{String})
     isempty(recs) && (println("記録なし"); return 1)
     rows = Set(rowkey_v2(Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"])) for d in recs)
     fps = Set(String(d["cert_fp"]) for d in recs)
+    rvs = Set(String(get(d, "rule", "?")) for d in recs)
     @printf("記録 %d 窓 / %d 行 / 指紋 %d 種 %s\n", length(recs), length(rows), length(fps), join(fps, ","))
+    @printf("規則: %s\n", join(rvs, " | "))
     rels = Float64[]; scal = Float64[]; inds = Float64[]
     worst = (0.0, ""); npass = 0; nfail = 0
     per = Dict{String,Vector{Float64}}()
@@ -466,20 +477,25 @@ function main_v2(args)
     "--summary" in args && return summarize_v2(String[a for a in args if !startswith(a, "--")])
     path = args[1]
     profile = "pilot"; tags = copy(TAGS_V4); custom = ""; lane_i, lane_n = 0, 1; limit = typemax(Int)
-    accept = Set{String}([CERT_FP_V2])
+    rule_s = "v2"
+    extra_accept = String[]
     i = 2
     while i <= length(args)
+        args[i] == "--rule" && (rule_s = args[i+1]; i += 1)
         args[i] == "--profile" && (profile = args[i+1]; i += 1)
         args[i] == "--tags" && (tags = String.(split(args[i+1], ",")); i += 1)
         args[i] == "--rows" && (custom = args[i+1]; i += 1)
         args[i] == "--limit" && (limit = parse(Int, args[i+1]); i += 1)
-        args[i] == "--accept-fp" && (push!(accept, args[i+1]); i += 1)
+        args[i] == "--accept-fp" && (push!(extra_accept, args[i+1]); i += 1)
         if args[i] == "--lane"
             m = match(r"^(\d+)/(\d+)$", args[i+1]); m === nothing && error("--lane は i/n")
             lane_i, lane_n = parse(Int, m[1]), parse(Int, m[2]); i += 1
         end
         i += 1
     end
+    rule = rule_s == "v1" ? SIGMA_RULE_V1 : rule_s == "v2" ? SIGMA_RULE_V2 : error("--rule は v1 か v2 ($rule_s)")
+    set_cert_rule!(rule)
+    accept = Set{String}(vcat([CERT_FP_V2_REF[]], extra_accept))
     rows = profile_rows(profile, tags, custom)
     # レーン分割はチャネル単位 (SCF キャッシュが効く)
     chans = unique([(z, t) for (z, t, _) in rows])
@@ -488,9 +504,9 @@ function main_v2(args)
     done, stale = load_done_v2(sibling_files_v2(path), accept)
     todo = [r for r in rows if !(rowkey_v2(r...) in done)]
     length(todo) > limit && (todo = todo[1:limit])
-    @printf("認証 v2 (%s, lane %d/%d): 全 %d 行 / 済 %d / 今回 %d   スレッド %d   指紋 %s\n",
-            profile, lane_i, lane_n, length(rows), length(done), length(todo), Threads.nthreads(), CERT_FP_V2)
-    for (k, v) in sort(collect(CERT_FP_V2_PARTS)); @printf("   fp.%s = %s\n", k, v); end
+    @printf("認証 v2 (%s, lane %d/%d, 規則 %s): 全 %d 行 / 済 %d / 今回 %d   スレッド %d   指紋 %s\n",
+            profile, lane_i, lane_n, rule_s, length(rows), length(done), length(todo), Threads.nthreads(), CERT_FP_V2_REF[])
+    for (k, v) in sort(collect(CERT_FP_V2_PARTS_REF[])); @printf("   fp.%s = %s\n", k, v); end
     stale > 0 && @printf("⚠⚠ 指紋が合わず捨てた窓: %d\n", stale)
     t_start = time()
     open(path, "a") do io
@@ -498,10 +514,10 @@ function main_v2(args)
             nw = 0
             emit = r -> (nw += 1; write(io, jsonl_line_v2(r), "\n"); flush(io))   # ★ 窓ごとに flush
             try
-                certify_row_v2(z, tag, e0; sentinel_only=(profile == "sentinel"), emit=emit)
+                certify_row_v2(z, tag, e0; sentinel_only=(profile == "sentinel"), rule=rule, emit=emit)
             catch err
                 write(io, jsonl_line_v2(Dict{String,Any}("z" => z, "tag" => tag, "e0_keV" => e0,
-                      "error" => first(sprint(showerror, err), 300), "cert_fp" => CERT_FP_V2)), "\n")
+                      "error" => first(sprint(showerror, err), 300), "cert_fp" => CERT_FP_V2_REF[])), "\n")
             end
             flush(io)
             el = time() - t_start

@@ -55,20 +55,43 @@ Base.@kwdef struct SigmaRule
     delta_theta::Float64 = 1e-4  # θ₁ = 0 のときの最下パネルの上端 (θ₂ に対する比)
     angular_npt::Int = 12        # 継ぎ目分割 GL のパネルあたり点数
     n_q::Int = 1216              # Q 表の点数
-    ppw::Float64 = CONT_PPW      # 連続状態の 1 波長あたり点数 (出荷と同じ)
+    ppw::Float64 = CONT_PPW      # 連続状態の 1 波長あたり点数 (⚠ v1 = PROD の 25。出荷 F(s) は HIGH の 30)
     dt_log::Float64 = CONT_DT_LOG
     l_cap::Int = PROD_SETTINGS.l_cap
     sig_thresh::Float64 = PROD_SETTINGS.sig_thresh
     transverse::Bool = true
     split_eps_c::Bool = true     # 参照関数の切替 ε_c をパネル境界にする
     l_max_policy::Symbol = :src  # :src = eps_setup の式 (ε ごと、階段あり) / :window_max = 窓の上端の値で一定
+                                 # / :kappa_rc = min(l_cap, ⌈κ(ε)·r_core⌉ + l_max_margin) (6/Z の上限を外す。v2)
+    l_max_margin::Int = 12       # :kappa_rc のマージン
 end
 const SIGMA_RULE_V1 = SigmaRule()
+# ★ 候補 v2 (2026-08-19 深夜、pilot v1 の結果を受けて): 連続状態を出荷 F(s) と同じ HIGH
+#   (ppw 30 / dt_log 1e-3 / l_cap 128 / sig_thresh 1e-13) に揃え、部分波数を κ·r_core に比例させる
+#   (src の l_kin = ⌈κ·min(r_core, 6/Z)⌉+12 は 3p/3d の高 ε で収束していない — `lkin_truncation_2026-08-19.md`)。
+#   窓・角度・n_q は v1 と同じ。事前登録 = `docs/notes/certification_v2b_preregistration_2026-08-19.md`
+const SIGMA_RULE_V2 = SigmaRule(ppw=HIGH_SETTINGS.ppw, dt_log=HIGH_SETTINGS.dt_log,
+                                l_cap=HIGH_SETTINGS.l_cap, sig_thresh=HIGH_SETTINGS.sig_thresh,
+                                l_max_policy=:kappa_rc, l_max_margin=12)
 
-rule_name(r::SigmaRule) = "win:sin2theta-geo$(r.n_panel)xGL$(r.npt)-dth$(r.delta_theta)" *
-                          (r.split_eps_c ? "-epsc" : "") *
-                          "/ang:knotsplit-GL$(r.angular_npt)-exactx/nq$(r.n_q)/ppw$(r.ppw)" *
-                          (r.l_max_policy === :src ? "" : "/lmax:$(r.l_max_policy)")
+"規則の名前 (認証の指紋に入る)。⚠ v1 の文字列は事前登録 v1 §1 のまま (追加項目は v1 既定と違うときだけ付く)"
+function rule_name(r::SigmaRule)
+    s = "win:sin2theta-geo$(r.n_panel)xGL$(r.npt)-dth$(r.delta_theta)" *
+        (r.split_eps_c ? "-epsc" : "") *
+        "/ang:knotsplit-GL$(r.angular_npt)-exactx/nq$(r.n_q)/ppw$(r.ppw)"
+    if r.dt_log != CONT_DT_LOG || r.l_cap != PROD_SETTINGS.l_cap || r.sig_thresh != PROD_SETTINGS.sig_thresh
+        s *= "/dt$(r.dt_log)/lcap$(r.l_cap)/sig$(r.sig_thresh)"
+    end
+    if r.l_max_policy === :kappa_rc
+        s *= "/lmax:kappa_rc+$(r.l_max_margin)"
+    elseif r.l_max_policy !== :src
+        s *= "/lmax:$(r.l_max_policy)"
+    end
+    return s
+end
+
+"規則の版名 (model_id の接尾辞)。v1/v2 と一致しなければ custom"
+rule_version(r::SigmaRule) = r == SIGMA_RULE_V1 ? "v1" : r == SIGMA_RULE_V2 ? "v2" : "custom"
 
 # ---------------------------------------------------------------------
 # 参照関数の切替点 ε_c (⚠ 定数を埋め込まない — 切替条件そのものから解く)
@@ -174,6 +197,40 @@ function eps_setup_lmax(pot_ion, r_b, u_b, e::Float64, z::Int, r_core::Float64,
     sig_ok = significant .& ok_l
     mres = any(sig_ok) ? maximum(resid_l[sig_ok]) : 0.0
     return cont, rl, mres, (c_ortho, resid_ortho), l_max, bad_count, r_tail
+end
+
+"""1 ノード (ε [Ha]) の Q 表 `rl` を規則の `l_max_policy` で組む。`l_fixed ≥ 0` なら :window_max の値。
+戻り値 (rl, l_max)。**本番 (P)・オラクル (O)・角度検査のすべてがこれを通る** (P と O が同じ l_max を共有する
+= P−O は窓求積の差だけを測る。`certify_sigma_v2.jl`)。"""
+function node_rl(ch, r_core::Float64, e::Float64, k_i::Float64, kf::Float64, rule::SigmaRule;
+                 l_fixed::Int=-1)
+    z = ch.z
+    c_light = ch.dirac === nothing ? (ch.rel === nothing ? C_LIGHT : ch.rel.c) : ch.dirac.c
+    nonrel = (ch.rel === nothing && ch.dirac === nothing)
+    kappa = nonrel ? sqrt(2.0 * e) : krel(e, c_light)
+    q_hi = min(k_i + kf, kappa + 15.0 * z)
+    q_lo = max(1e-4, 0.9 * (k_i - kf))
+    if rule.l_max_policy === :src
+        _, rl, _, _, lm, _, _ = eps_setup(ch.ion_pot, ch.r_b, ch.u_b, e, z, r_core,
+            q_lo, q_hi, rule.l_cap, rule.n_q, rule.ppw, rule.dt_log, ch.l_b,
+            rule.sig_thresh, k_i + kf; rel=ch.rel, dirac=ch.dirac)
+        # ⚠ tools の写し (src_lmax) が src と同じ式であることを毎ノード検算する
+        lm_chk = src_lmax(e, z, r_core, rule.l_cap, c_light; nonrel=nonrel)
+        lm == lm_chk || error("src_lmax が eps_setup と食い違う (ε=$(e) Ha): $(lm) vs $(lm_chk)")
+        return rl, lm
+    end
+    lm = if rule.l_max_policy === :window_max
+        l_fixed >= 0 || error(":window_max は l_fixed が要る")
+        l_fixed
+    elseif rule.l_max_policy === :kappa_rc
+        min(rule.l_cap, ceil(Int, kappa * r_core) + rule.l_max_margin)
+    else
+        error("未知の l_max_policy $(rule.l_max_policy)")
+    end
+    _, rl, _, _, _, _, _ = eps_setup_lmax(ch.ion_pot, ch.r_b, ch.u_b, e, z, r_core,
+        q_lo, q_hi, lm, rule.n_q, rule.ppw, rule.dt_log, ch.l_b,
+        rule.sig_thresh, k_i + kf; rel=ch.rel, dirac=ch.dirac)
+    return rl, lm
 end
 
 # ---------------------------------------------------------------------
@@ -385,6 +442,7 @@ function sigma_window_v1(ch, r_core::Float64, betas::Vector{Float64},
     c_light = ch.dirac === nothing ? (ch.rel === nothing ? C_LIGHT : ch.rel.c) : ch.dirac.c
     nonrel = (ch.rel === nothing && ch.dirac === nothing)
     # ★ l_max の方針: :window_max は窓の上端 ε (= 最大の κ) で src の式が与える値を全ノードに使う
+    #   (診断用。低 ε に高 l を強いるので Fe K で DomainError — pilot §3)。本番候補 v2 は :kappa_rc
     l_fixed = rule.l_max_policy === :window_max ?
               src_lmax(e2, z, r_core, rule.l_cap, c_light; nonrel=nonrel) : -1
     LMAX_USED = zeros(Int, n)
@@ -394,24 +452,8 @@ function sigma_window_v1(ch, r_core::Float64, betas::Vector{Float64},
         if kf <= 0.0
             continue
         end
-        kappa = ch.dirac === nothing ? sqrt(2.0 * e) : krel(e, ch.dirac.c)
-        q_hi = min(k_i + kf, kappa + 15.0 * z)
-        q_lo = max(1e-4, 0.9 * (k_i - kf))
-        local rl
-        if l_fixed < 0
-            _, rl, _, _, lm, _, _ = eps_setup(ch.ion_pot, ch.r_b, ch.u_b, e, z, r_core,
-                q_lo, q_hi, rule.l_cap, rule.n_q, rule.ppw, rule.dt_log, ch.l_b,
-                rule.sig_thresh, k_i + kf; rel=ch.rel, dirac=ch.dirac)
-            # ⚠ tools の写し (src_lmax) が src と同じ式であることを毎ノード検算する
-            lm_chk = src_lmax(e, z, r_core, rule.l_cap, c_light; nonrel=nonrel)
-            lm == lm_chk || error("src_lmax が eps_setup と食い違う (ε=$(e) Ha): $(lm) vs $(lm_chk)")
-            LMAX_USED[k] = lm
-        else
-            _, rl, _, _, _, _, _ = eps_setup_lmax(ch.ion_pot, ch.r_b, ch.u_b, e, z, r_core,
-                q_lo, q_hi, l_fixed, rule.n_q, rule.ppw, rule.dt_log, ch.l_b,
-                rule.sig_thresh, k_i + kf; rel=ch.rel, dirac=ch.dirac)
-            LMAX_USED[k] = l_fixed
-        end
+        rl, lm = node_rl(ch, r_core, e, k_i, kf, rule; l_fixed=l_fixed)
+        LMAX_USED[k] = lm
         tr = tr_on ? Transverse(ch.E_th + e, T0) : nothing
         ps = kf / k_i
         pmax = 0
@@ -503,7 +545,7 @@ function sigma_beta_delta(z::Int, tag::String, e0_keV::Float64;
         "effective_window_eV" => collect(r.effective_window_eV),
         "sigma_partial_own_nm2" => r.sigma_nm2,
         "units" => Dict("sigma" => "nm^2", "energy" => "eV", "angle" => "mrad"),
-        "model_id" => ch.model_id * "-sigma-candidate-v1",
+        "model_id" => ch.model_id * "-sigma-candidate-" * rule_version(rule),
         "numerical" => Dict("rule" => r.rule, "n_panels" => r.n_panels, "n_nodes" => r.n_nodes,
                             "crosses_eps_c" => r.crosses_eps_c,
                             "eps_c_eV" => EPS_C_HA === nothing ? nothing : EPS_C_HA * HARTREE_EV,

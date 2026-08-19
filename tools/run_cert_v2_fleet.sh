@@ -1,7 +1,8 @@
 #!/bin/bash
 # run_cert_v2_fleet.sh <profile> [レーン数] [スレッド数] [接頭辞] — 認証 v2 のフリート起動 (260819Cl)
 #
-#   bash tools/run_cert_v2_fleet.sh pilot 11 1        # sentinel 11 行 (時間の実測)
+#   bash tools/run_cert_v2_fleet.sh pilot 11 1        # sentinel 11 行 (時間の実測)。規則は CERT_RULE (既定 v2)
+#   CERT_RULE=v2 bash tools/run_cert_v2_fleet.sh pilot 11 1 cert_v2b_pilot   # 候補 v2 の pilot (接頭辞を分ける)
 #   bash tools/run_cert_v2_fleet.sh deep 16 1         # 全チャネル × E₀ 3 点 (+ sentinel) — 数日
 #   julia +1.11 --project=. tools/certify_sigma_v2.jl ../cert_v2_deep_lane*.jsonl --summary
 #
@@ -16,10 +17,11 @@ nlane=${2:-12}
 nthr=${3:-1}
 prefix=${4:-cert_v2_${profile}}
 stagger=${STAGGER:-45}
+rule=${CERT_RULE:-v2}          # 規則 (v1 = pilot 2026-08-19 / v2 = HIGH + κ·r_core)。CERT_RULE=v1 で旧規則
 cd "$(dirname "$0")/.." || exit 1
-echo "認証 v2 フリート起動: profile=$profile  $nlane レーン × $nthr スレッド = $((nlane * nthr)) 本  接頭辞 $prefix"
+echo "認証 v2 フリート起動: profile=$profile  規則=$rule  $nlane レーン × $nthr スレッド = $((nlane * nthr)) 本  接頭辞 $prefix"
 for lane in $(seq 0 $((nlane - 1))); do
-  nohup nice -n 10 bash tools/cert_v2_watchdog.sh "$lane" "$nlane" "$nthr" "$profile" "$prefix" +1.11 \
+  nohup nice -n 10 bash tools/cert_v2_watchdog.sh "$lane" "$nlane" "$nthr" "$profile" "$prefix" +1.11 "$rule" \
         > "../${prefix}_lane${lane}_watchdog.txt" 2>&1 &
   echo "  lane $lane 起動 (pid $!)  $(date '+%F %T')"
   [ "$lane" -lt $((nlane - 1)) ] && sleep "$stagger"
