@@ -30,7 +30,7 @@ using Printf
 const LK_S = [0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0]
 
 function run_NK_policy(ch, policy::Symbol; settings=HIGH_SETTINGS, l_cap::Int=settings.l_cap, margin::Int=12,
-                       s_nodes::Vector{Float64}=LK_S)
+                       s_nodes::Vector{Float64}=LK_S, r_eff::Float64=NaN)
     T0 = ch.T0; E_th = ch.E_th
     eps_max = T0 - E_th
     eps, we = eps_nodes(E_th, eps_max, settings.n1, settings.n2, settings.n3)
@@ -55,6 +55,8 @@ function run_NK_policy(ch, policy::Symbol; settings=HIGH_SETTINGS, l_cap::Int=se
         q_lo = max(1e-4, 0.9 * (k_i - kf))
         lm = policy === :src ? src_lmax(e, ch.z, r_core, l_cap, c_light; nonrel=nonrel) :
              policy === :kappa_rc ? min(l_cap, ceil(Int, kappa * r_core) + margin) :
+             policy === :kappa_r ? (isfinite(r_eff) || error(":kappa_r は r_eff が要る");
+                                    min(l_cap, ceil(Int, kappa * r_eff) + margin)) :
              error("policy?")
         _, rl, _, _, _, _, _ = eps_setup_lmax(ch.ion_pot, ch.r_b, ch.u_b, e, ch.z, r_core,
             q_lo, q_hi, lm, settings.n_q, Float64(settings.ppw), Float64(settings.dt_log),
