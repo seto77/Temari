@@ -21,7 +21,7 @@ lkin_truncation_probe.jl — ★★★ src の部分波打ち切り l_kin が出
 近いかは l_max 収束 (pilot §3 の 1 ノード掃引: 単調収束) から読む。
 
 実行:
-  julia +1.11 --project=. -t 10 tools/lkin_truncation_probe.jl [--rows "54,M4,200;79,M5,200"] [--lcap 128]
+  julia +1.11 --project=. -t 10 tools/lkin_truncation_probe.jl [--rows "54,M4,200;79,M5,200"] [--lcap 128] [--margin 12]
 =====================================================================#
 
 include(joinpath(@__DIR__, "sigma_beta_delta.jl"))
@@ -29,7 +29,7 @@ using Printf
 
 const LK_S = [0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 6.0, 8.0, 12.0, 16.0]
 
-function run_NK_policy(ch, policy::Symbol; settings=HIGH_SETTINGS, l_cap::Int=settings.l_cap)
+function run_NK_policy(ch, policy::Symbol; settings=HIGH_SETTINGS, l_cap::Int=settings.l_cap, margin::Int=12)
     T0 = ch.T0; E_th = ch.E_th
     eps_max = T0 - E_th
     eps, we = eps_nodes(E_th, eps_max, settings.n1, settings.n2, settings.n3)
@@ -50,7 +50,7 @@ function run_NK_policy(ch, policy::Symbol; settings=HIGH_SETTINGS, l_cap::Int=se
         q_hi = min(k_i + kf, kappa + 15.0 * ch.z + 2.0 * maximum(K_nodes))
         q_lo = max(1e-4, 0.9 * (k_i - kf))
         lm = policy === :src ? src_lmax(e, ch.z, r_core, l_cap, c_light; nonrel=nonrel) :
-             policy === :kappa_rc ? min(l_cap, ceil(Int, kappa * r_core) + 12) :
+             policy === :kappa_rc ? min(l_cap, ceil(Int, kappa * r_core) + margin) :
              error("policy?")
         _, rl, _, _, _, _, _ = eps_setup_lmax(ch.ion_pot, ch.r_b, ch.u_b, e, ch.z, r_core,
             q_lo, q_hi, lm, settings.n_q, Float64(settings.ppw), Float64(settings.dt_log),
@@ -67,6 +67,7 @@ end
 function main_lk(args)
     rows = [(54, "M4", 200.0), (79, "M5", 200.0), (56, "M4", 200.0)]
     lcap = HIGH_SETTINGS.l_cap
+    margin = 12
     i = 1
     while i <= length(args)
         if args[i] == "--rows"
@@ -75,6 +76,8 @@ function main_lk(args)
             i += 1
         elseif args[i] == "--lcap"
             lcap = parse(Int, args[i+1]); i += 1
+        elseif args[i] == "--margin"
+            margin = parse(Int, args[i+1]); i += 1
         end
         i += 1
     end
@@ -83,7 +86,7 @@ function main_lk(args)
         ch = prepare_channel(z, tag, e0; dirac_continuum=true)
         t = @elapsed begin
             Ns, ls, eps, r_core = run_NK_policy(ch, :src; l_cap=lcap)
-            Nk, lk, _, _ = run_NK_policy(ch, :kappa_rc; l_cap=lcap)
+            Nk, lk, _, _ = run_NK_policy(ch, :kappa_rc; l_cap=lcap, margin=margin)
         end
         @printf("\n== Z=%d %s @%.0f keV  r_core=%.2f  6/Z=%.3f  (%.0f s) ==\n", z, tag, e0, r_core, 6.0/z, t)
         @printf("  l_max: src %d..%d / κ·r_core+12 %d..%d (cap %d)\n", minimum(ls), maximum(ls), minimum(lk), maximum(lk), lcap)
