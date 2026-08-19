@@ -180,7 +180,9 @@ const PRODUCTION_SOURCE_FINGERPRINT = production_source_fingerprint()
 function production_context_sha256(settings, presc)
     return checkpoint_sha256(Dict{String,Any}(
         "source_fingerprint" => PRODUCTION_SOURCE_FINGERPRINT,
-        "settings" => settings,
+        # 260820Cl: settings_dict で部分波規則 (lkin_rule / frac / margin) も文脈に入れる —
+        #   TEMARI_LEGACY_V5_CUTOFF の有無で同じチェックポイントを受け取らないため (codex)
+        "settings" => settings_dict(settings),
         "prescription" => presc,
         "s_grid_A_inv" => S_GRID,
         "gate_mres" => GATE_MRES,
@@ -570,7 +572,8 @@ const SCHEMA_VERSION = 2
 
 "出荷形式 (s グリッド + スキーマ版) が v5 の契約どおりか"
 is_shipping_format() =
-    SCHEMA_VERSION == 2 && length(S_GRID) == 321 && S_GRID[end] == 16.0
+    SCHEMA_VERSION == 2 && length(S_GRID) == 321 && S_GRID[end] == 16.0 &&
+    S_GRID == collect(0.0:0.05:16.0)                 # 260820Cl: 端点だけでなく格子そのもの (codex)
 
 """出荷世代の番号。**処方一式に対して定義される。**つまみを 1 つでも出荷処方から
 外したら `0.0.0-dev` になる — `pack_resource.py` は全チャネルで
@@ -592,7 +595,10 @@ function presc_dataset_version(p; lkin_rule::AbstractString=string(LKIN_RULE), l
                                lkin_radius_frac=LKIN_RADIUS_FRAC, lkin_margin::Integer=LKIN_MARGIN)
     (is_shipping_format() && p == PRESC_V4) || return "0.0.0-dev"
     lkin_rule == "v5" && l_cap == 128 && return "5.0.0"
-    (lkin_rule == "v6" && l_cap == 256 && lkin_radius_frac == 0.999 && lkin_margin == 12) && return "6.0.0"
+    # ⚠ v6 の範囲 (等比 s 格子 / M1 の n_q / ppw などを束ねるか) は作者が凍結するまで **"6.0.0-dev"** を名乗る
+    #   (codex 2026-08-20: 版は処方 + 正確な S_GRID + schema + HIGH 全設定 + 部分波規則 + 量子化の一式で定義し、
+    #   生成側の名乗りと C16 を同じ定義から引く — その一式を `V6_SPEC` として作るのは凍結時)
+    (lkin_rule == "v6" && l_cap == 256 && lkin_radius_frac == 0.999 && lkin_margin == 12) && return "6.0.0-dev"
     return "0.0.0-dev"
 end
 
@@ -686,10 +692,16 @@ function run_channel(z::Int, tag::String, outdir::String;
             o = compute_channel(z, tag, e0; settings=settings, s_nodes=s_nodes_row,
                                 verbose=false, presc...)
             if !is_sane_row(o)
+                # 260820Cl: **fail-closed** — 2 度目も異常ならその行は書かない (failures に記録して次の E₀ へ)。
+                #   以前は記録だけして壊れた行を表に入れていた (QC C11 頼み)。欠けた行は check_tables の
+                #   E₀ 格子検査で見え、tools/repair_rows.jl で再計算できる (codex 2026-08-20)
                 push!(failures, Dict{String,Any}(
-                    "e0_keV" => e0, "reason" => "insane row after recompute",
+                    "e0_keV" => e0, "reason" => "insane row after recompute (row NOT written)",
                     "N0" => o["N0"], "sigma_ratio" =>
                         o["sigma_own_nm2"] / max(o["sigma_bote_nm2"], 1e-300)))
+                @printf("  [sane] Z=%d %s @%.1f: 2 度目も異常 → この行は書かない\n", z, tag, e0)
+                flush(stdout)
+                continue
             end
         end
         d = o["diag"]
@@ -708,6 +720,16 @@ function run_channel(z::Int, tag::String, outdir::String;
                 push!(failures, Dict{String,Any}(
                     "e0_keV" => e0, "badL" => d["bad_significant_l"],
                     "mres" => d["max_match_resid"], "rtail" => d["r_tail_max"]))
+            end
+            # 260820Cl: メッシュ再試行の結果も健全性を見る (fail-closed)
+            if !is_sane_row(o)
+                push!(failures, Dict{String,Any}(
+                    "e0_keV" => e0, "reason" => "insane row after ppw retry (row NOT written)",
+                    "N0" => o["N0"], "sigma_ratio" =>
+                        o["sigma_own_nm2"] / max(o["sigma_bote_nm2"], 1e-300)))
+                @printf("  [sane] Z=%d %s @%.1f: ppw 再試行後も異常 → この行は書かない\n", z, tag, e0)
+                flush(stdout)
+                continue
             end
         end
         # 260810Cl: 届かなかった上端を 0 で埋めて全行を 321 点に揃える
@@ -837,7 +859,11 @@ function audit(; presc=PRESC_V4)
              (50, "K", 30.0), (86, "L1", 30.0), (33, "M5", 120.0)]
     bumps = [
         ("eps nodes n1/n2/n3 ×1.4", (; HIGH_SETTINGS..., n1=28, n2=80, n3=28)),
-        ("l_cap 128→160",           (; HIGH_SETTINGS..., l_cap=160)),
+        # 260820Cl: 部分波規則 v6 (l_cap 256) に合わせて上へ振る。cap / margin / 含有半径を別々に、最後に同時に
+        ("l_cap 256→320",           (; HIGH_SETTINGS..., l_cap=320)),
+        ("lkin margin 12→20",       (; HIGH_SETTINGS..., lkin_margin=20)),
+        ("lkin 含有率 0.999→0.9999", (; HIGH_SETTINGS..., lkin_frac=0.9999)),
+        ("cap320 + margin20 + 0.9999", (; HIGH_SETTINGS..., l_cap=320, lkin_margin=20, lkin_frac=0.9999)),
         ("角度 n_x/n_phi ×1.5",     (; HIGH_SETTINGS..., n_x=144, n_phi=72)),
         ("n_q 360→540",             (; HIGH_SETTINGS..., n_q=540)),
         ("ppw 30→38",               (; HIGH_SETTINGS..., ppw=38.0)),

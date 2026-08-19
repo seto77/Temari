@@ -53,12 +53,16 @@ end
 :v6 = ⌈κ·r_eff⌉ + LKIN_MARGIN、r_eff = 含有率 LKIN_RADIUS_FRAC の半径 (260820Cl)。
 ⚠ tools/sigma_beta_delta.jl `src_lmax` と tools/lkin_truncation_probe.jl はこの式の写しを持つ — 変えたら追従する
 (`:src` 経路は毎ノード突き合わせて assert する)。"""
-function lkin_partial_waves(kappa::Float64, z::Int, r_core::Float64, r_b, u_b)
+function lkin_partial_waves(kappa::Float64, z::Int, r_core::Float64, r_b, u_b;
+                            dirac::Union{Nothing,NamedTuple}=nothing,
+                            frac::Float64=LKIN_RADIUS_FRAC, margin::Int=LKIN_MARGIN)
     if LKIN_RULE === :v5
         return ceil(Int, kappa * min(r_core, 6.0 / z)) + 12
     elseif LKIN_RULE === :v6
-        r_eff = bound_containment_radius(r_b, u_b, LKIN_RADIUS_FRAC)
-        return ceil(Int, kappa * r_eff) + LKIN_MARGIN
+        # Dirac 経路は 2 成分密度 G²+F² (行列要素が G_aG_b + F_aF_b なので)。それ以外は u_b²
+        r_eff = dirac === nothing ? bound_containment_radius(r_b, u_b, frac) :
+                bound_containment_radius(dirac.r_b, hypot.(dirac.G_b, dirac.F_b), frac)
+        return ceil(Int, kappa * r_eff) + margin
     else
         error("LKIN_RULE は :v5 か :v6 ($LKIN_RULE)")
     end
@@ -94,7 +98,8 @@ function eps_setup(pot_ion, r_b, u_b, e::Float64, z::Int, r_core::Float64,
                    ppw::Float64, dt_log::Float64, l_init::Int,
                    sig_thresh::Float64, q_kin_max::Float64;
                    rel::Union{Nothing,RelCont}=nothing,
-                   dirac::Union{Nothing,NamedTuple}=nothing)
+                   dirac::Union{Nothing,NamedTuple}=nothing,
+                   lkin_frac::Float64=LKIN_RADIUS_FRAC, lkin_margin::Int=LKIN_MARGIN)
     # 放出電子の波数。相対論 (第 3.5 章) では k_rel — グリッド密度・部分波上限・
     # マッチ半径の全てが正しい (短い) 波長基準になる。
     # `dirac` を渡すと κ 分解 Dirac 連続状態 (第 3.6 章) へ切り替わる。中身は
@@ -105,7 +110,7 @@ function eps_setup(pot_ion, r_b, u_b, e::Float64, z::Int, r_core::Float64,
     r_c = r_core + 2.0
     L_cut = 2.0 * r_c + 2.0 * e * r_c * r_c    # 障壁の転回点 = r_c となる l(l+1)
     l_barrier = floor(Int, sqrt(L_cut))
-    l_kin = lkin_partial_waves(kappa, z, r_core, r_b, u_b)
+    l_kin = lkin_partial_waves(kappa, z, r_core, r_b, u_b; dirac=dirac, frac=lkin_frac, margin=lkin_margin)
     l_max = min(l_cap, max(6, min(l_kin, l_barrier)))
     r_t = (sqrt(1.0 + 2.0 * e * l_max * (l_max + 1.0)) - 1.0) / (2.0 * e)
     lam = 2.0 * pi / kappa                     # 放出電子の波長
@@ -187,7 +192,8 @@ function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
                     sig_thresh::Float64;
                     rel::Union{Nothing,RelCont}=nothing,
                     tr::Union{Nothing,Transverse}=nothing,
-                    dirac::Union{Nothing,NamedTuple}=nothing)
+                    dirac::Union{Nothing,NamedTuple}=nothing,
+                    lkin_frac::Float64=LKIN_RADIUS_FRAC, lkin_margin::Int=LKIN_MARGIN)
     kappa = (rel === nothing && dirac === nothing) ? sqrt(2.0 * e) :
             krel(e, dirac === nothing ? rel.c : dirac.c)
     q_hi = min(k_i + kf, kappa + 15.0 * z + 2.0 * maximum(K_nodes))
@@ -195,7 +201,7 @@ function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
     cont, rl, mres, orec, l_max, bad_count, r_tail =
         eps_setup(pot_ion, r_b, u_b, e, z, r_core, q_lo, q_hi, l_cap, n_q,
                   ppw, dt_log, l_init, sig_thresh, k_i + kf; rel=rel,
-                  dirac=dirac)
+                  dirac=dirac, lkin_frac=lkin_frac, lkin_margin=lkin_margin)
     # 260805Cl 変更: K 非依存の角度幾何・作業領域を 1 回だけ作る (旧: K ごとに再構築)
     ws = AngWS(k_i, kf, n_x, n_phi, rl.lam_max)
     # 260808Cl 追加: Q₊ は i にしか依らない (j にも K にも非依存) ので、Q₊ 側の
@@ -287,7 +293,8 @@ function compute_NK(pot_ion, r_b, u_b, E_th::Float64, T0::Float64,
                     sig_thresh::Float64=1e-8, progress::Bool=false,
                     rel::Union{Nothing,RelCont}=nothing,
                     transverse::Bool=false,
-                    dirac::Union{Nothing,NamedTuple}=nothing)
+                    dirac::Union{Nothing,NamedTuple}=nothing,
+                    lkin_frac::Float64=LKIN_RADIUS_FRAC, lkin_margin::Int=LKIN_MARGIN)
     eps_max = T0 - E_th
     eps_max <= 0 && error("below threshold")
     transverse && any(!=(0.0), K_nodes) &&
@@ -320,7 +327,7 @@ function compute_NK(pot_ion, r_b, u_b, E_th::Float64, T0::Float64,
         row, mres, orec, lm, bd, rtl = eps_worker(
             pot_ion, r_b, u_b, eps[ie], kf, k_i, z, r_core, K_nodes,
             l_cap, n_x, n_phi, n_q, ppw, dt_log, l_init, occ_init, sig_thresh;
-            rel=rel, dirac=dirac,
+            rel=rel, dirac=dirac, lkin_frac=lkin_frac, lkin_margin=lkin_margin,
             tr=(transverse ? Transverse(E_th + eps[ie], T0) : nothing))
         dNde[ie, :] = row
         match_resid[ie] = mres

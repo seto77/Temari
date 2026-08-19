@@ -38,7 +38,7 @@ include(joinpath(@__DIR__, "lkin_truncation_probe.jl"))
 using Printf
 
 const LKS_POLICIES = Dict(
-    "src"       => (policy=:src,      l_cap=128, margin=12),
+    "src"       => (policy=:src_v5,   l_cap=128, margin=12),     # ⚠ 260820Cl: src 本体は v6 規則になった。掃引の "src" は出荷 v5 の式 (:src_v5) を指す
     "krc12"     => (policy=:kappa_rc, l_cap=128, margin=12),
     "krc12c256" => (policy=:kappa_rc, l_cap=256, margin=12),   # cap の効果だけ (krc12 と比べる)
     "krc20c256" => (policy=:kappa_rc, l_cap=256, margin=20),   # マージンの効果 (krc12c256 と比べる)

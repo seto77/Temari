@@ -58,7 +58,7 @@ const PROBE_S = [0.0, 0.5, 1.0, 2.0, 4.0, 8.0, 12.0, 16.0]   # Å⁻¹ (出荷�
 const RAISED_LCAP = [160, 192, 256]
 const BETA_EELS = 30e-3                               # rad
 
-"eps_setup と同じ式で (l_kin, l_barrier, l_max) を再計算する (E₀ 非依存)"
+"⚠ 260820Cl: **v5 の式** (⌈κ·min(r_core, 6/Z)⌉+12、l_cap 128) の写し。src は LKIN_RULE :v6 に変わったので現行の eps_setup とは一致しない (v5 出荷の診断として残す)"
 function lmax_formula(e::Float64, z::Int, r_core::Float64, c::Float64, l_cap::Int)
     kappa = krel(e, c)
     r_c = r_core + 2.0

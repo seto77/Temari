@@ -28,7 +28,7 @@ function eps_worker_tapped(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Floa
     r_c = r_core + 2.0
     L_cut = 2.0 * r_c + 2.0 * e * r_c * r_c
     l_barrier = floor(Int, sqrt(L_cut))
-    l_kin = ceil(Int, kappa * min(r_core, 6.0 / z)) + 12
+    l_kin = ceil(Int, kappa * min(r_core, 6.0 / z)) + 12   # ⚠ 260820Cl: これは **v5 の式** の写し (src は LKIN_RULE :v6 = ⌈κ·r(0.999)⌉+12 に変わった)
     l_max = min(l_cap, max(6, min(l_kin, l_barrier)))
     r_t = (sqrt(1.0 + 2.0 * e * l_max * (l_max + 1.0)) - 1.0) / (2.0 * e)
     lam = 2.0 * pi / kappa
