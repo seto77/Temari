@@ -113,6 +113,8 @@ deleted.
 | [`basis_s_requirement_2026-08-10.md`](notes/basis_s_requirement_2026-08-10.md) | What s a Bloch-wave basis actually demands, measured — and the two wrong exponents it corrected. |
 | [`format_and_sampling_2026-08-12.md`](notes/format_and_sampling_2026-08-12.md) | Why the shipping format was left alone: counted nodes and weighted contribution differ by four orders of magnitude. |
 | [`observable_propagation_2026-08-13.md`](notes/observable_propagation_2026-08-13.md) | How an error in F propagates to an observable, measured through ReciPro's ALCHEMI path. |
+| [`error_budget_2026-08-19.md`](notes/error_budget_2026-08-19.md) | **Every error term for F(s, E₀) in one table, each labelled by kind** — acceptance budget, direct measurement, observed maximum over a sample, discrepancy against an external reference, unexplained, scenario, not measured. The point is the kind column: rows of different kinds must not be added, and the note lists the pairs that look combinable and are not. |
+| [`benchmark_spec_2026-08-19.md`](notes/benchmark_spec_2026-08-19.md) | **The smallest target an independent group could recompute**: ten channels chosen by a stated rule, 17 exact grid nodes at 200 keV, the full prescription including the three places where the function default, the CLI default and the shipping recipe differ, and a two-tier acceptance that refuses to set a tolerance across prescriptions. Nobody external has run it yet, and the note says so. |
 
 #### The f_x / f_e dataset
 
