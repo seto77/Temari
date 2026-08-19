@@ -145,6 +145,7 @@ deleted.
 | [`nq_nx_2026-08-19.md`](notes/nq_nx_2026-08-19.md) | Which of n_x and n_q limits the angular quadrature — and the breakpoint split that removed the knob. |
 | [`window_quadrature_2026-08-19.md`](notes/window_quadrature_2026-08-19.md) | Why the window quadrature was five orders worse than the draft said (the delayed maximum), the two holes the audit found in the certification itself (raw-ε branch, 1000 eV width cap), and §8: the measurements that fixed the candidate rule — the floor is the continuum discretization, not the Q table. |
 | [`certification_v2_preregistration_2026-08-19.md`](notes/certification_v2_preregistration_2026-08-19.md) | **Preregistration of the certification of the candidate σ(β, Δ) rule** (`tools/sigma_beta_delta.jl`): sample, windows, pass rule, what is and is not claimed — written before any value was looked at. Deep profile ≈ 2.9 days, author's call. |
+| [`certification_v2_pilot_2026-08-19.md`](notes/certification_v2_pilot_2026-08-19.md) | The pilot of that certification (11 sentinel rows): β ≤ 30 mrad at the floor everywhere, but 32 windows fail at β ≥ 60 mrad reaching high ε — and the two mechanisms behind it, the partial-wave staircase and **an under-converged partial-wave cutoff in the shipped prescription for extended 3p/3d orbitals at high ε** (Xe M4, 30 keV: +7.3 % when l_max is raised). Not yet measured on F(s). |
 
 #### Operations and outside views
 

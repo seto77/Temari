@@ -61,12 +61,14 @@ Base.@kwdef struct SigmaRule
     sig_thresh::Float64 = PROD_SETTINGS.sig_thresh
     transverse::Bool = true
     split_eps_c::Bool = true     # 参照関数の切替 ε_c をパネル境界にする
+    l_max_policy::Symbol = :src  # :src = eps_setup の式 (ε ごと、階段あり) / :window_max = 窓の上端の値で一定
 end
 const SIGMA_RULE_V1 = SigmaRule()
 
 rule_name(r::SigmaRule) = "win:sin2theta-geo$(r.n_panel)xGL$(r.npt)-dth$(r.delta_theta)" *
                           (r.split_eps_c ? "-epsc" : "") *
-                          "/ang:knotsplit-GL$(r.angular_npt)-exactx/nq$(r.n_q)/ppw$(r.ppw)"
+                          "/ang:knotsplit-GL$(r.angular_npt)-exactx/nq$(r.n_q)/ppw$(r.ppw)" *
+                          (r.l_max_policy === :src ? "" : "/lmax:$(r.l_max_policy)")
 
 # ---------------------------------------------------------------------
 # 参照関数の切替点 ε_c (⚠ 定数を埋め込まない — 切替条件そのものから解く)
@@ -86,6 +88,93 @@ function eps_c_reference_switch(; z_asym::Float64=1.0, c::Float64=C_LIGHT,
     return 0.5 * (lo + hi)
 end
 const EPS_C_HA = eps_c_reference_switch()
+
+# ---------------------------------------------------------------------
+# ★ 部分波数 l_max の階段 (2026-08-19 深夜、pilot の不合格 17 窓の機構)
+#
+# src の `eps_setup` は l_max = min(l_cap, max(6, min(l_kin, l_barrier)))、
+# l_kin = ⌈κ·min(r_core, 6/Z)⌉ + 12 を ε ごとに決め直す。ε が上がると l_kin が 1 ずつ増え、
+# **β が大きい (≳ 100 mrad) と 1 段ごとに dσ/dε が相対 ~1e-06 跳ぶ** (Xe M4 @400、窓 [1e3,1e5] eV、
+# β=200 mrad で実測。l_cap=12 で l_max を定数にすると 16 vs 32 パネルの差が 1.4e-06 → 9.8e-09 に潰れ、
+# ppw・dt_log・n_q・sig_thresh は効かない = 負のテスト込みで帰属済)。β ≤ 60 mrad では高 l′ が効かないので
+# 見えない (window_quadrature §2.6 の 2.66e-16 はそのため)。
+# ⇒ 候補 v2 では **窓の中で l_max を一定にする** (`l_max_policy = :window_max`: 窓の上端 ε で src の式が
+#   与える l_max を全ノードに使う)。src は凍結なので、eps_setup の写し `eps_setup_lmax` を tools に置く。
+#   ⚠ 写しの式は src と同じでなければならない — `:src` 経路では eps_setup の返す l_max と突き合わせて assert。
+# ---------------------------------------------------------------------
+"src の eps_setup と同じ l_max の式 (⚠ src が変われば追従が要る。`:src` 経路で毎ノード検算する)"
+function src_lmax(e::Float64, z::Int, r_core::Float64, l_cap::Int, c_light::Float64;
+                  nonrel::Bool=false)
+    kappa = nonrel ? sqrt(2.0 * e) : krel(e, c_light)
+    r_c = r_core + 2.0
+    L_cut = 2.0 * r_c + 2.0 * e * r_c * r_c
+    l_barrier = floor(Int, sqrt(L_cut))
+    l_kin = ceil(Int, kappa * min(r_core, 6.0 / z)) + 12
+    return min(l_cap, max(6, min(l_kin, l_barrier)))
+end
+
+"""`eps_setup` の写し — `l_max` を引数で与える版 (他は src と同じ手順・同じ順序)。
+⚠ src/l5_channel.jl の eps_setup が変わったらここも追従する。"""
+function eps_setup_lmax(pot_ion, r_b, u_b, e::Float64, z::Int, r_core::Float64,
+                        q_lo::Float64, q_hi::Float64, l_max::Int, n_q::Int,
+                        ppw::Float64, dt_log::Float64, l_init::Int,
+                        sig_thresh::Float64, q_kin_max::Float64;
+                        rel::Union{Nothing,RelCont}=nothing,
+                        dirac::Union{Nothing,NamedTuple}=nothing)
+    c_light = dirac === nothing ? (rel === nothing ? C_LIGHT : rel.c) : dirac.c
+    kappa = (rel === nothing && dirac === nothing) ? sqrt(2.0 * e) : krel(e, c_light)
+    r_t = (sqrt(1.0 + 2.0 * e * l_max * (l_max + 1.0)) - 1.0) / (2.0 * e)
+    lam = 2.0 * pi / kappa
+    r_match = min(max(r_match_for(pot_ion, e), r_core + 5.0, r_t + 3.0 * lam), 400.0)
+    local cont, rl, c_ortho, resid_ortho, resid_l, ok_l
+    if dirac === nothing
+        cont = ContinuumSet(V_for(pot_ion, e), e, l_max, r_core, r_match;
+                            q_resolve=q_hi, ppw=ppw, dt_log=dt_log,
+                            z_asym=pot_ion.z_asym, rel=rel)
+        c_ortho, resid_ortho = orthogonalize_l0!(cont, r_b, u_b; l=l_init)
+        rl = RlTable(cont, r_b, u_b, q_lo, q_hi, n_q, l_init)
+        resid_l = cont.match_resid
+        ok_l = cont.ok
+    else
+        cont = DiracContinuumSet(V_for(pot_ion, e), e, l_max, r_core, r_match, z;
+                                 q_resolve=q_hi, ppw=ppw, dt_log=dt_log,
+                                 z_asym=pot_ion.z_asym, c=dirac.c)
+        c_ortho, resid_ortho = orthogonalize_dirac!(cont, dirac.r_b, dirac.G_b,
+                                                    dirac.F_b, dirac.kappa)
+        rl = RlTable(cont, dirac.r_b, dirac.G_b, dirac.F_b, q_lo, q_hi, n_q, dirac.kappa)
+        resid_l = zeros(l_max + 1)
+        ok_l = trues(l_max + 1)
+        for ic in eachindex(cont.kappas)
+            li = cont.ls[ic] + 1
+            resid_l[li] = max(resid_l[li], cont.match_resid[ic])
+            ok_l[li] &= cont.ok[ic]
+        end
+    end
+    w_ch = [A * maximum(abs2, view(rl.R, ic, :)) for (ic, (_, _, A)) in enumerate(rl.channels)]
+    b_l = zeros(rl.nL)
+    for (w, (lp, _, _)) in zip(w_ch, rl.channels)
+        b_l[lp+1] += w
+    end
+    significant = b_l ./ max(sum(b_l), 1e-300) .> sig_thresh
+    bad_count = count(significant .& (resid_l .> 1e-4) .& ok_l)
+    r_tail = 0.0
+    if q_hi < 0.999 * q_kin_max
+        peak = isempty(w_ch) ? 0.0 : maximum(w_ch)
+        if peak > 0.0
+            for (ic, (lp, _, A)) in enumerate(rl.channels)
+                if significant[lp+1]
+                    r_tail = max(r_tail, A * rl.R[ic, end]^2 / peak)
+                end
+            end
+        end
+    end
+    for li in 1:rl.nL
+        (!significant[li] || !ok_l[li]) && zero_l!(rl, li - 1)
+    end
+    sig_ok = significant .& ok_l
+    mres = any(sig_ok) ? maximum(resid_l[sig_ok]) : 0.0
+    return cont, rl, mres, (c_ortho, resid_ortho), l_max, bad_count, r_tail
+end
 
 # ---------------------------------------------------------------------
 # 窓のパネル (θ 座標)
@@ -256,7 +345,7 @@ function sigma_window_v1(ch, r_core::Float64, betas::Vector{Float64},
     nb = length(betas)
     zero_result = (sigma_nm2=zeros(nb), n_panels=0, n_nodes=0, n_degenerate_panels=0,
                    crosses_eps_c=false, window_indicator=0.0, window_indicator_weighted=0.0,
-                   panel_edges_sha="", angular_panels_max=0,
+                   panel_edges_sha="", angular_panels_max=0, l_max_min=0, l_max_max=0,
                    effective_window_eV=(d1_eV, d2_eff), requested_window_eV=(d1_eV, d2_eV),
                    rule=rule_name(rule), zero_reason="")
     # 空窓 / β=0 は検証の後・状態構築の前に厳密な 0 を返す (順序が重要)
@@ -293,6 +382,12 @@ function sigma_window_v1(ch, r_core::Float64, betas::Vector{Float64},
     ANG = zeros(Int, n)
     z = ch.z
     tr_on = rule.transverse
+    c_light = ch.dirac === nothing ? (ch.rel === nothing ? C_LIGHT : ch.rel.c) : ch.dirac.c
+    nonrel = (ch.rel === nothing && ch.dirac === nothing)
+    # ★ l_max の方針: :window_max は窓の上端 ε (= 最大の κ) で src の式が与える値を全ノードに使う
+    l_fixed = rule.l_max_policy === :window_max ?
+              src_lmax(e2, z, r_core, rule.l_cap, c_light; nonrel=nonrel) : -1
+    LMAX_USED = zeros(Int, n)
     Threads.@threads :greedy for k in n:-1:1
         e = EPS[k]
         kf = kin_k(EREM[k])
@@ -302,9 +397,21 @@ function sigma_window_v1(ch, r_core::Float64, betas::Vector{Float64},
         kappa = ch.dirac === nothing ? sqrt(2.0 * e) : krel(e, ch.dirac.c)
         q_hi = min(k_i + kf, kappa + 15.0 * z)
         q_lo = max(1e-4, 0.9 * (k_i - kf))
-        _, rl, _, _, _, _, _ = eps_setup(ch.ion_pot, ch.r_b, ch.u_b, e, z, r_core,
-            q_lo, q_hi, rule.l_cap, rule.n_q, rule.ppw, rule.dt_log, ch.l_b,
-            rule.sig_thresh, k_i + kf; rel=ch.rel, dirac=ch.dirac)
+        local rl
+        if l_fixed < 0
+            _, rl, _, _, lm, _, _ = eps_setup(ch.ion_pot, ch.r_b, ch.u_b, e, z, r_core,
+                q_lo, q_hi, rule.l_cap, rule.n_q, rule.ppw, rule.dt_log, ch.l_b,
+                rule.sig_thresh, k_i + kf; rel=ch.rel, dirac=ch.dirac)
+            # ⚠ tools の写し (src_lmax) が src と同じ式であることを毎ノード検算する
+            lm_chk = src_lmax(e, z, r_core, rule.l_cap, c_light; nonrel=nonrel)
+            lm == lm_chk || error("src_lmax が eps_setup と食い違う (ε=$(e) Ha): $(lm) vs $(lm_chk)")
+            LMAX_USED[k] = lm
+        else
+            _, rl, _, _, _, _, _ = eps_setup_lmax(ch.ion_pot, ch.r_b, ch.u_b, e, z, r_core,
+                q_lo, q_hi, l_fixed, rule.n_q, rule.ppw, rule.dt_log, ch.l_b,
+                rule.sig_thresh, k_i + kf; rel=ch.rel, dirac=ch.dirac)
+            LMAX_USED[k] = l_fixed
+        end
         tr = tr_on ? Transverse(ch.E_th + e, T0) : nothing
         ps = kf / k_i
         pmax = 0
@@ -354,11 +461,14 @@ function sigma_window_v1(ch, r_core::Float64, betas::Vector{Float64},
         end
     end
     io = IOBuffer(); write(io, ed)
+    lm_used = filter(>(0), LMAX_USED)
     return (sigma_nm2=sig, n_panels=npan, n_nodes=n, n_degenerate_panels=n_degenerate,
             crosses_eps_c=(EPS_C_HA !== nothing && e1 < EPS_C_HA < e2),
             window_indicator=ind, window_indicator_weighted=ind_w,
             panel_edges_sha=bytes2hex(sha256(take!(io)))[1:16],
             angular_panels_max=maximum(ANG; init=0),
+            l_max_min=isempty(lm_used) ? 0 : minimum(lm_used),
+            l_max_max=isempty(lm_used) ? 0 : maximum(lm_used),
             effective_window_eV=(d1_eV, d2_eff), requested_window_eV=(d1_eV, d2_eV),
             rule=rule_name(rule), zero_reason="")
 end

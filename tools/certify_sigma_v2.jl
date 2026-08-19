@@ -212,38 +212,46 @@ function window_list(emax_eV::Float64; sentinel_only::Bool=false)
     return ws
 end
 
+"""1 行 = (z, tag, e0) の全窓。`emit(rec)` を窓ごとに呼ぶ (⚠ 行が終わるまで書かないと、重い行
+(Ca M1 @400 keV は > 2 時間) で watchdog の STALL (2 時間) に引っ掛かって殺される — pilot で実際に起きた)。
+σ_ref (= [0, ε_max] のオラクル) が先に要るので、その窓を**最初に**計算する。"""
 function certify_row_v2(z::Int, tag::String, e0::Float64; sentinel_only::Bool=false,
-                        rule::SigmaRule=SIGMA_RULE_V1)
+                        rule::SigmaRule=SIGMA_RULE_V1, emit::Function=(r -> nothing))
     t0 = time()
     ch, r_core = sigma_channel(z, tag, e0)
     emax_eV = (ch.T0 - ch.E_th) * HARTREE_EV
     betas = V2_BETAS_MRAD .* 1e-3
     recs = Dict{String,Any}[]
-    ws = window_list(emax_eV; sentinel_only=sentinel_only)
-    # σ_ref = 最も広い窓のオラクル値 (β ごと)。sentinel では P で代用
+    ws0 = window_list(emax_eV; sentinel_only=sentinel_only)
+    nw = length(ws0)
+    # σ_ref の窓 (start=0,to_epsmax) を先頭へ (window_index は元の並びのまま)
+    order = sortperm(1:nw; by=i -> (ws0[i][1] == "start=0,to_epsmax" ? 0 : 1, i))
     sigma_ref = zeros(length(betas))
+    have_ref = false
     ang = sentinel_only ? (Float64[], Float64[], Float64[]) : angular_check(ch, r_core, betas, rule)
-    for (iw, (wid, d1, d2, in_dom)) in enumerate(ws)
+    for iw in order
+        (wid, d1, d2, in_dom) = ws0[iw]
         tw = time()
         if !in_dom
-            push!(recs, Dict{String,Any}(
+            rec = Dict{String,Any}(
                 "z" => z, "tag" => tag, "e0_keV" => e0, "eth_keV" => ch.eth_keV,
                 "u" => e0 / ch.eth_keV, "eps_max_eV" => emax_eV, "l_init" => ch.l_b,
                 "window_id" => wid, "d1_eV" => d1, "d2_eV" => d2, "out_of_domain" => true,
-                "window_index" => iw, "cert_fp" => CERT_FP_V2, "state_sha" => state_hash_v2(ch),
-                "elapsed_s" => 0.0))
+                "window_index" => iw, "n_windows_in_row" => nw, "cert_fp" => CERT_FP_V2,
+                "state_sha" => state_hash_v2(ch), "elapsed_s" => 0.0, "row_elapsed_s" => time() - t0)
+            push!(recs, rec); emit(rec)
             continue
         end
         P = sigma_window_v1(ch, r_core, betas, d1, d2; rule=rule)
         O = sentinel_only ? copy(P.sigma_nm2) :
             oracle_window(ch, r_core, betas, d1 / HARTREE_EV, d2 / HARTREE_EV, rule)
-        if d1 == 0.0 && d2 >= emax_eV * (1 - 1e-12)
-            sigma_ref .= O
+        if wid == "start=0,to_epsmax"
+            sigma_ref .= O; have_ref = true
         end
         diff = P.sigma_nm2 .- O
         rel = [abs(O[i]) > 0 ? abs(diff[i]) / abs(O[i]) : (diff[i] == 0 ? 0.0 : Inf) for i in eachindex(O)]
         ec_eV = EPS_C_HA === nothing ? NaN : EPS_C_HA * HARTREE_EV
-        push!(recs, Dict{String,Any}(
+        rec = Dict{String,Any}(
             "z" => z, "tag" => tag, "e0_keV" => e0, "eth_keV" => ch.eth_keV,
             "u" => e0 / ch.eth_keV, "eps_max_eV" => emax_eV,
             "l_init" => ch.l_b, "window_id" => wid, "out_of_domain" => false,
@@ -261,18 +269,17 @@ function certify_row_v2(z::Int, tag::String, e0::Float64; sentinel_only::Bool=fa
             "oracle" => sentinel_only ? "none" : "sqrt-eps-geo$(V2_ORACLE_NPAN)xGL$(V2_ORACLE_NPT)-epsc",
             "window_index" => iw, "elapsed_s" => time() - tw,
             "cert_fp" => CERT_FP_V2, "state_sha" => state_hash_v2(ch),
-            "ang_eps_eV" => ang[1], "ang_long_rel" => ang[2], "ang_trans_rel" => ang[3]))
-    end
-    # scaled = |diff| / max(|O|, atol/rtol · σ_ref) を後から付ける (σ_ref が最後に決まるため)
-    for r in recs
-        r["row_elapsed_s"] = time() - t0
-        get(r, "out_of_domain", false) && continue
-        O = r["O"]; diff = r["diff"]
-        r["sigma_ref"] = sigma_ref
-        r["scaled"] = [abs(diff[i]) / max(abs(O[i]), (V2_ATOL / V2_RTOL) * sigma_ref[i], 1e-300)
-                       for i in eachindex(O)]
-        r["pass"] = sentinel_only ? nothing :
-                    all(abs(diff[i]) <= V2_RTOL * abs(O[i]) + V2_ATOL * sigma_ref[i] for i in eachindex(O))
+            "ang_eps_eV" => ang[1], "ang_long_rel" => ang[2], "ang_trans_rel" => ang[3],
+            "n_windows_in_row" => nw, "l_max_min" => P.l_max_min, "l_max_max" => P.l_max_max,
+            "row_elapsed_s" => time() - t0)
+        # scaled / pass (σ_ref は先頭の窓で確定済。無ければ |O| だけで判定し、その旨を記録)
+        rec["sigma_ref"] = have_ref ? copy(sigma_ref) : zeros(length(betas))
+        rec["sigma_ref_available"] = have_ref
+        rec["scaled"] = [abs(diff[i]) / max(abs(O[i]), (V2_ATOL / V2_RTOL) * sigma_ref[i], 1e-300)
+                         for i in eachindex(O)]
+        rec["pass"] = sentinel_only ? nothing :
+                      all(abs(diff[i]) <= V2_RTOL * abs(O[i]) + V2_ATOL * sigma_ref[i] for i in eachindex(O))
+        push!(recs, rec); emit(rec)
     end
     return recs
 end
@@ -428,7 +435,7 @@ function summarize_v2(paths::Vector{String})
         for (lab, pred) in (("l=0", Int(d["l_init"]) == 0), ("l=1", Int(d["l_init"]) == 1), ("l=2", Int(d["l_init"]) == 2),
                             ("starts_at_zero", d["starts_at_zero"] == true), ("ends_at_epsmax", d["ends_at_epsmax"] == true),
                             ("crosses_eps_c", d["crosses_eps_c"] == true),
-                            (@sprintf("width=%.3g", Float64(d["width_eV"])), true))
+                            (String(d["window_id"]), true))
             pred && push!(get!(per, lab, Float64[]), mx)
         end
     end
@@ -488,16 +495,13 @@ function main_v2(args)
     t_start = time()
     open(path, "a") do io
         for (k, (z, tag, e0)) in enumerate(todo)
-            recs = try
-                certify_row_v2(z, tag, e0; sentinel_only=(profile == "sentinel"))
+            nw = 0
+            emit = r -> (nw += 1; write(io, jsonl_line_v2(r), "\n"); flush(io))   # ★ 窓ごとに flush
+            try
+                certify_row_v2(z, tag, e0; sentinel_only=(profile == "sentinel"), emit=emit)
             catch err
-                [Dict{String,Any}("z" => z, "tag" => tag, "e0_keV" => e0,
-                                  "error" => first(sprint(showerror, err), 300), "cert_fp" => CERT_FP_V2)]
-            end
-            nw = length(recs)
-            for r in recs
-                r["n_windows_in_row"] = nw
-                write(io, jsonl_line_v2(r), "\n")
+                write(io, jsonl_line_v2(Dict{String,Any}("z" => z, "tag" => tag, "e0_keV" => e0,
+                      "error" => first(sprint(showerror, err), 300), "cert_fp" => CERT_FP_V2)), "\n")
             end
             flush(io)
             el = time() - t_start
