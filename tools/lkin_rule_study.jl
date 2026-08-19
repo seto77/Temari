@@ -7,7 +7,7 @@ lkin_rule_study.jl — ★ F v6 の部分波規則を選ぶための要因計画
   半径の定義 r_eff ∈ {r_core (1−1e-12 含有 ×1.15) / r(1−1e-8) / r(0.999) / r(0.99) / r(0.9)}
   × margin ∈ {8, 12, 20} × cap ∈ {128, 160 (rcore のみ)}
 
-を、**2 段の参照** refA = (r_core, +32, cap 256) と refB = (r_core, +48, cap 320) に対して比べる
+を、**2 段の参照** refA = (r_core, +32, cap 256) と refB = (r_core, +32, cap 320) に対して比べる
 (refA−refB が小さいことが参照自身の安定の証拠。codex 2026-08-20 の手順)。
 費用の代理 = Σ_ε l_max (部分波数の総和。連続状態ソルバと RlTable の費用にほぼ比例)。
 
@@ -51,7 +51,10 @@ function lrs_rules(ch)
         push!(rules, ("$(rn)+$(m)c$(cap)", :kappa_r, r, m, cap))
     end
     push!(rules, ("refA:rcore+32c256", :kappa_r, rc, 32, 256))
-    push!(rules, ("refB:rcore+48c320", :kappa_r, rc, 48, 320))
+    # ⚠ margin +48 は低 ε (κ→0) で l ≫ κr となり src の Coulomb 関数が DomainError (sqrt の負引数 −2e-16) で落ちる
+    #   (2026-08-20 02:48 実測、Zn M1 @400)。refB は margin を refA と同じ +32 にして cap だけ 320 へ
+    #   (refA − refB = cap の効果。margin の収束は +20 vs +32 (cap 固定) で見る)
+    push!(rules, ("refB:rcore+32c320", :kappa_r, rc, 32, 320))
     return rules, radii
 end
 
@@ -65,10 +68,15 @@ function lrs_row(z, tag, e0)
     res = Dict{String,Any}()
     for (nm, pol, r, m, cap) in rules
         tp = time()
-        N, lused, _, _ = run_NK_policy(ch, pol; l_cap=cap, margin=m, r_eff=r)
-        res[nm] = Dict{String,Any}("N0" => N[1], "F" => N ./ N[1], "l_sum" => sum(lused),
-                                   "l_max_max" => maximum(lused), "n_at_cap" => count(==(cap), lused),
-                                   "elapsed_s" => time() - tp)
+        try
+            N, lused, _, _ = run_NK_policy(ch, pol; l_cap=cap, margin=m, r_eff=r)
+            res[nm] = Dict{String,Any}("N0" => N[1], "F" => N ./ N[1], "l_sum" => sum(lused),
+                                       "l_max_max" => maximum(lused), "n_at_cap" => count(==(cap), lused),
+                                       "elapsed_s" => time() - tp)
+        catch err
+            # 規則ごとに失敗を記録する (行ごと落とすと他の規則の結果も失う)
+            res[nm] = Dict{String,Any}("error" => first(sprint(showerror, err), 200), "elapsed_s" => time() - tp)
+        end
     end
     rec["res"] = res
     rec["elapsed_s"] = time() - t0
@@ -86,13 +94,15 @@ function lrs_summary(paths::Vector{String})
     s = [Float64(x) for x in recs[1]["s_grid"]]
     i2 = findall(x -> 0.0 < x <= 2.0, s)
     names = sort(collect(keys(recs[1]["res"])))
-    println("記録 $(length(recs)) 行。参照 = refB (rcore+48, cap 320)。各規則: |ΔN0/N0| vs refB の最悪 / max|ΔF| (s≤2) vs refB の最悪 / 費用 Σl_max の refB 比 (中央値) / 事前登録の判定 (|ΔN0| ≤ 1e-04 かつ |ΔF| ≤ 5e-06) を超えた行数")
+    println("記録 $(length(recs)) 行。参照 = refB (rcore+32, cap 320)。各規則: |ΔN0/N0| vs refB の最悪 / max|ΔF| (s≤2) vs refB の最悪 / 費用 Σl_max の refB 比 (中央値) / 事前登録の判定 (|ΔN0| ≤ 1e-04 かつ |ΔF| ≤ 5e-06) を超えた行数")
     println("(refA−refB が参照自身の安定。src 行は出荷処方)")
     for nm in names
         dn = Float64[]; df = Float64[]; cost = Float64[]; nf = 0; worst = ""
+        nerr = count(d -> haskey(d["res"], nm) && haskey(d["res"][nm], "error"), recs)
         for d in recs
             haskey(d["res"], nm) || continue
-            r = d["res"][nm]; b = d["res"]["refB:rcore+48c320"]
+            r = d["res"][nm]; b = d["res"]["refB:rcore+32c320"]
+            (haskey(r, "error") || haskey(b, "error")) && continue
             x = abs(Float64(r["N0"]) / Float64(b["N0"]) - 1.0)
             F = _lfv(r["F"]); Fb = _lfv(b["F"])
             y = _maxfin(abs.((F .- Fb)[i2]))
@@ -102,16 +112,19 @@ function lrs_summary(paths::Vector{String})
                 worst *= @sprintf(" Z%d%s@%.0f", Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"]))
             end
         end
-        @printf("  %-22s ΔN0 %.2e  ΔF %.2e  cost %.2f  fail %2d/%d%s\n", nm, maximum(dn), maximum(df),
-                sort(cost)[(length(cost) + 1) ÷ 2], nf, length(dn), worst)
+        isempty(dn) && (@printf("  %-22s (結果なし、error %d)\n", nm, nerr); continue)
+        @printf("  %-22s ΔN0 %.2e  ΔF %.2e  cost %.2f  fail %2d/%d  err %d%s\n", nm, maximum(dn), maximum(df),
+                sort(cost)[(length(cost) + 1) ÷ 2], nf, length(dn), nerr, worst)
     end
     println("\n行ごと (src / rcore+12c128 / r99+12c128 / r90+12c128 の ΔF vs refB, 費用比):")
     for d in recs
-        b = d["res"]["refB:rcore+48c320"]; Fb = _lfv(b["F"])
+        b = d["res"]["refB:rcore+32c320"]; Fb = _lfv(b["F"])
         cells = String[]
+        haskey(b, "error") && continue
         for nm in ("src", "rcore+12c128", "r99+12c128", "r90+12c128", "refA:rcore+32c256")
             haskey(d["res"], nm) || continue
             r = d["res"][nm]
+            haskey(r, "error") && (push!(cells, nm * " ERR"); continue)
             push!(cells, @sprintf("%s %.1e/%.2f", nm, _maxfin(abs.((_lfv(r["F"]) .- Fb)[i2])), Float64(r["l_sum"]) / Float64(b["l_sum"])))
         end
         rad = d["radii"]
