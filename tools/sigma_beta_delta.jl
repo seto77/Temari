@@ -74,6 +74,13 @@ const SIGMA_RULE_V2 = SigmaRule(ppw=HIGH_SETTINGS.ppw, dt_log=HIGH_SETTINGS.dt_l
                                 l_cap=HIGH_SETTINGS.l_cap, sig_thresh=HIGH_SETTINGS.sig_thresh,
                                 l_max_policy=:kappa_rc, l_max_margin=12)
 
+# ★ 候補 v3 (2026-08-20 未明、pilot v2 の結果を受けて): v2 + 窓の等比パネル数 24 (β = 200 mrad × 広がった軌道 × 高 ε の
+#   窓で 16 パネルが 3e-07〜4e-06 外れ、2×2 で純粋な窓求積の不足と帰属、パネル数掃引で 24 が足りた)。
+#   事前登録 = `docs/notes/certification_v3_preregistration_2026-08-20.md`
+const SIGMA_RULE_V3 = SigmaRule(n_panel=24, ppw=HIGH_SETTINGS.ppw, dt_log=HIGH_SETTINGS.dt_log,
+                                l_cap=HIGH_SETTINGS.l_cap, sig_thresh=HIGH_SETTINGS.sig_thresh,
+                                l_max_policy=:kappa_rc, l_max_margin=12)
+
 "規則の名前 (認証の指紋に入る)。⚠ v1 の文字列は事前登録 v1 §1 のまま (追加項目は v1 既定と違うときだけ付く)"
 function rule_name(r::SigmaRule)
     s = "win:sin2theta-geo$(r.n_panel)xGL$(r.npt)-dth$(r.delta_theta)" *
@@ -91,7 +98,7 @@ function rule_name(r::SigmaRule)
 end
 
 "規則の版名 (model_id の接尾辞)。v1/v2 と一致しなければ custom"
-rule_version(r::SigmaRule) = r == SIGMA_RULE_V1 ? "v1" : r == SIGMA_RULE_V2 ? "v2" : "custom"
+rule_version(r::SigmaRule) = r == SIGMA_RULE_V1 ? "v1" : r == SIGMA_RULE_V2 ? "v2" : r == SIGMA_RULE_V3 ? "v3" : "custom"
 
 """規則の**全フィールド**を構造化して返す (JSON 用)。`rule_name` は互換のための短い文字列で、
 `transverse` と v1 既定の連続状態設定を省くので、自己記述には**こちら**を使う (codex 2026-08-19 深夜)。"""

@@ -34,7 +34,8 @@ ang_eps_eV[], ang_long_rel[], ang_trans_rel[] (行に 1 回だけ)
 実行:
   julia +1.11 --project=. -t 1 tools/certify_sigma_v2.jl ../cert_v2_<profile>_lane0.jsonl --profile deep --lane 0/16 [--rule v1|v2]
   (--rule の既定は v2 = HIGH の連続状態 + l_max = ⌈κ·r_core⌉+12。v1 = pilot 2026-08-19 の規則。
-   指紋は規則ごとに違う。事前登録 v2 = docs/notes/certification_v2b_preregistration_2026-08-19.md)
+   v3 = v2 + 窓 24 パネル (オラクルは 32 パネル)。指紋は規則ごとに違う。
+   事前登録 v2 = docs/notes/certification_v2b_preregistration_2026-08-19.md / v3 = certification_v3_preregistration_2026-08-20.md)
   julia +1.11 --project=. tools/certify_sigma_v2.jl ../cert_v2_deep_lane*.jsonl --summary
 
 ⚠ 走行中は本ファイル・sigma_beta_delta.jl・angular_split_v2.jl・angular_sweep.jl・beta_spike.jl を触らない (指紋)。
@@ -53,6 +54,8 @@ const V2_WIDTHS_EV  = [10.0, 1000.0, 1e5, Inf]          # Inf = ε_max − Δ₁
 const V2_EPSC_HALFWIDTHS_EV = [100.0, 0.01]             # ε_c を跨ぐ窓 [ε_c−h, ε_c+h]
 const V2_ORACLE_NPAN = 24
 const V2_ORACLE_NPT  = 16
+# v3 (窓 24 パネル) のオラクルは 32 パネル (本番とパネル数が同じにならないように。事前登録 v3 §0-3)
+oracle_npan(rule::SigmaRule) = rule == SIGMA_RULE_V3 ? 32 : V2_ORACLE_NPAN
 const V2_ANG_EPS_EV  = [50.0]                           # + 0.05·ε_max を足す
 const V2_RTOL = 1.0e-7                                  # 事前登録: 合否 |P−O| ≤ rtol|O| + atol σ_ref
 const V2_ATOL = 1.0e-9                                  # σ_ref = 同じ行の最も広い窓 [0, ε_max] の O
@@ -75,6 +78,7 @@ function cert_fingerprint_v2(rule::SigmaRule)
         V2_WIDTHS_EV, V2_EPSC_HALFWIDTHS_EV, V2_ORACLE_NPAN, V2_ORACLE_NPT, V2_ANG_EPS_EV,
         V2_RTOL, V2_ATOL))))[1:16]
     parts["rule"] = rule_name(rule)
+    parts["oracle"] = "sqrt-eps-geo$(oracle_npan(rule))xGL$(V2_ORACLE_NPT)-epsc"
     parts["prod"] = string(PROD_SETTINGS)
     io = IOBuffer()
     for k in sort(collect(keys(parts)))
@@ -127,7 +131,7 @@ end
 function oracle_window(ch, r_core, betas::Vector{Float64}, e1::Float64, e2::Float64,
                        rule::SigmaRule)
     T0 = ch.T0; k_i = kin_k(T0); emax = T0 - ch.E_th
-    eps, we = oracle_window_nodes(e1, e2, V2_ORACLE_NPAN, V2_ORACLE_NPT)
+    eps, we = oracle_window_nodes(e1, e2, oracle_npan(rule), V2_ORACLE_NPT)
     n = length(eps); nb = length(betas)
     V = zeros(n, nb)
     # ⚠ オラクルのノードも本番と同じ `node_rl` (= 同じ l_max の方針) を通す — P−O は窓求積の差だけを測る
@@ -275,7 +279,7 @@ function certify_row_v2(z::Int, tag::String, e0::Float64; sentinel_only::Bool=fa
             "angular_panels_max" => P.angular_panels_max, "panel_edges_sha" => P.panel_edges_sha,
             "n_q" => rule.n_q, "ppw" => rule.ppw, "rule" => P.rule, "rule_version" => rule_version(rule),
             "l_max_policy" => string(rule.l_max_policy), "rule_config" => rule_config(rule),
-            "oracle" => sentinel_only ? "none" : "sqrt-eps-geo$(V2_ORACLE_NPAN)xGL$(V2_ORACLE_NPT)-epsc",
+            "oracle" => sentinel_only ? "none" : "sqrt-eps-geo$(oracle_npan(rule))xGL$(V2_ORACLE_NPT)-epsc",
             "window_index" => iw, "elapsed_s" => time() - tw,
             "cert_fp" => cert_fp, "state_sha" => state_hash_v2(ch),
             "ang_eps_eV" => ang[1], "ang_long_rel" => ang[2], "ang_trans_rel" => ang[3],
@@ -512,7 +516,8 @@ function main_v2(args)
         end
         i += 1
     end
-    rule = rule_s == "v1" ? SIGMA_RULE_V1 : rule_s == "v2" ? SIGMA_RULE_V2 : error("--rule は v1 か v2 ($rule_s)")
+    rule = rule_s == "v1" ? SIGMA_RULE_V1 : rule_s == "v2" ? SIGMA_RULE_V2 : rule_s == "v3" ? SIGMA_RULE_V3 :
+           error("--rule は v1 / v2 / v3 ($rule_s)")
     set_cert_rule!(rule)
     accept = Set{String}(vcat([CERT_FP_V2_REF[]], extra_accept))
     rows = profile_rows(profile, tags, custom)
