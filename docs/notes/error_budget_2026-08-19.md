@@ -121,6 +121,8 @@ min/max を中央値・IQR・具体条件名なしで出さない。**中央値�
 | 伝播後 | サイト比 **≤ 1.2e-04**、生の収量 ≤ 1.5e-04 | **`scenario-sensitivity`** | `docs/notes/observable_propagation_2026-08-13.md:145` |
 | 観測量の s 帯別感度 | [0,0.5) 4.1e-03 / [1,2) 1.7e-04 / [2,4) 1.1e-05 / [4,6) **1.5e-09** / [6,10) **1.0e-15** / [10,∞) **0** | `direct-measurement` | `docs/notes/observable_propagation_2026-08-13.md:101-118` |
 | 尾根差を全部我々のものと仮定した F への伝播 | max\|ΔF\| 2.2e-02…4.8e-02 | `scenario-sensitivity` | `docs/handover/next_phase_2026-08-13.md:527-537` |
+| **v3 → v5 の処方差** (共通 246ch、内挿なし) | 最大 \|ΔF\| **1.68e-01**。s<2 帯最大の中央値 8.57e-03 | `direct-measurement` | `docs/notes/prescription_impact_2026-08-19.md` §2 |
+| 同、観測量への感度 | Al/Co 配置 **2.81e-03 / 5.67e-03**、全 246ch では **4.14e-02** (約 15 倍) | `scenario-sensitivity` | 同 §3 |
 
 ⚠⚠ **「サイト比なら共通誤差が打ち消える」はほぼ誤り** — 打ち消しは 1.1–1.2 倍だけ。
 生の収量では逆に **1.76 倍に増幅**する。
