@@ -17,6 +17,14 @@
 
 ## ⚠ 正本はまだ ReciPro 側 (dataset v3 は 2026-08-05 に完走・出荷済み)
 
+⚠ **2026-08-19 訂正: この節は v3 世代 (2026-08-05 時点) の記述で、現在は成り立たない**。
+**v4 以降の生成コードの正本は Temari** (`src/gen_production.jl`) である — 切替条件
+(層分割 P1/P2 の完了 + v3 本番生成の完走) は両方満たされ、dataset v4.0.0 (2026-08-08) と
+v5.0.0 は実際に Temari 側のコードから生成した。ReciPro 側 handout の
+`gen_production.jl` は v3 世代のミラーのままで v4/v5 を生成できない (既定処方が v3)。
+正本 = `src/prod_v4_jl/MANIFEST.md` / `src/prod_v5_jl/MANIFEST.md`。
+以下は履歴として残す。
+
 dataset v3 (246 チャネル) は完走し ReciPro ver4.946 で出荷済み。ただし生成コードの
 正本は引き続き ReciPro 側で、Temari を正本へ切り替えるのは層分割 (P1) 完了後。
 ReciPro との関係・取り込み判断の詳細は、リポジトリに含めない内部の作業文書で管理している。
@@ -26,6 +34,12 @@ ReciPro との関係・取り込み判断の詳細は、リポジトリに含め
   ファイル単位で差分を確認して手動コピーすること**
 
 ### `ionization.jl` の Temari 先行分 (handout へ戻す判断が要るもの)
+
+⚠ 2026-08-19 追記: 下表の「handout への配備」欄は v3 世代の計画。**v4 以降は Temari が
+正本なので、高速化・処方切替を handout へ戻す必要は無くなった** (handout は v3 凍結の
+ミラー。ReciPro へ配備するのは生成コードではなく生成済みデータ — `handout/prod_v4_jl/`
+等 — である)。下表の高速化・処方切替は Temari 側で v4/v5 の生成に使われた
+(`src/prod_v4_jl/MANIFEST.md` / `src/prod_v5_jl/MANIFEST.md`)。
 
 | 内容 | 種別 | handout への配備 |
 |---|---|---|
@@ -38,7 +52,7 @@ ReciPro との関係・取り込み判断の詳細は、リポジトリに含め
 
 ```bash
 cd src
-julia -t auto ionization.jl selftest        # 自己検証 (~10 秒)
+julia -t auto ionization.jl selftest        # 自己検証 (~50 秒。2026-08-19 更新: T6/T21/T22 等の追加で v0 当時の ~10 秒から伸びた。docs/src/en/cli.md と同値)
 julia -t auto ionization.jl refcheck        # Python 参照値との照合 (~1 分)
 julia -t auto ionization.jl 26 K 200 --quick
 

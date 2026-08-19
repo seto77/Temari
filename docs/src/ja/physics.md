@@ -35,7 +35,11 @@ $S$ は束縛状態と連続状態の間の遷移行列要素から組み立て�
 2 本のビームの組が生む 2 つの運動量移行 $(Q_+, Q_-)$ で評価されます。放出電子が
 どちらへ、どれだけの速さで出ていくかについて積分すると $N(K)$ が残り、それを
 $N(0)$ で割ると、非弾性像の非局在化を支配する符号つきの**形状** $F$ が得られます。
-$F(0) = 1$ に規格化されています。
+$F(0) = 1$ に規格化されています。結晶中では、これが EDX マップの方位依存性を
+Bloch 波シミュレーションで記述するのに必要な非対角量です。ALCHEMI (Atom Location by
+CHannelling-Enhanced MIcroanalysis) は、その特性 X 線収量の方位依存性からサイト
+占有率を求める手法で、Temari が供給するのはそのシミュレーションが使う形状因子で
+あって、占有率の精密化そのものは行いません。
 
 一緒に出荷される**絶対**断面積は、エンジン自身の値では*ありません*。
 Bote et al. (2009) の解析式から来るもので、この式は Bote & Salvat (2008) の
@@ -52,8 +56,8 @@ Bote et al. (2009) の解析式から来るもので、この式は Bote & Salva
 | $F(s, E_0)$ | 上の式全体を $K$ の格子上で計算し、$N(0)$ で規格化します |
 | $\mathrm{d}\sigma/\mathrm{d}\Delta E$ | $\varepsilon$ 積分の手前で止め、その被積分関数を $K = 0$ で評価して $4\gamma^2 a_0^2$ 倍したものを報告します。同じ被積分関数を $\Delta E$ と縮約すると、阻止能への寄与になります |
 | $\mathrm{d}f/\mathrm{d}\Delta E(Q)$ | 角度積分を丸ごと飛ばして $2\Delta E\, S(Q, Q, 1)/Q^2$ を報告します。$S$ は物理として $k_i$ や $k_f$ を一切参照しないので、**GOS は $E_0$ を持ちません** |
-| $\delta_l$ | 連続状態ソルバだけを中性原子の静的な場で使い、行列要素ではなく漸近フィットの位相を報告します |
-| Mott 弾性 | κ 分解の Dirac 位相からスピン保存振幅とスピン反転振幅を組み立て、$\mathrm{d}\sigma/\mathrm{d}\Omega$、$\sigma_{el}$、$\sigma_{tr}$、Sherman 関数を報告します |
+| $\delta_l$ | 連続状態ソルバだけを使い、行列要素ではなく漸近フィットの位相を報告します。散乱場の選び方は Mott 出口と同じです: 既定は中性原子の純静電場 `:static`、`--fm` で Furness–McCarthy の局所交換を足し、`--xapot` は比較用の標的 Xα 場です |
+| Mott 弾性 | κ 分解の Dirac 位相からスピン保存振幅とスピン反転振幅を組み立て、$\mathrm{d}\sigma/\mathrm{d}\Omega$、$\sigma_{el}$、$\sigma_{tr}$、Sherman 関数を報告します。散乱場は 3 つ選べますが、互換ではありません。**既定は `:static`** で、純静電の $-Z/r + V_H$ です。NIST SRD 64 (Powell et al., 2016) に対する $\sigma_{el}$ の比は 1 keV 以上で 0.90–0.94 ですが、低エネルギーの重元素では悪化します (Au の 100 eV で 0.667)。**`--fm`** は Furness–McCarthy の局所交換 (Furness & McCarthy, 1973) を足したもので、交換の*近似*であり、エネルギー依存で高エネルギーでは消えます。数 keV 以上ではほとんど変わりませんが、それより下では大きく動きます (Au の 100 eV で 0.912、全体のばらつきは 0.90–1.06)。⚠ この「縮まる」は試験した範囲で 1 つの参照に対して比べた結果であって、`--fm` のほうが物理として正確だという実証では**ありません**。⚠ **`--xapot`** (標的自身の Xα 交換) は比較専用です: 入射電子が感じる場ではなく、高エネルギーでも消えません。数値は [ロードマップ](roadmap.md#small-to-medium-effort) にあります |
 | $f_x(s), f_e(s)$ | 中性原子の密度を Fourier 変換し、Mott–Bethe の関係を適用します。イオン化チャネルもビームエネルギーも関わりません |
 
 イオン化の機構の上に組まれた 4 つの出口は、後述する処方の限界と、$\varepsilon$
@@ -302,12 +306,14 @@ $j_1$ で代わりに規格化します。その窓の外では命令列が変�
 - Bote, D. & Salvat, F. (2008). Calculations of inner-shell ionization by electron impact with the distorted-wave and plane-wave Born approximations. *Physical Review A* **77**, 042701.
 - Bote, D., Salvat, F., Jablonski, A. & Powell, C. J. (2009). Cross sections for ionization of K, L and M shells of atoms by impact of electrons and positrons with energies up to 1 GeV: Analytical formulas. *Atomic Data and Nuclear Data Tables* **95**, 871–909. Erratum: **97** (2011), 186.
 - Cromer, D. T. & Mann, J. B. (1968). X-ray scattering factors computed from numerical Hartree–Fock wave functions. *Acta Crystallographica A* **24**, 321–324.
+- Furness, J. B. & McCarthy, I. E. (1973). Semiphenomenological optical model for electron scattering on atoms. *Journal of Physics B* **6**, 2280–2291.
 - Kohn, W. & Sham, L. J. (1965). Self-consistent equations including exchange and correlation effects. *Physical Review* **140**, A1133–A1138.
 - Krieger, J. B., Li, Y. & Iafrate, G. J. (1992). Construction and application of an accurate local spin-polarized Kohn–Sham potential with integer discontinuity: Exchange-only theory. *Physical Review A* **45**, 101–126.
 - Latter, R. (1955). Atomic energy levels for the Thomas–Fermi and Thomas–Fermi–Dirac potential. *Physical Review* **99**, 510–519.
 - Olukayode, S., Froese Fischer, C. & Volkov, A. (2023). Revisited relativistic Dirac–Hartree–Fock X-ray scattering factors. I. Neutral atoms with Z = 2–118. *Acta Crystallographica A* **79**, 59–79.
 - Oxley, M. P. & Allen, L. J. (2000). Atomic scattering factors for K-shell and L-shell ionization by fast electrons. *Acta Crystallographica A* **56**, 470–490.
 - Peng, L.-M., Ren, G., Dudarev, S. L. & Whelan, M. J. (1996). Robust parameterization of elastic and absorptive electron atomic scattering factors. *Acta Crystallographica A* **52**, 257–276.
+- Powell, C. J., Jablonski, A., Salvat, F. & Lee, A. Y. (2016). *NIST Electron Elastic-Scattering Cross-Section Database, Version 4.0*. NIST Standard Reference Database 64 (NSRDS 64), National Institute of Standards and Technology, Gaithersburg. doi:10.6028/NIST.NSRDS.64
 - Slater, J. C. (1951). A simplification of the Hartree–Fock method. *Physical Review* **81**, 385–390.
 - Thorkildsen, G. (2023). New benchmarks in the modelling of X-ray atomic form factors. *Acta Crystallographica A* **79**, 318–330.
 - Waasmaier, D. & Kirfel, A. (1995). New analytical scattering-factor functions for free atoms and ions. *Acta Crystallographica A* **51**, 416–431.

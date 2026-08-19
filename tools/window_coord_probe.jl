@@ -96,6 +96,26 @@ function wc_nodes(d1_eV::Float64, d2_eV::Float64, n::Int, coord::Symbol)
             end
         end
         return (eps, we)
+    elseif coord === :sin2geo       # ★ 260819Cl: sin²θ 座標 × θ 上の等比パネル
+        # ε = ε_max sin²θ で両端の √ を正則化したうえで、θ を等比に P 分割する。
+        # θ₁ = 0 (Δ₁ = 0) のときは最下パネルを [0, θ₂·1e-4] に置く (`:geo` の ε 比 1e-8 と同じ)
+        em = WC_EMAX[]
+        em <= 0.0 && error("WC_EMAX が未設定")
+        P = WC_NPAN[]
+        t1 = asin(sqrt(clamp(e1/em, 0.0, 1.0)))
+        t2 = asin(sqrt(clamp(e2/em, 0.0, 1.0)))
+        lo = t1 > 0 ? t1 : t2 * 1e-4
+        edges = t1 > 0 ? (t1 .* (t2/t1) .^ range(0, 1, length=P+1)) :
+                         vcat(0.0, lo .* (t2/lo) .^ range(0, 1, length=P))
+        eps = Float64[]; we = Float64[]
+        for p in 1:(length(edges)-1)
+            a = edges[p]; h = edges[p+1] - a
+            for j in eachindex(x)
+                th = a + h*x[j]
+                push!(eps, em*sin(th)^2); push!(we, w[j]*h*em*sin(2.0*th))
+            end
+        end
+        return (eps, we)
     elseif coord === :ship          # 出荷の分岐そのもの
         return d1_eV == 0.0 ? (e2 .* x .^ 2, w .* 2.0 .* e2 .* x) :
                               (e1 .+ (e2 - e1) .* x, w .* (e2 - e1))
@@ -237,6 +257,80 @@ function main_width(args)
     return 0
 end
 
+"規則 `(coord, P, n)` で窓 [d1, d2] を積む (P は等比パネル数。単一規則なら無視)"
+function wc_rule(ch, r_core, k_i, T0, beta, d1, d2, coord::Symbol, P::Int, n::Int)
+    WC_NPAN[] = P
+    e, ww = wc_nodes(d1, d2, n, coord)
+    return wc_eval(ch, r_core, k_i, T0, beta, e, ww)
+end
+
+"""★★ 幅の実験 (第 2 版、260819Cl) — **基準を等比パネルに替える**。
+
+`--width` の基準 (ε 上の tanh-sinh) は**広い窓で自分が壊れていた**
+(`docs/notes/window_quadrature_2026-08-19.md` §7.4a、[[oracle-can-break-first]])。
+ここでは基準 = **√ε 等比 32×24 (768 点)**、基準の健全性は**別座標の sin²θ 等比 48×16
+(768 点)** との差で見る。両者が一致しない行は基準が信用できないので ⚠ を付ける。
+
+候補の規則:
+  出荷 GL16 / √ε 単一 GL512 / √ε 等比 16×16・16×24 / sin²θ 単一 GL256・GL512 /
+  sin²θ 等比 16×16・16×24
+
+Δ₁ ∈ {0, 0.01, 10} eV、幅 ∈ {1e3, 1e4, 1e5, 0.5·ε_max, 0.99·ε_max, **ε_max−Δ₁ (上端ちょうど)**}。
+⚠ 上端ちょうどの窓は kf → 0 の √ 分岐点が区間の端に来る (契約は Δ₂ = ε_max を許す)。"""
+function main_width2(args)
+    beta = 0.3e-3
+    rows = [(54, "M4", 400.0), (79, "M5", 200.0), (26, "K", 200.0),
+            (20, "M1", 400.0), (6, "K", 30.0)]
+    rules = [("出荷GL16", :ship, 1, 16), ("√εGL512", :sqrt, 1, 512),
+             ("√ε等比16x16", :geo, 16, 16), ("√ε等比16x24", :geo, 16, 24),
+             ("sin²GL256", :sin2, 1, 256), ("sin²GL512", :sin2, 1, 512),
+             ("sin²等比16x16", :sin2geo, 16, 16), ("sin²等比16x24", :sin2geo, 16, 24)]
+    println("★★ 窓の幅を契約の上限まで広げる (第 2 版) — 基準 = √ε 等比 32×24、健全性 = sin²θ 等比 48×16 との差")
+    println("  β = 0.3 mrad。⚠ 幅 = ε_max−Δ₁ は上端ちょうど (kf→0 の √ 分岐点が端に来る)\n")
+    worst = Dict{String,Float64}()
+    for (z, tag, e0) in rows
+        local ch, r_core, T0, k_i
+        try; ch, r_core, T0, k_i = wc_setup(z, tag, e0)
+        catch err; @printf("== Z=%d %s @%.0f keV ⚠ 飛ばす (%s)\n", z, tag, e0, sprint(showerror, err)); continue end
+        emax_Ha = T0 - ch.E_th
+        emax = emax_Ha * HARTREE_EV
+        WC_EMAX[] = emax_Ha
+        @printf("== Z=%d %s @%.0f keV  (ε_max = %.0f eV) ==\n", z, tag, e0, emax)
+        for d1 in (0.0, 0.01, 10.0)
+            ws = [1e3, 1e4, 1e5, 0.5*emax, 0.99*emax, emax - d1]
+            @printf("  Δ₁ = %.2f eV\n", d1)
+            @printf("    %11s %9s %10s |", "幅[eV]", "幅/ε_max", "基準健全性")
+            for r in rules; @printf(" %13s", r[1]); end
+            println()
+            for w in ws
+                d2 = d1 + w
+                d2 > emax + 1e-9*emax && continue
+                d2 > emax && (d2 = emax)
+                ref = wc_rule(ch, r_core, k_i, T0, beta, d1, d2, :geo, 32, 24)
+                ref2 = wc_rule(ch, r_core, k_i, T0, beta, d1, d2, :sin2geo, 48, 16)
+                san = reldiff(ref2, ref)
+                @printf("    %11.4g %9.4f %10.2e%s|", w, w/emax, san, san > 1e-7 ? "⚠" : " ")
+                for r in rules
+                    v = wc_rule(ch, r_core, k_i, T0, beta, d1, d2, r[2], r[3], r[4])
+                    rd = reldiff(v, ref)
+                    worst[r[1]] = max(get(worst, r[1], 0.0), rd)
+                    @printf(" %13.2e", rd)
+                end
+                println()
+                flush(stdout)
+            end
+        end
+        println()
+    end
+    println("  ★ まとめ (全条件の最悪。基準との差):")
+    for r in rules
+        @printf("    %-16s %10.2e\n", r[1], get(worst, r[1], NaN))
+    end
+    println("\n  読み方: 基準健全性に ⚠ が付いた行は基準どうしが 1e-7 以上食い違う = その行の数字は信用しない")
+    return 0
+end
+
 if abspath(PROGRAM_FILE) == abspath(@__FILE__)
-    exit("--width" in ARGS ? main_width(ARGS) : main_d1(ARGS))
+    exit("--width2" in ARGS ? main_width2(ARGS) :
+         "--width" in ARGS ? main_width(ARGS) : main_d1(ARGS))
 end

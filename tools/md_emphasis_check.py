@@ -218,6 +218,7 @@ def blocks(path):
     if buf: yield start, "\n".join(buf)
 
 def main(paths):
+    sys.stdout.reconfigure(encoding="utf-8")   # Windows の cp932 で和文の出力が落ちないように
     total = 0
     for p in paths:
         hits = []

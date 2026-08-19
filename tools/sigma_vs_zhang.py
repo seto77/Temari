@@ -534,6 +534,88 @@ def summarize(recs, skipped, n_bad, n_err, norm_bad, align):
     for r in worstc[:8]:
         print(f"  {r['elem']:>2} {r['tag']:<3} Z={r['z']:<3} 窓 {r['window']:>9} eV  "
               f"β {r['beta']:5.0f} mrad   検算 {r['check']:.2e}   比 {r['ratio']:.4f}")
+    return good
+
+
+# ★ 260819Cl: B1 (verification.md の外部比較を全格子へ) 用の層別集計。
+#   codex の条件 — 殻 / Z 帯 / 窓 / β ごとの層別、median・IQR・P5/P95、min/max と
+#   その具体的条件、除外件数。min/max だけを前面に出さない。
+def _zband(z):
+    if z <= 18:
+        return "Z 1–18"
+    if z <= 36:
+        return "Z 19–36"
+    if z <= 54:
+        return "Z 37–54"
+    if z <= 86:
+        return "Z 55–86"
+    return "Z 87–108"
+
+
+def _stat_row(label, sub):
+    """sub = 記録のリスト (同じ層)。markdown の 1 行を返す。"""
+    if not sub:
+        return None
+    s = sorted(sub, key=lambda r: r["ratio"])
+    v = [r["ratio"] for r in s]
+    lo, hi = s[0], s[-1]
+    def cond(r):
+        return f"{r['elem']} {r['tag']} [{r['window'].replace('-', ',')}] eV β={r['beta']:.0f}"
+    return (f"| {label} | {len(v)} | {v[0]:.4f} | {pct(v,0.05):.4f} | {pct(v,0.25):.4f} | "
+            f"{pct(v,0.5):.4f} | {pct(v,0.75):.4f} | {pct(v,0.95):.4f} | {v[-1]:.4f} | "
+            f"{cond(lo)} / {cond(hi)} |")
+
+
+def strata(good, n_total, n_dropped):
+    """合格した条件の層別 (markdown)。⚠ 6,300 条件は独立な 6,300 実験ではなく、
+    同じモデル・同じ参照 DB 上の相関した点である — そう書いたうえで出す。"""
+    hdr = ("| 層 | n | min | P5 | Q1 | median | Q3 | P95 | max | min の条件 / max の条件 |\n"
+           "|---|---:|---:|---:|---:|---:|---:|---:|---:|---|")
+    print(f"\n{'='*74}\n層別 (合格 {len(good)} / 全 {n_total}、除外 {n_dropped})\n{'='*74}")
+    blocks = [
+        ("全部", lambda r: "all"),
+        ("殻", lambda r: r["tag"]),
+        ("Z 帯", lambda r: _zband(r["z"])),
+        ("窓 [eV]", lambda r: "[" + r["window"].replace("-", ",") + "]"),
+        ("β [mrad]", lambda r: f"{r['beta']:.0f}"),
+    ]
+    order_tag = {t: i for i, t in enumerate(("K", "L1", "L2", "L3", "M1", "M2", "M3", "M4", "M5"))}
+    for title, key in blocks:
+        print(f"\n#### {title}\n\n{hdr}")
+        keys = sorted({key(r) for r in good},
+                      key=lambda k: (order_tag.get(k, 99), k) if title == "殻" else
+                                    (float(k) if title == "β [mrad]" else k))
+        for k in keys:
+            row = _stat_row(k, [r for r in good if key(r) == k])
+            row and print(row)
+    # 裾の分解: [0,50] eV と M4/M5 を除いた帯
+    def not_narrow(r):
+        return r["window"] != "0-50"
+    def not_m45(r):
+        return r["tag"] not in ("M4", "M5")
+    print(f"\n#### 裾の分解\n\n{hdr}")
+    for label, pred in (("[0,50] eV を除く", not_narrow), ("M4/M5 を除く", not_m45),
+                        ("両方除く", lambda r: not_narrow(r) and not_m45(r))):
+        row = _stat_row(label, [r for r in good if pred(r)])
+        row and print(row)
+
+
+def write_csv(good, path):
+    """合格した条件の比だけを CSV へ (第三者データの転記ではなく**比**。
+    作者決定 2026-08-17: 点ごとの比は公開してよい)。"""
+    import csv
+    rows = sorted(good, key=lambda r: (r["z"], r["tag"], r["window"], r["beta"]))
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["Z", "element", "channel", "delta1_eV", "delta2_eV", "beta_mrad",
+                    "sigma_ratio_db_over_temari", "reconstruction_check_rel",
+                    "clamp_weight_temari", "clamp_weight_db"])
+        for r in rows:
+            d1, d2 = r["window"].split("-")
+            w.writerow([r["z"], r["elem"], r["tag"], d1, d2, f"{r['beta']:.0f}",
+                        f"{r['ratio']:.6f}", f"{r['check']:.3e}",
+                        f"{r['clamp_ours']:.3e}", f"{r['clamp_theirs']:.3e}"])
+    print(f"\nCSV を書いた: {path} ({len(rows)} 行)")
 
 
 class PowerLawSurface:
@@ -678,7 +760,11 @@ def main(argv):
             print_detail(ent, recs, note)
         elif k % 25 == 0:
             print(f"\r  {k}/{len(ents)} …", end="", flush=True)
-    summarize(all_recs, skipped, n_bad, n_err, norm_bad, align)
+    good = summarize(all_recs, skipped, n_bad, n_err, norm_bad, align)
+    if good and "--strata" in argv:
+        strata(good, len(all_recs), len(all_recs) - len(good))
+    if good and "--csv" in argv:
+        write_csv(good, argv[argv.index("--csv") + 1])
     return 0
 
 

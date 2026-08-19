@@ -40,10 +40,17 @@ For anything that touches computation, also run the bit-identity snapshot
 **before and after** the change and paste the diff (empty diff = bit-identical):
 
 ```text
-julia +1.11 -t 4 tools/bitident_snapshot.jl before.txt   # BEFORE the change
-julia +1.11 -t 4 tools/bitident_snapshot.jl after.txt    # AFTER the change
+julia +1.11 -t 4 tools/bitident_snapshot.jl before.txt          # BEFORE the change (v2/v3, 5 channels)
+julia +1.11 -t 4 tools/bitident_snapshot.jl --v4 before4.txt    # BEFORE the change (v4 shipping, 7 channels)
+julia +1.11 -t 4 tools/bitident_snapshot.jl after.txt           # AFTER the change
+julia +1.11 -t 4 tools/bitident_snapshot.jl --v4 after4.txt     # AFTER the change
 diff before.txt after.txt
+diff before4.txt after4.txt
 ```
+
+Run **both** snapshots: the plain one guards the v2/v3 reproduction path, the
+`--v4` one the shipping path (it is the only one that exercises the Dirac
+continuum and the M shells).
 
 If the change is meant to alter values, also run a version with the change
 neutralised (a "null build") and confirm it is bit-identical to the old code -

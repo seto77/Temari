@@ -157,7 +157,8 @@ impossible は s = 15.0。
 }
 ```
 
-runner 側は `isnan(actual_bound)` を検査する。
+runner 側は `isnan(actual_bound)` を検査する
+(260819Cl: その runner = `tools/b8_make_vectors.jl --verify`、§9)。
 **凍結する意味論は 3 点** — F の返却値は 0 / region は `impossible` /
 **有限の上界は存在しない**。NaN の bit pattern ではない。
 
@@ -264,3 +265,87 @@ M4 の不発は説明できなくなって落ちる**。
 修正条項 1 (§2.2a) で足した C13 は、**足した直後は二実装が食い違った**
 (Δ = 8.4e-04〜3.3e-03)。それが曖昧さ 2 の発見につながった。
 ⚠ **ケースを足さなければ、この 3e-03 は誰にも見えないままだった**。
+
+---
+
+## 9. runner — 凍結 fixture の再生検査 (2026-08-19 追記) { #runner }
+
+§4 と §7 は「runner 側」と書きながら、**fixture を読み戻して検査する側を持っていなかった**
+(`tools/b8_make_vectors.jl` は `--compare` / `--negative` / `--emit` だけ)。
+⇒ 同ファイルに **`--verify <prod_dir> <fixture.json>`** を足した (260819Cl)。
+
+    julia +1.11 --project=. tools/b8_make_vectors.jl --verify src/prod_v5_jl verification/f_v5_postrelease_vectors.json
+
+**何をするか**:
+
+- fixture の各ベクトルを **fixture を作ったのと同じ評価器** (`tools/f_contract_oracle.jl`
+  の `oracle_f_at`) で出荷ディレクトリに対して評価し直す
+- F と `bound` は fixture 記載の `tolerance_rel` (= 1e-12) で相対比較、`region` は文字列の
+  完全一致、`bound_assertion: "is_nan"` は §4 どおり `isnan(actual)` の**述語**で検査
+- provenance: `dataset_version` を各チャネル JSON の同名欄と、`julia_oracle_sha256` を
+  今の `f_contract_oracle.jl` の SHA-256 と突き合わせ、食い違えば FAIL
+  (評価器が変わっていれば「同じ評価器で再生」の前提が崩れる)。`python_loader_sha256` は
+  verify が Python を呼ばないので**警告のみ**。§5 の `archive_sha256` は fixture に入って
+  いないので「記録あり/無し」を出すだけ (展開済みディレクトリとは比較できない)
+- ベクトルごとに PASS/FAIL を出し、終了コードは **全ベクトル PASS かつ provenance 一致の
+  ときだけ 0**
+
+⚠ **これは fixture と評価器の整合の回帰検査であって、B8 の独立性を足すものではない** (§1)。
+⚠ `src/prod_v5_jl/` は `.gitignore` (`prod*/`) なので **CI には載せられない** (リポ内の
+checkout だけでは走らない)。手元で fixture か評価器に触るたびに回す。
+
+### 9.1 実施記録 — 正常系と、負のテストで落ちることの実演
+
+**正常系** (2026-08-19、Julia 1.11.9、`src/prod_v5_jl` = dataset v5.0.0):
+
+```
+--- provenance ---
+  julia_oracle_sha256  一致  a98ab617a4f9…
+  python_loader_sha256 一致  28a012ff1126…
+--- vectors ---
+  PASS [ 1] K_Z6    C1 node x node                     E₀=  40.0000 s= 1.0000  Δ= 0.0e+00
+  ...
+  PASS [50] M5_Z86  C12 overvoltage node               E₀=  35.0000 s= 1.0000  Δ= 0.0e+00
+  dataset_version      fixture 5.0.0 vs チャネル JSON: 一致 (4 チャネル)
+--- summary ---
+  vectors: 50 PASS / 0 FAIL / 50 total   最大 Δ_F = 0.00e+00 (許容 1e-12)
+  provenance mismatches: 0
+  RESULT: PASS                                          (exit 0)
+```
+
+**50/50 PASS、Δ_F は全点 0.0** — 同じ評価器なので bit 同一で戻る (JSON の往復で
+倍精度が保たれていることの副産物の確認でもある)。
+
+**負のテスト 1 — 値と述語を故意に壊した複製** (scratchpad 上の `fixture_perturbed_values.json`。
+⚠ `verification/` の fixture は触っていない)。壊した 6 箇所と判定:
+
+| # | 壊し方 | 判定 |
+|---|---|---|
+| [3] K_Z6 C3 | F を相対 +1e-9 | **FAIL** (rel 1.00e-09) |
+| [15] K_Z26 C3 | F を相対 +5e-13 (許容の内側の対照) | PASS (Δ=5.0e-13) — 許容がゼロではなく宣言どおりであることの確認 |
+| [27] L2_Z20 C3 | F を相対 +3e-12 (許容の直上) | **FAIL** (rel 3.00e-12) |
+| [21] K_Z26 C10 | region `unrecorded` → `tabulated` | **FAIL** (region 不一致) |
+| [30] L2_Z20 C6 | bound 0 → 1e-6 | **FAIL** (bound rel 1.00e+00) |
+| [48] M5_Z86 C11 | `is_nan` → `value` (bound 0) | **FAIL** (bound is NaN but expected a value) |
+
+```
+  vectors: 45 PASS / 5 FAIL / 50 total   最大 Δ_F = 1.00e-09 (許容 1e-12)
+  provenance mismatches: 0
+  RESULT: FAIL                                          (exit 1)
+```
+
+**負のテスト 2 — provenance だけを壊した複製** (`julia_oracle_sha256` を全部 0 に):
+
+```
+--- provenance ---
+  ⚠ julia_oracle_sha256 不一致: fixture 000000000000… / 今 a98ab617a4f9…
+    ⇒ 評価器が fixture 生成時と違う。「同じ評価器で再生」の前提が崩れる (fixture を --emit で作り直すか、評価器を戻す)
+  vectors: 50 PASS / 0 FAIL / 50 total   最大 Δ_F = 0.00e+00 (許容 1e-12)
+  provenance mismatches: 1
+  RESULT: FAIL                                          (exit 1)
+```
+
+⇒ 3 種の故障 (値 / 領域ラベル・述語 / provenance) がそれぞれ別の経路で捕まり、
+終了コードも非ゼロになる。許容の内側 (5e-13) は通る。
+[[prove-the-check-can-fail]] / [[nonzero-exit-is-not-a-pass]] の規律どおり、
+**ここまで見せてから「runner がある」と言う**。

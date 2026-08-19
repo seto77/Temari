@@ -279,6 +279,102 @@ measured away from threshold and an order of magnitude less for the one
 near-threshold row — a scenario estimate for those rows, not an attribution and
 not a bound on the shipped tables.
 
+Two things the table above does not do should be said plainly. The "nine knobs,
+none moves the ridge by more than 8 %" statement is an observation on those four
+channels — the same four channels hid, until carbon was added, an angular
+quadrature failure that reaches relative error 1.00 (see below). And the band
+table skips the intermediate band 0.3 ≤ ρ < 0.8, which is never compared there
+although, for β = 100 mrad and 1000 eV windows, it carries up to 39 % of the
+partial cross section while the ridge band carries 0.00–5.79 % (≤ 2.42 % for
+β ≤ 30 mrad). The integrated comparison below includes that band, weighted as
+the experiment would weight it, but does not resolve it.
+
+### The partial cross section σ(β, Δ) against the same database, on every channel { #sigma-against-the-gos-database }
+
+The band-wise GOS ratio above and the ratio below are **different quantities**
+and must not be read as inverses of each other: one compares the surface cell by
+cell at fixed ρ; the other integrates both surfaces with the same kinematics,
+collection semi-angle β and edge-relative energy window [Δ₁, Δ₂] and compares
+the two partial cross sections σ(β, Δ). The second is what an EELS or
+(through the k-factor) an EDX measurement actually weights.
+
+The second comparison was run on **all 525 shipped channels (81 elements,
+Z = 6–86) × 4 windows ([0,50], [0,100], [0,200], [50,150] eV above the
+respective threshold) × 3 semi-angles (10, 30, 100 mrad) = 6,300 conditions**,
+at 200 keV, transverse kernel off on both sides (the database is longitudinal),
+our subshell occupancy convention applied to their per-shell data and checked
+against their `occupancy_ratio` attribute every time. Each condition passes two
+gates before its ratio is counted: the reconstruction check (our own σ rebuilt
+from our own GOS surface agrees with the directly quadratured σ to ≤ 3×10⁻³;
+worst 1.24×10⁻³), and the clamp weight (the fraction of σ carried by points
+outside either surface's tabulated range must be ≤ 10⁻³; ours is 0 everywhere
+after extending the ε grid down to 10⁻⁵ eV). **29 conditions were excluded**,
+all because the database's own grid (lower ε edge 0.01 eV) extrapolates too much
+weight for As and Se M4/M5; 6,271 remain. The angular quadrature of the comparison
+script is checked against a closed-form surface where a single Gauss–Legendre
+rule in t = sin²(θ/2) fails to relative error 1.00 at a·t_β ≳ 10⁴ (a·t_β reaches
+4.65×10⁵ in this sweep) and the log-x rule used agrees to 5.4×10⁻¹⁵ — the
+negative test is part of the script's self-test.
+
+Ratio σ_database / σ_Temari, stratified (n = number of conditions):
+
+| Stratum | n | min | P5 | Q1 | median | Q3 | P95 | max |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| **all** | 6271 | 0.4695 | 0.8392 | 0.9616 | **1.0240** | 1.0735 | 1.1388 | 2.3358 |
+| K | 540 | 1.0162 | 1.0405 | 1.0538 | 1.0771 | 1.1026 | 1.1367 | 1.2719 |
+| L1 | 804 | 0.8643 | 0.8966 | 0.9314 | 0.9752 | 1.0074 | 1.0577 | 1.1372 |
+| L2 | 804 | 0.8709 | 0.9756 | 1.0218 | 1.0549 | 1.0851 | 1.1383 | 1.3248 |
+| L3 | 804 | 0.8733 | 0.9783 | 1.0256 | 1.0597 | 1.0896 | 1.1422 | 1.3275 |
+| M1 | 684 | 0.6855 | 0.7530 | 0.8331 | 0.9180 | 1.0094 | 1.1651 | 1.4358 |
+| M2 | 684 | 0.7431 | 0.8846 | 0.9683 | 1.0203 | 1.0795 | 1.2080 | 1.4525 |
+| M3 | 684 | 0.7323 | 0.9020 | 0.9745 | 1.0206 | 1.0680 | 1.2006 | 1.4149 |
+| M4 | 634 | 0.5361 | 0.8074 | 0.9259 | 1.0065 | 1.0547 | 1.1136 | 2.3358 |
+| M5 | 633 | 0.4695 | 0.7816 | 0.9238 | 1.0061 | 1.0538 | 1.1131 | 2.3012 |
+| Z 1–18 | 156 | 1.0367 | 1.0479 | 1.0760 | 1.1066 | 1.1309 | 1.2070 | 1.2719 |
+| Z 19–36 | 1147 | 0.7990 | 0.9260 | 1.0015 | 1.0481 | 1.0977 | 1.2324 | 1.4358 |
+| Z 37–54 | 1896 | 0.8084 | 0.9042 | 0.9898 | 1.0269 | 1.0723 | 1.1232 | 1.2469 |
+| Z 55–86 | 3072 | 0.4695 | 0.7850 | 0.9210 | 1.0062 | 1.0597 | 1.1154 | 2.3358 |
+| window [0,50] eV | 1563 | 0.4695 | 0.7872 | 0.9089 | 0.9948 | 1.0605 | 1.1449 | 2.3358 |
+| window [0,100] eV | 1564 | 0.6332 | 0.8418 | 0.9629 | 1.0165 | 1.0679 | 1.1337 | 1.8324 |
+| window [0,200] eV | 1569 | 0.7315 | 0.8744 | 0.9810 | 1.0277 | 1.0708 | 1.1352 | 1.5713 |
+| window [50,150] eV | 1575 | 0.7401 | 0.8966 | 0.9995 | 1.0481 | 1.0814 | 1.1350 | 1.3767 |
+| β = 10 mrad | 2090 | 0.4863 | 0.8897 | 1.0205 | 1.0721 | 1.1062 | 1.2061 | 2.3358 |
+| β = 30 mrad | 2090 | 0.4778 | 0.8456 | 0.9831 | 1.0245 | 1.0680 | 1.1108 | 2.2521 |
+| β = 100 mrad | 2091 | 0.4695 | 0.8016 | 0.9193 | 0.9786 | 1.0254 | 1.0708 | 2.1888 |
+| excluding [0,50] eV | 4708 | 0.6332 | 0.8691 | 0.9806 | 1.0286 | 1.0754 | 1.1346 | 1.8324 |
+| excluding M4/M5 | 5004 | 0.6855 | 0.8620 | 0.9699 | 1.0277 | 1.0772 | 1.1453 | 1.4525 |
+| excluding both | 3753 | 0.7245 | 0.8718 | 0.9782 | 1.0307 | 1.0774 | 1.1388 | 1.4178 |
+
+How to read it, and what not to read into it:
+
+- The **median and the interquartile range barely move** under any cut
+  (median 1.02–1.03, IQR ≈ 0.96–1.08); what widens is the tail, and the tail is
+  one combination — **M4/M5 × the narrowest window [0,50] eV**. The two extremes
+  are the opposite way round: the maximum 2.3358 is Ba M4 [0,50] eV at 10 mrad,
+  the minimum 0.4695 is Yb M5 [0,50] eV at 100 mrad (their reconstruction checks
+  are 1.2×10⁻⁴ and 8.8×10⁻⁵, so this is not a quadrature artefact: the two GOS
+  surfaces genuinely differ there). Both are 3d edges in the first 50 eV, where
+  the empty 4f levels shape the onset — the place an atomic model is most
+  exposed, though that was not measured, only observed.
+- **K shells are systematically above 1** (all 540 conditions, 1.016–1.272).
+  Aligned on absolute loss instead of edge-relative windows, K tightens to
+  0.972–1.157 (median 1.021), so part of that offset is the threshold convention
+  (we use the Bote–Salvat edge, the database its own computed threshold, 1.5–3.3 %
+  lower).
+- The 6,271 conditions are **not 6,271 independent experiments**. They are
+  correlated points on one model and one reference database; the spread measures
+  the disagreement between two calculations, not the accuracy of either.
+- **This is a comparison the author ran against an external dataset, not a
+  third-party verification.** Per-condition ratios (only ratios — no values from
+  the database are reproduced) are in
+  [`verification/sigma_ratio_zhang_2026-08-19.csv`](https://github.com/seto77/Temari/blob/main/verification/sigma_ratio_zhang_2026-08-19.csv);
+  the measurement record is `docs/notes/external_gate_2026-08-19.md`, the script
+  `tools/sigma_vs_zhang.py` (it reads the CC-BY database from `refs/`, which is
+  not in the repository).
+- An earlier internal draft of the σ(β, Δ) contract quoted "0.83–1.11" for this
+  ratio. That was the four-channel value (Fe K, Fe L1, Au L3, Au M5); it did not
+  represent the full set and is withdrawn.
+
 Both comparisons were performed locally during development. **Neither the
 published tables, the fitted coefficients, nor the GPL-code output is included in
 this repository**, in any form — see
@@ -450,10 +546,13 @@ edge energies must come from Bote–Salvat or every row shifts.
 
 ## Open items
 
-- **The Bethe-ridge discrepancy in the GOS** (above) is unexplained; the next
-  measurements are the two channels whose comparison window straddles the ridge
-  on both sides (Fe L1, Au M5), where the difference is one of shape rather than
-  amplitude.
+- **The Bethe-ridge discrepancy in the GOS** (above) is unexplained. It is no
+  longer a blocker for the partial cross section — the integrated σ(β, Δ)
+  comparison on every channel (above) is what gates that, and the ridge band
+  carries at most a few percent of it — but whether to pursue the cause further
+  (the two channels whose comparison window straddles the ridge on both sides,
+  Fe L1 and Au M5, where the difference is one of shape rather than amplitude)
+  or to record it as an unexplained discrepancy is an open decision.
 - **The oscillator-strength sum rule as a diagnostic.** T11 verifies it; what is
   still worth building on top of it is the intended use — the deficit against the
   occupancy at low $Q$ is a direct measure of the missing white-line strength,

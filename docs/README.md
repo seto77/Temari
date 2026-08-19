@@ -208,7 +208,7 @@ mechanical — **filenames are unchanged**, so `docs/foo.md` is now one of
 `docs/notes/foo.md`, `docs/handover/foo.md` or `docs/release/foo.md`, and the
 table above says which.
 
-Five places still spell the old flat paths, deliberately. **Do not "finish the
+Three places still spell the old flat paths, deliberately. **Do not "finish the
 job" by running a sed over them** — each one is load-bearing:
 
 | Where | Why it was not updated |
@@ -216,14 +216,20 @@ job" by running a sed over them** — each one is load-bearing:
 | `src/*.jl` comments and provenance strings (34 references across 11 files) | Every byte of `src/` feeds the source fingerprint recorded in generated datasets, and `physics_pointer` is written verbatim into the shipped JSON. Editing them would make a regenerated table differ from the released one. |
 | Released dataset trees under `src/prod_*` — the JSON files **and** their `MANIFEST.md` (15 distinct filenames) | Published data, frozen by SHA-256. |
 | `schema/temari_dataset_v2.schema.json` | Packaged into the release archive; see the warning above. |
-| `tools/temari_factors_contract.py` | Likewise packaged. |
-| ⚠ **`tools/certify_sigma.jl` and `tools/beta_spike.jl` (7 references) — while a certification fleet is running** | `cert_fingerprint()` hashes the CRLF-normalized bytes of *both* files into `CERT_FP`, stamps it on every row, and the resume filter and the summary census key off it. Change one byte and a restarted lane stops seeing the rows already written. |
 
-That last row is the dangerous one, because those two files sit in `tools/` next
-to two dozen others that *were* updated, so they look like an oversight. They are
-not. As of 2026-08-19 a σ(β, Δ) fleet is mid-run with `CERT_FP` =
-`2061dc7e3c5fcbf6` and roughly fourteen thousand rows behind it. Check before
-touching:
+Two further entries used to sit in this table and were cleared on 2026-08-19
+(commit `ae82361`), after the certification fleet had finished:
+
+| Where | Status |
+| --- | --- |
+| `tools/temari_factors_contract.py` | Its one old path (a docstring pointer added 2026-08-18, *after* dataset-factors v1.0.0 was packaged — the copy inside that archive carries no `docs/` pointer at all) was updated in `ae82361`. The archive is unaffected. |
+| ⚠ **`tools/certify_sigma.jl` and `tools/beta_spike.jl` (7 references)** | Updated in `ae82361`, once the σ(β, Δ) fleet was over. **The constraint re-applies whenever a certification fleet is running**: `cert_fingerprint()` hashes the CRLF-normalized bytes of *both* files into `CERT_FP`, stamps it on every row, and the resume filter and the summary census key off it. Change one byte mid-run and a restarted lane stops seeing the rows already written. |
+
+That last row is the one to remember, because those two files sit in `tools/`
+next to two dozen others and any edit to them looks harmless. The 2026-08-19
+σ(β, Δ) run **completed** (14,796 rows, 236,728 windows, 16 h 44 m, `CERT_FP` =
+`2061dc7e3c5fcbf6`; `docs/notes/certification_2026-08-19.md` §4) — which is why
+the fix could land. Before touching either file while a fleet is running, check:
 
 ```bash
 grep -ho '"cert_fp":"[0-9a-f]*"' ../cert_sigma_v1_lane*.jsonl | sort | uniq -c
@@ -231,8 +237,8 @@ grep -ho '"cert_fp":"[0-9a-f]*"' ../cert_sigma_v1_lane*.jsonl | sort | uniq -c
 
 More than one fingerprint in that census means the run has already been split by
 an edit (or by a deliberate code fix) and the rows are keyed to different code.
-Bring these two into line only once no fleet is running, and apply the rename
-together with the `--accept-fp <old fp>` migration the file itself describes.
+Edit these two only once no fleet is running, or apply the change together with
+the `--accept-fp <old fp>` migration the file itself describes.
 
 **Released artifacts stay as they are, permanently.** A pointer recorded in one
 of them is a historical path: check out the generator commit it names and the
@@ -247,6 +253,11 @@ wrong and are corrected in the release description rather than in the file:
 dataset-factors v1.0.0 has **no DOI** (the text promises one), and its exchange
 is the **exchange-only KLI approximation to the OEP**, not "exact exchange in
 the KLI approximation". Fix both in the next dataset-factors release.
+(2026-08-19: the **repository copy** of that README now carries both corrections,
+with an HTML comment recording what the v1.0.0 archive says — the repository
+copy had already diverged from the archive on 2026-08-18, when the
+`--values-from` section was added, so the archive is the only frozen copy. The
+archive itself is not rebuilt; its bytes and SHA-256 stay canonical.)
 
 ## Working rules
 

@@ -215,8 +215,11 @@ Recorded because they look plausible and cost time to disprove:
   worth roughly 1.2× end to end. **Not bit-identical** (the start order moves the
   values by about 10⁻¹³ relative), so it is held for a generation that already
   changes the quadrature.
-- **Sixteen further audited candidates** without a verdict yet, catalogued in
-  `docs/notes/speedup_audit_2026-08-05.json`.
+- **Six further audited candidates** without a verdict yet, catalogued in
+  `docs/notes/speedup_audit_2026-08-05.json` (the ledger also records, as of
+  2026-08-19, which of the once-open items were adopted in v4, superseded by
+  the 2026-08-05 angular-side rewrite, or deferred with the λ truncation
+  above).
 
 Measured and **rejected**: pre-filtering the insignificant partial waves before
 building them. 95–99 % of them survive the significance filter, so there is

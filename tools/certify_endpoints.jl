@@ -29,7 +29,13 @@ certify_endpoints.jl — 動径格子の**端点切断**を測る (事前登録 
 
     julia tools/certify_endpoints.jl 79 --stage 1            # 粗い dt でスクリーニング
     julia tools/certify_endpoints.jl 79 --stage 5 --deep     # 採用格子 + r0/100・rmax×2
-    julia tools/certify_endpoints.jl --aggregate DIR
+    python tools/endpoints_aggregate.py DIR [--stage1] [--md out.md]   # 集計 (既定 = deep、--stage1 で 1 段目)
+
+⚠ 以前ここに書いてあった `--aggregate DIR` は**ヘッダに書かれているだけで未実装**だった
+(`main` は解釈しない)。集計は `tools/endpoints_aggregate.py` (260816Cl 新設) で行う
+(2026-08-19 ヘッダ訂正。コードは不変。⚠ この訂正で以後の出力 JSON の `tool_sha256` は
+変わる — 既存の `ep_zNNN_*.json` が持つ値は frozen worktree で走らせた当時の実物で、
+それ自体は正しい)。
 =====================================================================#
 using Printf
 

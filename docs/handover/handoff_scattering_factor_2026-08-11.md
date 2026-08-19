@@ -378,7 +378,7 @@ codex との議論は `c:\tmp` に残っている (リポジトリ外):
 申し送り §3 の「v5 成果物に v3 由来の SRC 文言が残っていないか」を監査した。
 
 - `src/prod_v5_jl/*.json`・`tables/`・`docs/src/`・`README.md`・`CITATION.cff` を走査
-- **取り違えは無い。**JSON に出る "SRC" は `validated` の
+- **取り違えは無い**。JSON に出る "SRC" は `validated` の
   「**v4 が v3 の SRC を置き換えた**」という**正しい履歴記述**だけ。
   `prescription.continuum` は `kappa-resolved Dirac`、
   `model_id` は `…-KDIRAC2C-…-v4-DSCF`

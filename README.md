@@ -14,7 +14,11 @@ Temari publishes the signed inner-shell ionization form factor F(s, E₀): the
 normalized off-diagonal shape obtained by contracting the mixed dynamic form
 factor over the ejected electron's energy and direction, for two Bloch waves
 separated by K = 4πs·a₀. It is the off-diagonal response needed to model how an
-EDX map depends on crystal orientation. **525
+EDX map depends on crystal orientation. ALCHEMI (Atom Location by
+CHannelling-Enhanced MIcroanalysis) estimates site occupancy from
+orientation-dependent characteristic X-ray yields; Temari supplies the
+off-diagonal ionization shape factors used by the downstream Bloch-wave
+simulation, and does not perform the occupancy refinement itself. **525
 channels (K, L1–L3, M1–M5), 14,796 rows, s ≤ 16 Å⁻¹**, published as
 [dataset v5.0.0](https://doi.org/10.5281/zenodo.21872050) under CC-BY-4.0, with
 an executable data contract. Using the tables does not require Julia.
@@ -190,8 +194,9 @@ Three tiers, all reproducible from this repository:
 Reference data used during development (published tables, GPL code output) is
 **not included** in this repository.
 
-Every push runs `selftest`, the kernel bit-identity checks and a gated
-`refcheck` on Linux and Windows, against Julia 1.11.9 and 1.12.
+Every push that touches code runs `selftest` on Linux and Windows against Julia
+1.11.9 and 1.12, and — on Linux, Julia 1.11.9 — the kernel bit-identity checks,
+a gated `refcheck` and the small-component gate (`.github/workflows/ci.yml`).
 
 ## Contributing
 

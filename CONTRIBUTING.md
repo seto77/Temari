@@ -126,14 +126,21 @@ For anything that touches a computation, add the end-to-end bit-identity check.
 **Take the "before" snapshot first** — you cannot reconstruct it afterwards:
 
 ```powershell
-julia -t 4 tools/bitident_snapshot.jl before.txt   # BEFORE your change
+julia -t 4 tools/bitident_snapshot.jl before.txt          # BEFORE your change (v2/v3 prescriptions, 5 channels)
+julia -t 4 tools/bitident_snapshot.jl --v4 before4.txt    # BEFORE your change (v4 shipping prescription, 7 channels)
 # ... make the change ...
 julia -t 4 tools/bitident_snapshot.jl after.txt
-diff before.txt after.txt                          # empty = bit-identical
+julia -t 4 tools/bitident_snapshot.jl --v4 after4.txt
+diff before.txt after.txt                                 # empty = bit-identical
+diff before4.txt after4.txt
 ```
 
-The snapshot covers five channels chosen to span light/heavy elements, K and L3,
-and both continuum models. It prints every value with a round-trippable
+**Run both.** The plain snapshot covers five channels chosen to span light/heavy
+elements, K and L3, and both continuum models of the v2/v3 prescriptions — it
+guards the reproduction path. The `--v4` snapshot covers seven channels of the
+v4 shipping prescription (κ-resolved Dirac continuum, Dirac SCF, including
+M1 = 3s and M5 = 3d) — it guards the shipping path, which the five-channel set
+does not exercise. Both print every value with a round-trippable
 representation, so a text diff is equivalent to a `===` comparison on `Float64`.
 
 If your change is *supposed* to alter values, also build a version with the

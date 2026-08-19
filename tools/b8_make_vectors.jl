@@ -14,9 +14,24 @@ the published archive" である。
     julia -t 1 tools/b8_make_vectors.jl --compare <prod_dir>   # 二実装の突き合わせ
     julia -t 1 tools/b8_make_vectors.jl --negative <prod_dir>  # 負のミュータント
     julia -t 1 tools/b8_make_vectors.jl --emit <prod_dir> <out.json>
+    julia -t 1 tools/b8_make_vectors.jl --verify <prod_dir> <fixture.json>   # 260819Cl 追加
 
 ⚠ `--emit` は `--compare` と `--negative` が通ってからでないと意味がない。
 一致しなかったケースは fixture に**入れない** (事前登録 §2.3)。
+
+260819Cl: `--verify` = **凍結済み fixture の再生検査 (runner)**。fixture の各ベクトルを
+**生成に使ったのと同じ評価器** (`f_contract_oracle.jl`) で出荷ディレクトリに対して
+評価し直し、F と bound は相対 `tolerance_rel` (fixture 記載、無ければ 1e-12) で、
+`region` / `bound_assertion` (`is_nan` 述語) は完全一致で比べる。
+provenance も見る: `dataset_version` は各チャネル JSON の同名欄と、
+`julia_oracle_sha256` は今の `f_contract_oracle.jl` の SHA-256 と突き合わせ、
+どちらかが食い違えば FAIL (評価器が変わったなら「同じ評価器」という前提が崩れる
+ので、fixture を作り直すか評価器を戻す)。`python_loader_sha256` は
+**verify が Python を呼ばない**ので食い違っても警告止まり。終了コードは
+全ベクトル PASS かつ provenance 一致のときだけ 0。
+⚠ これは fixture と評価器の**整合の回帰検査**であって、B8 の独立性を足すものではない
+(事前登録 §1)。⚠ **負のテストで落ちることを実演してから「効いている」と言う**
+(`docs/notes/b8_preregistration_2026-08-19.md` §9)。
 =====================================================================#
 
 include(joinpath(@__DIR__, "f_contract_oracle.jl"))
@@ -231,8 +246,166 @@ function negative(dir::AbstractString)
     return nfail
 end
 
+# ---------------------------------------------------------------------
+# 260819Cl: --verify — 凍結 fixture を同じ評価器で再生して突き合わせる runner
+# ---------------------------------------------------------------------
+
+"""fixture の 1 ベクトルを再評価して、(ok, 理由文字列, Δ_F) を返す。
+
+判定規則 (事前登録 §3・§4 のまま):
+  * F …… 相対 `tol` (両方が |·| < 1e-300 なら一致扱い — `--compare` と同じ)
+  * bound …… `bound_assertion == "is_nan"` なら `isnan(actual)` の**述語**、
+              `"value"` なら相対 `tol`
+  * region …… 文字列の完全一致
+⚠ 評価器が例外を投げたら、それもそのベクトルの FAIL (runner 全体は止めない)。"""
+function verify_vector(ch::Dict{String,Any}, v::Dict{String,Any}, tol::Float64)
+    e0 = Float64(v["e0_keV"])
+    s = Float64(v["s_A_inv"])
+    ex = v["expected"]::Dict{String,Any}
+    exF = Float64(ex["F"])
+    exr = String(ex["region"])
+    assertion = String(get(ex, "bound_assertion", "value"))
+    local af, ab, ar
+    try
+        (af, ab, ar) = oracle_f_at(ch, e0, s)
+    catch err
+        return (false, "oracle threw: $(sprint(showerror, err))", NaN)
+    end
+    reasons = String[]
+    dF = _rel(af, exF)
+    okF = (dF <= tol) || (abs(af) < 1e-300 && abs(exF) < 1e-300)
+    okF || push!(reasons, @sprintf("F %.17g vs expected %.17g (rel %.2e)", af, exF, dF))
+    (ar == exr) || push!(reasons, "region \"$ar\" vs expected \"$exr\"")
+    if assertion == "is_nan"
+        isnan(ab) || push!(reasons, @sprintf("bound %.17g but expected is_nan", ab))
+    elseif assertion == "value"
+        exb = ex["bound"]
+        if exb === nothing
+            push!(reasons, "expected bound is null but assertion is \"value\"")
+        elseif isnan(ab)
+            push!(reasons, "bound is NaN but expected a value")
+        else
+            db = _rel(ab, Float64(exb))
+            okb = (db <= tol) || (abs(ab) < 1e-300 && abs(Float64(exb)) < 1e-300)
+            okb || push!(reasons, @sprintf("bound %.17g vs expected %.17g (rel %.2e)",
+                                            ab, Float64(exb), db))
+        end
+    else
+        push!(reasons, "unknown bound_assertion \"$assertion\"")
+    end
+    return (isempty(reasons), join(reasons, "; "), dF)
+end
+
+"""凍結 fixture を `dir` の出荷データに対して再生する。戻り値は失敗数 (0 = 全 PASS)。"""
+function verify(dir::AbstractString, fixture_path::AbstractString)
+    doc = parse_json_file(String(fixture_path))
+    vecs = doc["vectors"]::Vector{Any}
+    tol = haskey(doc, "tolerance_rel") ? Float64(doc["tolerance_rel"]) : B8_TOL
+    println("fixture  = $fixture_path")
+    println("dataset  = $dir")
+    @printf("tolerance (rel) = %.0e  (%s)\n", tol,
+            haskey(doc, "tolerance_rel") ? "fixture 記載" : "既定 B8_TOL")
+    println("evaluator = tools/f_contract_oracle.jl (fixture を作ったのと同じ評価器)")
+
+    # ---- provenance ----
+    nprov = 0
+    println("\n--- provenance ---")
+    # dataset_version: チャネル JSON の同名欄と突き合わせる (下でチャネルごとに)
+    if haskey(doc, "julia_oracle_sha256")
+        cur = bytes2hex(sha256(read(joinpath(@__DIR__, "f_contract_oracle.jl"))))
+        rec = String(doc["julia_oracle_sha256"])
+        if cur == rec
+            println("  julia_oracle_sha256  一致  $(cur[1:12])…")
+        else
+            nprov += 1
+            println("  ⚠ julia_oracle_sha256 不一致: fixture $(rec[1:12])… / 今 $(cur[1:12])…")
+            println("    ⇒ 評価器が fixture 生成時と違う。「同じ評価器で再生」の前提が崩れる " *
+                    "(fixture を --emit で作り直すか、評価器を戻す)")
+        end
+    else
+        println("  julia_oracle_sha256  (fixture に無い)")
+    end
+    if haskey(doc, "python_loader_sha256")
+        pyp = joinpath(@__DIR__, "temari_contract.py")
+        if isfile(pyp)
+            cur = bytes2hex(sha256(read(pyp)))
+            rec = String(doc["python_loader_sha256"])
+            if cur == rec
+                println("  python_loader_sha256 一致  $(cur[1:12])…")
+            else
+                println("  ⚠ python_loader_sha256 不一致 (警告のみ — verify は Python を呼ばない): " *
+                        "fixture $(rec[1:12])… / 今 $(cur[1:12])…")
+            end
+        else
+            println("  python_loader_sha256 (tools/temari_contract.py が無いので未検査)")
+        end
+    else
+        println("  python_loader_sha256 (fixture に無い)")
+    end
+    # 将来の fixture が archive_sha256 (事前登録 §5) を持っていても、出荷ディレクトリ
+    # 側には比べる相手 (tarball) が無いので、ここでは記録するだけ
+    haskey(doc, "archive_sha256") &&
+        println("  archive_sha256       記録あり $(String(doc["archive_sha256"])[1:12])… (展開済みディレクトリとは比較不能。記録のみ)")
+    fx_dsv = haskey(doc, "dataset_version") ? String(doc["dataset_version"]) : nothing
+    fx_dsv === nothing && println("  dataset_version      (fixture に無い)")
+
+    # ---- vectors ----
+    cache = Dict{String,Dict{String,Any}}()
+    chan_dsv_checked = Set{String}()
+    nfail = 0
+    npass = 0
+    worst = 0.0
+    println("\n--- vectors ---")
+    for (k, vv) in enumerate(vecs)
+        v = vv::Dict{String,Any}
+        cid = String(v["channel_id"])
+        label = @sprintf("[%2d] %-7s %-34s E₀=%9.4f s=%7.4f", k, cid, String(v["case"]),
+                         Float64(v["e0_keV"]), Float64(v["s_A_inv"]))
+        if !haskey(cache, cid)
+            p = _chan_path(dir, cid)
+            if !isfile(p)
+                nfail += 1
+                println("  FAIL $label  — チャネルファイルが無い: $p")
+                continue
+            end
+            cache[cid] = oracle_load(p)
+            if fx_dsv !== nothing && !(cid in chan_dsv_checked)
+                push!(chan_dsv_checked, cid)
+                raw = parse_json_file(String(p))
+                dv = haskey(raw, "dataset_version") ? String(raw["dataset_version"]) : "(無い)"
+                if dv != fx_dsv
+                    nprov += 1
+                    println("  ⚠ dataset_version 不一致 ($cid): fixture $fx_dsv / チャネル JSON $dv")
+                end
+            end
+        end
+        ok, why, dF = verify_vector(cache[cid], v, tol)
+        isfinite(dF) && (worst = max(worst, dF))
+        if ok
+            npass += 1
+            println("  PASS $label  Δ=$(@sprintf("%8.1e", dF))")
+        else
+            nfail += 1
+            println("  FAIL $label  — $why")
+        end
+    end
+    if fx_dsv !== nothing
+        println("\n  dataset_version      fixture $fx_dsv vs チャネル JSON: " *
+                (nprov == 0 ? "一致 ($(length(chan_dsv_checked)) チャネル)" : "不一致あり (上記)"))
+    end
+
+    # ---- summary ----
+    println("\n--- summary ---")
+    @printf("  vectors: %d PASS / %d FAIL / %d total   最大 Δ_F = %.2e (許容 %.0e)\n",
+            npass, nfail, length(vecs), worst, tol)
+    @printf("  provenance mismatches: %d\n", nprov)
+    total_fail = nfail + nprov
+    println(total_fail == 0 ? "  RESULT: PASS" : "  RESULT: FAIL")
+    return total_fail
+end
+
 function main(args::Vector{String})
-    isempty(args) && (println("usage: --compare|--negative|--emit <prod_dir> [out]"); return 2)
+    isempty(args) && (println("usage: --compare|--negative|--emit|--verify <prod_dir> [out|fixture]"); return 2)
     mode = args[1]
     dir = length(args) >= 2 ? args[2] : "src/prod_v5_jl"
     if mode == "--compare"
@@ -240,6 +413,10 @@ function main(args::Vector{String})
         return nok == nall ? 0 : 1
     elseif mode == "--negative"
         return negative(dir) == 0 ? 0 : 1
+    elseif mode == "--verify"
+        length(args) >= 3 || (println("--verify には fixture.json が要る"); return 2)
+        isfile(args[3]) || (println("fixture が無い: $(args[3])"); return 2)
+        return verify(dir, args[3]) == 0 ? 0 : 1
     elseif mode == "--emit"
         length(args) >= 3 || (println("--emit には出力先が要る"); return 2)
         rows, nok, nall = compare(dir; verbose = false)

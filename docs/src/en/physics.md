@@ -37,7 +37,12 @@ and the continuum state, taken at the two momentum transfers $(Q_+, Q_-)$ that
 a pair of beams separated by $K$ produce. Integrating over where the ejected electron
 goes and how fast leaves $N(K)$, and dividing by $N(0)$ gives the signed
 **shape** $F$ that governs the delocalization of the inelastic image,
-normalized to $F(0) = 1$.
+normalized to $F(0) = 1$. In a crystal this is the off-diagonal response that a
+Bloch-wave simulation needs to model how an EDX map depends on orientation;
+ALCHEMI (Atom Location by CHannelling-Enhanced MIcroanalysis) estimates site
+occupancy from that orientation dependence of the characteristic X-ray yields,
+and Temari supplies the shape factors that simulation consumes — it does not
+perform the occupancy refinement itself.
 
 The **absolute** cross section that is shipped alongside it is *not* the
 engine's own value. It comes from the analytic formulas of Bote et al. (2009),
@@ -55,8 +60,8 @@ knows which one is running.
 | $F(s, E_0)$ | The full expression above, on a grid of $K$, normalized by $N(0)$ |
 | $\mathrm{d}\sigma/\mathrm{d}\Delta E$ | Stops before the $\varepsilon$ integral and reports its integrand at $K = 0$, times $4\gamma^2 a_0^2$. Contracting that same integrand against $\Delta E$ gives the stopping-power contribution |
 | $\mathrm{d}f/\mathrm{d}\Delta E(Q)$ | Skips the angular integral entirely and reports $2\Delta E\, S(Q, Q, 1)/Q^2$. Since $S$ never references $k_i$ or $k_f$ as physics, **the GOS carries no $E_0$** |
-| $\delta_l$ | Uses only the continuum solver, in the neutral atom's static field, and reports the phase of the asymptotic fit rather than a matrix element |
-| Mott elastic | Builds the spin-preserving and spin-flip amplitudes from κ-resolved Dirac phases and reports $\mathrm{d}\sigma/\mathrm{d}\Omega$, $\sigma_{el}$, $\sigma_{tr}$ and the Sherman function |
+| $\delta_l$ | Uses only the continuum solver and reports the phase of the asymptotic fit rather than a matrix element. The scattering field is the same choice as for the Mott exit: the neutral atom's purely electrostatic field `:static` by default, `--fm` to add the Furness–McCarthy local exchange, `--xapot` for the target-Xα comparison field |
+| Mott elastic | Builds the spin-preserving and spin-flip amplitudes from κ-resolved Dirac phases and reports $\mathrm{d}\sigma/\mathrm{d}\Omega$, $\sigma_{el}$, $\sigma_{tr}$ and the Sherman function. Three scattering fields are available and they are not interchangeable. **`:static` is the default** — the purely electrostatic $-Z/r + V_H$; against NIST SRD 64 (Powell et al., 2016) its $\sigma_{el}$ ratio sits at 0.90–0.94 above 1 keV and degrades at low energy for heavy elements (Au at 100 eV: 0.667). **`--fm`** adds the Furness–McCarthy local exchange (Furness & McCarthy, 1973) — an exchange *approximation*, energy-dependent and vanishing at high energy; it changes little above a few keV but a great deal below (Au at 100 eV: 0.912; overall spread 0.90–1.06). That narrowing is a comparison against one reference over the range tested, **not** a demonstration that `--fm` is the more accurate physics. ⚠ **`--xapot`** (the target's own Xα exchange) is for comparison only: it is not a field the incoming electron feels and it does not vanish at high energy. The numbers are on the [roadmap](roadmap.md#small-to-medium-effort) |
 | $f_x(s), f_e(s)$ | Fourier-transforms the neutral-atom density and applies the Mott–Bethe relation; no ionization channel or beam energy is involved |
 
 The four exits built on the ionization machinery share the prescription's
@@ -328,12 +333,14 @@ This is also the pattern the project follows generally: see
 - Bote, D. & Salvat, F. (2008). Calculations of inner-shell ionization by electron impact with the distorted-wave and plane-wave Born approximations. *Physical Review A* **77**, 042701.
 - Bote, D., Salvat, F., Jablonski, A. & Powell, C. J. (2009). Cross sections for ionization of K, L and M shells of atoms by impact of electrons and positrons with energies up to 1 GeV: Analytical formulas. *Atomic Data and Nuclear Data Tables* **95**, 871–909. Erratum: **97** (2011), 186.
 - Cromer, D. T. & Mann, J. B. (1968). X-ray scattering factors computed from numerical Hartree–Fock wave functions. *Acta Crystallographica A* **24**, 321–324.
+- Furness, J. B. & McCarthy, I. E. (1973). Semiphenomenological optical model for electron scattering on atoms. *Journal of Physics B* **6**, 2280–2291.
 - Kohn, W. & Sham, L. J. (1965). Self-consistent equations including exchange and correlation effects. *Physical Review* **140**, A1133–A1138.
 - Krieger, J. B., Li, Y. & Iafrate, G. J. (1992). Construction and application of an accurate local spin-polarized Kohn–Sham potential with integer discontinuity: Exchange-only theory. *Physical Review A* **45**, 101–126.
 - Latter, R. (1955). Atomic energy levels for the Thomas–Fermi and Thomas–Fermi–Dirac potential. *Physical Review* **99**, 510–519.
 - Olukayode, S., Froese Fischer, C. & Volkov, A. (2023). Revisited relativistic Dirac–Hartree–Fock X-ray scattering factors. I. Neutral atoms with Z = 2–118. *Acta Crystallographica A* **79**, 59–79.
 - Oxley, M. P. & Allen, L. J. (2000). Atomic scattering factors for K-shell and L-shell ionization by fast electrons. *Acta Crystallographica A* **56**, 470–490.
 - Peng, L.-M., Ren, G., Dudarev, S. L. & Whelan, M. J. (1996). Robust parameterization of elastic and absorptive electron atomic scattering factors. *Acta Crystallographica A* **52**, 257–276.
+- Powell, C. J., Jablonski, A., Salvat, F. & Lee, A. Y. (2016). *NIST Electron Elastic-Scattering Cross-Section Database, Version 4.0*. NIST Standard Reference Database 64 (NSRDS 64), National Institute of Standards and Technology, Gaithersburg. doi:10.6028/NIST.NSRDS.64
 - Slater, J. C. (1951). A simplification of the Hartree–Fock method. *Physical Review* **81**, 385–390.
 - Thorkildsen, G. (2023). New benchmarks in the modelling of X-ray atomic form factors. *Acta Crystallographica A* **79**, 318–330.
 - Waasmaier, D. & Kirfel, A. (1995). New analytical scattering-factor functions for free atoms and ions. *Acta Crystallographica A* **51**, 416–431.
