@@ -1299,9 +1299,14 @@ function refcheck()
         s = Float64.(c["s_A_inv"])
         # ⚠ dirac_scf=false で固定。refcheck は「Julia 実装が Python 実装の
         # **同じ処方**を再現するか」を見る検査で、参照値は非相対論 SCF で作られている。
-        # 既定が DSCF になっても、ここは処方を揃えないと意味を失う
+        # 既定が DSCF になっても、ここは処方を揃えないと意味を失う。
+        # ⚠ 260820Cl: 部分波の打ち切りも同じ理由で **v5 の式に固定** (`lkin_rule=:v5`) —
+        # 参照値は ⌈κ·min(r_core, 6/Z)⌉+12 で作られており、src の既定が LKIN_RULE :v6 に
+        # 変わった日に CI の refcheck が Fe L1 の |dN0/N0| = 4.1e-04 (= 意図した処方差) で
+        # 落ちた。処方差は本検査の対象外 (lkin_truncation_2026-08-19.md §6 が正本)
         o = compute_channel(z, tag, Float64(c["e0_keV"]);
-                            settings=QUICK_SETTINGS, s_nodes=s, verbose=false,
+                            settings=(; QUICK_SETTINGS..., lkin_rule=:v5),
+                            s_nodes=s, verbose=false,
                             dirac_scf=false, x_alpha=1.0)
         dF = maximum(abs.(o["F"] .- Float64.(c["F"])))
         dN0 = abs(o["N0"] / Float64(c["N0"]) - 1.0)

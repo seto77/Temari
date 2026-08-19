@@ -58,9 +58,11 @@ function compute_channel(z::Int, tag::String, e0_keV::Float64;
                          dt_log=Float64(get(settings, :dt_log, CONT_DT_LOG)),
                          l_init=ch.l_b, occ_init=ch.occ_init, progress=verbose,
                          rel=ch.rel, dirac=ch.dirac,
-                         # 260820Cl: 部分波規則の数値つまみ (監査で振れるように settings から)
+                         # 260820Cl: 部分波規則の数値つまみ (監査で振れるように settings から)。
+                         #   lkin_rule は refcheck (Python 参照値 = v5 の式) が :v5 を固定するために通す
                          lkin_frac=Float64(get(settings, :lkin_frac, LKIN_RADIUS_FRAC)),
-                         lkin_margin=Int(get(settings, :lkin_margin, LKIN_MARGIN)))
+                         lkin_margin=Int(get(settings, :lkin_margin, LKIN_MARGIN)),
+                         lkin_rule=Symbol(get(settings, :lkin_rule, LKIN_RULE)))
     return Dict{String,Any}(
         "schema_version" => SINGLE_RUN_SCHEMA_VERSION,
         "model_id" => ch.model_id, "exit" => "edx-form-factor",
