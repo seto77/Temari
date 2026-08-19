@@ -164,7 +164,8 @@ instructions to follow.
 
 | File | Role |
 | --- | --- |
-| [`next_chat_2026-08-20.md`](handover/next_chat_2026-08-20.md) | **Current.** Written 2026-08-19. Read this first. |
+| [`next_chat_2026-08-21.md`](handover/next_chat_2026-08-21.md) | **Current.** What remains after the messaging overhaul and after B9, B10, B6, B8 and B3 — and what the finished certification changed about it. Read this first. |
+| [`next_chat_2026-08-20.md`](handover/next_chat_2026-08-20.md) | Written 2026-08-19: the certification run and that day's work. Superseded by the above. |
 | [`next_chat_2026-08-19.md`](handover/next_chat_2026-08-19.md) | The plan for 2026-08-19; superseded by the above, which reports what executing it produced. |
 | [`next_phase_2026-08-18.md`](handover/next_phase_2026-08-18.md) | Sets the direction for the release after this one (σ(β, Δ)). Still the statement of direction. |
 | [`next_phase_2026-08-13.md`](handover/next_phase_2026-08-13.md) | Still authoritative for what remains open in the F(s, E₀) track. Absorbed [`next_phase_2026-08-12.md`](handover/next_phase_2026-08-12.md) and [`claude_handoff_remaining_work_2026-08-09.md`](handover/claude_handoff_remaining_work_2026-08-09.md). |
