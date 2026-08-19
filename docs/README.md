@@ -128,6 +128,7 @@ deleted.
 | [`speedup_v4_2026-08-08.md`](notes/speedup_v4_2026-08-08.md) | **The v4 optimization record**: 3.9× on a production row, every step bit-identical, with the profile before and after and the reason the next lever was declined. |
 | [`host_stability_2026-08-19.md`](notes/host_stability_2026-08-19.md) | The BSODs that stopped the full-grid certification, and what was changed on the machine. |
 | [`recipro_requests_2026-08-18.md`](notes/recipro_requests_2026-08-18.md) | What ReciPro wants next, in ReciPro's own priority order. Requests, not specifications. |
+| [`work_list_2026-08-19.md`](notes/work_list_2026-08-19.md) | **What to do next, in order.** The 35 items that survived a parallel audit and a review pass, sorted by what a third party's trust depends on rather than by effort. Carries the sequencing constraints (which items must wait for the certification fleet, which must be written before others pick their numbers), the items deliberately not taken, and the four lenses that audit did not have. |
 | [`evaluation_report_2026-08-19.md`](notes/evaluation_report_2026-08-19.md) | **Where Temari sits and what it is for**: the novelty claim, the competing codes and datasets it must be told apart from, what is honestly still missing, and the priority order that follows. This is the positioning document the 2026-08-19 messaging overhaul was executed against — the narrowed headline (off-diagonal F(s, E₀)) comes from its priority A. |
 
 ### `handover/` — the dated chain
