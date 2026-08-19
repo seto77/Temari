@@ -159,6 +159,43 @@ an accuracy limit.
     take the larger of the two bracketing rows. `temari_contract.py` does
     exactly this and carries a golden vector a port must reproduce.
 
+### Reading it in Python { #reading-it-in-python }
+
+The archive already contains a working reader — `tools/temari_contract.py`, the
+same file that validates it. It needs only the standard library, and it can be
+imported rather than run:
+
+```python
+import sys
+sys.path.insert(0, "tools")                      # inside the unpacked archive
+from temari_contract import load_channel, f_at
+
+ch = load_channel("F_K_Z26.json")                # iron K
+value, bound, region = f_at(ch, 200.0, 1.25)     # E₀ in keV, s in Å⁻¹
+# -> 0.6877601086513626, 0.0, 'tabulated'
+```
+
+`f_at` returns a triple, and **the third element is the one that matters**: it
+tells you which of the three regions of [the contract](#the-contract) you landed
+in, so you never have to compare against `s_cert` yourself.
+
+```python
+f_at(ch,  30.0, 14.0)   # (0.0029482858, 0.0,        'tabulated')  -- computed
+f_at(ch,  30.0, 14.2)   # (0.0,          0.005896770, 'unrecorded') -- past s_cert; `bound` applies
+f_at(ch,  30.0, 15.0)   # (0.0,          nan,         'impossible') -- no such Bloch pair exists
+```
+
+Interpolation in E₀ is handled for you, in the coordinates the shipping consumer
+uses — `f_at(ch, 160.0, 2.5)` evaluates a row that does not exist in the file.
+
+!!! warning "This is a v5.0.0 example, not a Temari Python API"
+    `load_channel` and `f_at` are the two entry points of the reference loader
+    **bundled with dataset v5.0.0**, and they are stable for that archive because
+    that archive is frozen. They are not a package, they are not versioned
+    independently of the dataset, and nothing else in that file — the spline
+    internals in particular — is an interface. Pin the dataset version you read
+    with, and do not build a library on top of these names.
+
 ### How far the numbers are trusted
 
 - **QC**: 525 / 525 channels pass, zero generation-gate failures. The

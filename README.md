@@ -54,6 +54,20 @@ You do not need to run anything. Dataset v5.0.0 is mirrored byte-identically at
 - **What do the numbers mean, and what will bite me?** —
   **<https://seto77.github.io/Temari/data/>**. Read it before use: F is signed,
   q = 4πs, and values past each row's `s_cert` are padding rather than physics.
+- **How do I read it?** — the archive carries a reader that needs only the
+  Python standard library, and E₀ interpolation is done for you:
+
+  ```python
+  import sys; sys.path.insert(0, "tools")
+  from temari_contract import load_channel, f_at
+  value, bound, region = f_at(load_channel("F_K_Z26.json"), 200.0, 1.25)
+  # -> 0.6877601086513626, 0.0, 'tabulated'
+  ```
+
+  `region` says which side of `s_cert` you are on, so you never test it
+  yourself. It is an example for **this dataset version**, not a Temari Python
+  package — see
+  [Reading it in Python](https://seto77.github.io/Temari/data/#reading-it-in-python).
 
 The **atomic scattering factors f_x(s), f_e(s)** are published too — 86 neutral
 atoms (Z = 1–86), s ≤ 6 Å⁻¹ on 7681 nodes, full-Dirac SCF with the
