@@ -109,7 +109,7 @@ jobs:
 
   small-component:
     # The only external figures that exist for the small-component fraction are
-    # three one-significant-digit values in Zhang et al. 2024 section 6.2. The
+    # three one-significant-digit values in Zhang et al. (2025) §6.2. The
     # gate is whether our zeta lands inside the interval that rounds to each of
     # them -- the most a one-digit reference can assert. It needs no reference
     # data on disk: the three quoted figures are constants in the script and the

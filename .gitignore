@@ -29,6 +29,7 @@ Manifest.toml
 __pycache__/
 *.pyc
 .venv/
+.venv-docs/
 
 # エディタ・OS
 .vscode/

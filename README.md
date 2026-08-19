@@ -64,7 +64,7 @@ separate dataset family, **dataset-factors v1.0.0** (CC-BY-4.0), at
 s_i = 6i/7680 and check its SHA-256), and the interpolation convention is part
 of the contract (f_x: cubic in s, clamped left / not-a-knot right; f_e: cubic in
 t = s²). The archive ships an executable contract that checks both. Details on
-the [Data page](https://seto77.github.io/Temari/data/#atomic-scattering-factors-f_xs-f_es--dataset-factors-v100).
+the [Data page](https://seto77.github.io/Temari/data/#factors).
 
 The dataset and the software carry independent version lines and are never
 mixed in the same release.
@@ -78,7 +78,7 @@ Julia's standard library is the only dependency.
 git clone https://github.com/seto77/Temari.git
 cd Temari
 
-julia -t auto src/ionization.jl selftest        # analytic ladder, ~10 s
+julia -t auto src/ionization.jl selftest        # analytic ladder, ~1 min
 julia -t auto src/ionization.jl 26 K 200 --quick  # Fe K at 200 keV
 julia -t auto src/gui.jl                        # zero-dependency browser GUI
 ```

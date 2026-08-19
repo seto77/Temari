@@ -105,7 +105,7 @@ characterises the comparison, a copied column republishes their work.
 All of these run from the repository root and need nothing but Julia.
 
 ```powershell
-# 1. Analytic ladder T0-T10 (~10 s). Failures are assertions.
+# 1. Analytic ladder T0-T24 and T26-T27 (~1 min; up to ~3 min cold). Failures are assertions.
 julia -t auto src/ionization.jl selftest
 
 # 2. Against the independent Python implementation (~1 min).

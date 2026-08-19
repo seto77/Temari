@@ -67,5 +67,5 @@ body:
     attributes:
       label: Self-verification
       options:
-        - label: "`julia -t auto src/ionization.jl selftest` was run and its result is included above (it takes about 10 s)"
+        - label: "`julia -t auto src/ionization.jl selftest` was run and its result is included above (about a minute; up to ~3 min cold)"
         - label: "The SCF caches (`atom_cache_*.jls`) were deleted and the problem still occurs"
