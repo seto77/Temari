@@ -221,6 +221,7 @@ function validate_inputs(betas::Vector{Float64}, beta_in::Float64, d1_eV::Float6
                          d2_eV::Float64, emax_eV::Float64, clip::Bool)
     for b in betas
         isfinite(b) || return (false, "β が NaN/Inf")
+        b == 0.0 && signbit(b) && return (false, "β = −0.0 は正規化してから渡す")
         b < 0.0 && return (false, "β < 0 は拒否 (sin² で正の開口として通ってしまうため明示的に拒否)")
         b > pi && return (false, "β > π は拒否 (幾何学的上限。黙って飽和しない)")
     end
@@ -253,8 +254,9 @@ function sigma_window_v1(ch, r_core::Float64, betas::Vector{Float64},
     ok || error("入力検証: " * why)
     d2_eff = min(d2_eV, emax_eV)
     nb = length(betas)
-    zero_result = (sigma_nm2=zeros(nb), n_panels=0, n_nodes=0, crosses_eps_c=false,
-                   window_indicator=0.0, panel_edges_sha="", angular_panels_max=0,
+    zero_result = (sigma_nm2=zeros(nb), n_panels=0, n_nodes=0, n_degenerate_panels=0,
+                   crosses_eps_c=false, window_indicator=0.0, window_indicator_weighted=0.0,
+                   panel_edges_sha="", angular_panels_max=0,
                    effective_window_eV=(d1_eV, d2_eff), requested_window_eV=(d1_eV, d2_eV),
                    rule=rule_name(rule), zero_reason="")
     # 空窓 / β=0 は検証の後・状態構築の前に厳密な 0 を返す (順序が重要)
@@ -270,13 +272,19 @@ function sigma_window_v1(ch, r_core::Float64, betas::Vector{Float64},
     xg, wg = gl01(rule.npt)
     n = npan * rule.npt
     TH = zeros(n); WT = zeros(n); EPS = zeros(n); EREM = zeros(n)
+    n_degenerate = 0
     @inbounds for p in 1:npan
         a = ed[p]; h = ed[p+1] - a
+        # ⚠ 表現限界: パネルが細すぎて GL 節点が端点に丸まる (ε_c の 1 ULP 隣など) なら、
+        #   反対側の参照関数の枝を評価してしまう危険がある。そのパネルは寄与 0 にして数える
+        #   (黙って反対枝を積まない。codex のレビュー 2026-08-19)
+        degenerate = any(j -> (th = a + h * xg[j]; th <= a || th >= a + h), 1:rule.npt)
+        degenerate && (n_degenerate += 1)
         for j in 1:rule.npt
             k = (p - 1) * rule.npt + j
             th = a + h * xg[j]
             TH[k] = th
-            WT[k] = h * wg[j] * emax * sin(2.0 * th)       # dε = ε_max sin 2θ dθ
+            WT[k] = degenerate ? 0.0 : h * wg[j] * emax * sin(2.0 * th)   # dε = ε_max sin 2θ dθ
             EPS[k] = emax * sin(th)^2
             EREM[k] = emax * cos(th)^2                     # ε_max − ε を引き算で作らない
         end
@@ -328,17 +336,28 @@ function sigma_window_v1(ch, r_core::Float64, betas::Vector{Float64},
         end
         sig[ib] = pref * tot
     end
-    # 診断: パネルごとの Legendre 尾 (被積分関数 = ヤコビアン込み f(θ) = ε_max sin2θ · V)
-    for ib in 1:nb, p in 1:npan
-        h = ed[p+1] - ed[p]
-        f = [emax * sin(2.0 * TH[(p-1)*rule.npt+j]) * V[(p-1)*rule.npt+j, ib] for j in 1:rule.npt]
-        all(iszero, f) && continue
-        ind = max(ind, mode_tail_ratio(xg, wg, f))
+    # 診断: パネルごとの Legendre 尾 (被積分関数 = ヤコビアン込み f(θ) = ε_max sin2θ · V)。
+    #   `window_indicator` = パネルごとの尾比の最大 (極細パネルの丸めノイズに支配されうる)、
+    #   `window_indicator_weighted` = 尾比 × |パネル積分|/|σ| の最大 (寄与で重み付け)。
+    #   ⚠ どちらも診断値。誤差推定ではない (k ≥ 16 のモードは見えない)
+    ind_w = 0.0
+    for ib in 1:nb
+        sig[ib] == 0.0 && continue
+        for p in 1:npan
+            h = ed[p+1] - ed[p]
+            f = [emax * sin(2.0 * TH[(p-1)*rule.npt+j]) * V[(p-1)*rule.npt+j, ib] for j in 1:rule.npt]
+            all(iszero, f) && continue
+            tr_ = mode_tail_ratio(xg, wg, f)
+            ind = max(ind, tr_)
+            pint = h * sum(wg .* f) * pref
+            ind_w = max(ind_w, tr_ * abs(pint) / abs(sig[ib]))
+        end
     end
     io = IOBuffer(); write(io, ed)
-    return (sigma_nm2=sig, n_panels=npan, n_nodes=n,
+    return (sigma_nm2=sig, n_panels=npan, n_nodes=n, n_degenerate_panels=n_degenerate,
             crosses_eps_c=(EPS_C_HA !== nothing && e1 < EPS_C_HA < e2),
-            window_indicator=ind, panel_edges_sha=bytes2hex(sha256(take!(io)))[1:16],
+            window_indicator=ind, window_indicator_weighted=ind_w,
+            panel_edges_sha=bytes2hex(sha256(take!(io)))[1:16],
             angular_panels_max=maximum(ANG; init=0),
             effective_window_eV=(d1_eV, d2_eff), requested_window_eV=(d1_eV, d2_eV),
             rule=rule_name(rule), zero_reason="")
@@ -359,7 +378,8 @@ end
 function sigma_beta_delta(z::Int, tag::String, e0_keV::Float64;
                           beta_mrad, delta1_eV::Float64, delta2_eV::Float64,
                           beta_in_mrad::Float64=0.0, clip::Bool=false,
-                          normalize::Symbol=:own, rule::SigmaRule=SIGMA_RULE_V1)
+                          normalize::Symbol=:bote, rule::SigmaRule=SIGMA_RULE_V1)
+    normalize in (:own, :bote) || error("normalize は :own か :bote ($normalize)")
     betas = Float64[b * 1e-3 for b in (beta_mrad isa Number ? [beta_mrad] : beta_mrad)]
     ch, r_core = sigma_channel(z, tag, e0_keV)
     r = sigma_window_v1(ch, r_core, betas, delta1_eV, delta2_eV;
@@ -383,15 +403,26 @@ function sigma_beta_delta(z::Int, tag::String, e0_keV::Float64;
                             "panel_edges_sha" => r.panel_edges_sha,
                             "angular_panels_max" => r.angular_panels_max,
                             "zero_reason" => r.zero_reason))
-    if normalize === :bote
+    # 契約 §1/§3: own と bote の**両方を常に返す** (`normalize` は主値 `sigma_nm2` の選択だけ)。
+    # 分母 σ_own,total は**同じ規則**で窓 [0, ε_max]・β = π (横断の設定も同じ)。
+    # 出荷 JSON の `sigma_own_nm2` (別の求積) を分母にしない — 新規則の closure が壊れる
+    if all(iszero, r.sigma_nm2)
+        out["sigma_total_own_nm2"] = nothing; out["sigma_total_bote_nm2"] = nothing
+        out["sigma_partial_bote_nm2"] = zeros(length(betas))
+    else
         tot = sigma_window_v1(ch, r_core, [Float64(pi)], 0.0, (ch.T0 - ch.E_th) * HARTREE_EV;
                               rule=rule)
         s_own_tot = tot.sigma_nm2[1]
+        (isfinite(s_own_tot) && s_own_tot > 0.0) || error("σ_own,total が非有限または非正: $s_own_tot")
         s_bote_tot = bote_sigma_nm2(z, ch.subshell, e0_keV * 1e3)
         out["sigma_total_own_nm2"] = s_own_tot
         out["sigma_total_bote_nm2"] = s_bote_tot
         out["sigma_partial_bote_nm2"] = r.sigma_nm2 .* (s_bote_tot / s_own_tot)
-        out["normalization"] = "bote: sigma_own(beta,Delta) * sigma_Bote,total / sigma_own,total"
     end
+    out["normalization"] = string(normalize)
+    out["normalization_definition"] = "bote: sigma_own(beta,Delta) * sigma_Bote,total / sigma_own,total (same rule, [0,eps_max], beta=pi)"
+    out["sigma_nm2"] = normalize === :bote ? out["sigma_partial_bote_nm2"] : out["sigma_partial_own_nm2"]
+    out["numerical"]["n_degenerate_panels"] = r.n_degenerate_panels
+    out["numerical"]["window_indicator_weighted"] = r.window_indicator_weighted
     return out
 end

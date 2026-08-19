@@ -91,9 +91,14 @@ function oracle_window_nodes(e1::Float64, e2::Float64, P::Int, n::Int)
     edges = e1 > 0 ? (e1 .* (e2 / e1) .^ range(0, 1, length=P + 1)) :
                      vcat(0.0, lo .* (e2 / lo) .^ range(0, 1, length=P))
     # ε_c も境界に (本番と同じ理由。オラクル側も段差を内部に残さない)
-    ed = collect(edges)
+    ed0 = collect(edges)
     if EPS_C_HA !== nothing && e1 < EPS_C_HA < e2
-        push!(ed, EPS_C_HA); sort!(ed); unique!(ed)
+        push!(ed0, EPS_C_HA); sort!(ed0)
+    end
+    # 表現上同一の重複だけ除く (本番と同じ書き方。⚠ 境界に対してであってノードに対してではない)
+    ed = Float64[ed0[1]]
+    for v in ed0[2:end]
+        v > ed[end] && push!(ed, v)
     end
     eps = Float64[]; we = Float64[]
     for p in 1:(length(ed) - 1)
@@ -182,20 +187,26 @@ function state_hash_v2(ch)
     return bytes2hex(sha256(take!(io)))[1:16]
 end
 
-"認証する窓の一覧 [(d1, d2)]"
+"""認証する窓の一覧 [(window_id, d1, d2, in_domain)]。`window_id` は**生成規則由来の安定 ID**
+(丸めた端点の文字列ではない)。`to_epsmax` の上端は `d2 = ε_max` を正本にし、幅から再構成しない
+(丸めで 1 ULP 上へ出ると自分の検証に拒否される)。契約外 (Δ₂ > ε_max) の窓は**黙って落とさず**、
+`out_of_domain=true` の行として記録する (sentinel の [0,1000] eV は ε_max < 1000 eV の行で契約外)。"""
 function window_list(emax_eV::Float64; sentinel_only::Bool=false)
-    sentinel_only && return [(0.0, min(1000.0, emax_eV))]
-    ws = Tuple{Float64,Float64}[]
+    ws = Tuple{String,Float64,Float64,Bool}[]        # (id, d1, d2, in_domain)
+    if sentinel_only
+        push!(ws, ("start=0,width=1000", 0.0, 1000.0, 1000.0 <= emax_eV))
+        push!(ws, ("start=0,to_epsmax", 0.0, emax_eV, true))
+        return ws
+    end
     for d1 in V2_STARTS_EV, w in V2_WIDTHS_EV
-        d1 >= emax_eV && continue
+        id = isinf(w) ? @sprintf("start=%g,to_epsmax", d1) : @sprintf("start=%g,width=%g", d1, w)
         d2 = isinf(w) ? emax_eV : d1 + w
-        d2 > emax_eV && continue                  # 契約の規則: 上限超過は拒否 (clip しない)
-        push!(ws, (d1, d2))
+        push!(ws, (id, d1, d2, d1 < emax_eV && d2 <= emax_eV))
     end
     if EPS_C_HA !== nothing
         ec = EPS_C_HA * HARTREE_EV
         for h in V2_EPSC_HALFWIDTHS_EV
-            ec + h < emax_eV && push!(ws, (ec - h, ec + h))
+            push!(ws, (@sprintf("cross_epsc,h=%g", h), ec - h, ec + h, ec + h <= emax_eV && ec - h >= 0.0))
         end
     end
     return ws
@@ -212,8 +223,17 @@ function certify_row_v2(z::Int, tag::String, e0::Float64; sentinel_only::Bool=fa
     # σ_ref = 最も広い窓のオラクル値 (β ごと)。sentinel では P で代用
     sigma_ref = zeros(length(betas))
     ang = sentinel_only ? (Float64[], Float64[], Float64[]) : angular_check(ch, r_core, betas, rule)
-    for (iw, (d1, d2)) in enumerate(ws)
+    for (iw, (wid, d1, d2, in_dom)) in enumerate(ws)
         tw = time()
+        if !in_dom
+            push!(recs, Dict{String,Any}(
+                "z" => z, "tag" => tag, "e0_keV" => e0, "eth_keV" => ch.eth_keV,
+                "u" => e0 / ch.eth_keV, "eps_max_eV" => emax_eV, "l_init" => ch.l_b,
+                "window_id" => wid, "d1_eV" => d1, "d2_eV" => d2, "out_of_domain" => true,
+                "window_index" => iw, "cert_fp" => CERT_FP_V2, "state_sha" => state_hash_v2(ch),
+                "elapsed_s" => 0.0))
+            continue
+        end
         P = sigma_window_v1(ch, r_core, betas, d1, d2; rule=rule)
         O = sentinel_only ? copy(P.sigma_nm2) :
             oracle_window(ch, r_core, betas, d1 / HARTREE_EV, d2 / HARTREE_EV, rule)
@@ -226,14 +246,16 @@ function certify_row_v2(z::Int, tag::String, e0::Float64; sentinel_only::Bool=fa
         push!(recs, Dict{String,Any}(
             "z" => z, "tag" => tag, "e0_keV" => e0, "eth_keV" => ch.eth_keV,
             "u" => e0 / ch.eth_keV, "eps_max_eV" => emax_eV,
-            "l_init" => ch.l_b,
+            "l_init" => ch.l_b, "window_id" => wid, "out_of_domain" => false,
             "d1_eV" => d1, "d2_eV" => d2, "width_eV" => d2 - d1,
             "starts_at_zero" => d1 == 0.0, "ends_at_epsmax" => d2 >= emax_eV * (1 - 1e-12),
             "crosses_eps_c" => P.crosses_eps_c,
             "dist_to_eps_c_eV" => isnan(ec_eV) ? NaN : min(abs(d1 - ec_eV), abs(d2 - ec_eV)),
             "betas_mrad" => V2_BETAS_MRAD, "P" => P.sigma_nm2, "O" => O,
             "diff" => diff, "rel" => rel,
-            "indicator" => P.window_indicator, "n_panels" => P.n_panels, "n_nodes" => P.n_nodes,
+            "indicator" => P.window_indicator, "indicator_weighted" => P.window_indicator_weighted,
+            "n_degenerate_panels" => P.n_degenerate_panels,
+            "n_panels" => P.n_panels, "n_nodes" => P.n_nodes,
             "angular_panels_max" => P.angular_panels_max, "panel_edges_sha" => P.panel_edges_sha,
             "n_q" => rule.n_q, "ppw" => rule.ppw, "rule" => P.rule,
             "oracle" => sentinel_only ? "none" : "sqrt-eps-geo$(V2_ORACLE_NPAN)xGL$(V2_ORACLE_NPT)-epsc",
@@ -243,13 +265,14 @@ function certify_row_v2(z::Int, tag::String, e0::Float64; sentinel_only::Bool=fa
     end
     # scaled = |diff| / max(|O|, atol/rtol · σ_ref) を後から付ける (σ_ref が最後に決まるため)
     for r in recs
+        r["row_elapsed_s"] = time() - t0
+        get(r, "out_of_domain", false) && continue
         O = r["O"]; diff = r["diff"]
         r["sigma_ref"] = sigma_ref
         r["scaled"] = [abs(diff[i]) / max(abs(O[i]), (V2_ATOL / V2_RTOL) * sigma_ref[i], 1e-300)
                        for i in eachindex(O)]
         r["pass"] = sentinel_only ? nothing :
                     all(abs(diff[i]) <= V2_RTOL * abs(O[i]) + V2_ATOL * sigma_ref[i] for i in eachindex(O))
-        r["row_elapsed_s"] = time() - t0
     end
     return recs
 end
@@ -297,7 +320,7 @@ end
 
 "済み判定: 行 (z,tag,e0) の**全窓**が同じ指紋で揃っているものだけ済み (⚠ 例外行は済みに数えない)"
 function load_done_v2(paths::Vector{String}, accept::Set{String})
-    have = Dict{String,Set{Int}}(); need = Dict{String,Int}(); stale = 0
+    have = Dict{String,Set{String}}(); need = Dict{String,Int}(); stale = 0
     for p in paths
         isfile(p) || continue
         for line in eachline(p)
@@ -308,7 +331,8 @@ function load_done_v2(paths::Vector{String}, accept::Set{String})
             fp = haskey(d, "cert_fp") ? String(d["cert_fp"]) : ""
             if !(fp in accept); stale += 1; continue; end
             k = rowkey_v2(Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"]))
-            push!(get!(have, k, Set{Int}()), Int(d["window_index"]))
+            # ⚠ 件数ではなく **window_id の集合** で数える (重複行が欠落を偽装しない。codex)
+            push!(get!(have, k, Set{String}()), String(d["window_id"]))
             need[k] = max(get(need, k, 0), Int(d["n_windows_in_row"]))
         end
     end
@@ -390,6 +414,9 @@ function summarize_v2(paths::Vector{String})
     rels = Float64[]; scal = Float64[]; inds = Float64[]
     worst = (0.0, ""); npass = 0; nfail = 0
     per = Dict{String,Vector{Float64}}()
+    n_ood = count(d -> get(d, "out_of_domain", false) == true, recs)
+    n_ood > 0 && @printf("契約外 (Δ₂ > ε_max 等) として記録した窓: %d\n", n_ood)
+    recs = [d for d in recs if get(d, "out_of_domain", false) != true]
     for d in recs
         r = [Float64(x) for x in d["rel"]]; s = [Float64(x) for x in d["scaled"]]
         append!(rels, filter(isfinite, r)); append!(scal, s)
