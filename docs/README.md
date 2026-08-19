@@ -182,14 +182,31 @@ mechanical — **filenames are unchanged**, so `docs/foo.md` is now one of
 `docs/notes/foo.md`, `docs/handover/foo.md` or `docs/release/foo.md`, and the
 table above says which.
 
-Four places still spell the old flat paths, deliberately:
+Five places still spell the old flat paths, deliberately. **Do not "finish the
+job" by running a sed over them** — each one is load-bearing:
 
 | Where | Why it was not updated |
 | --- | --- |
-| `src/*.jl` comments and provenance strings (33 references) | Every byte of `src/` feeds the source fingerprint recorded in generated datasets, and `physics_pointer` is written verbatim into the shipped JSON. Editing them would make a regenerated table differ from the released one. |
-| Released dataset trees under `src/prod_*` — the JSON files **and** their `MANIFEST.md` (12 references) | Published data, frozen by SHA-256. |
+| `src/*.jl` comments and provenance strings (34 references across 11 files) | Every byte of `src/` feeds the source fingerprint recorded in generated datasets, and `physics_pointer` is written verbatim into the shipped JSON. Editing them would make a regenerated table differ from the released one. |
+| Released dataset trees under `src/prod_*` — the JSON files **and** their `MANIFEST.md` (15 distinct filenames) | Published data, frozen by SHA-256. |
 | `schema/temari_dataset_v2.schema.json` | Packaged into the release archive; see the warning above. |
 | `tools/temari_factors_contract.py` | Likewise packaged. |
+| ⚠ **`tools/certify_sigma.jl` and `tools/beta_spike.jl` (7 references) — while a certification fleet is running** | `cert_fingerprint()` hashes the CRLF-normalized bytes of *both* files into `CERT_FP`, stamps it on every row, and the resume filter and the summary census key off it. Change one byte and a restarted lane stops seeing the rows already written. |
+
+That last row is the dangerous one, because those two files sit in `tools/` next
+to two dozen others that *were* updated, so they look like an oversight. They are
+not. As of 2026-08-19 a σ(β, Δ) fleet is mid-run with `CERT_FP` =
+`2061dc7e3c5fcbf6` and roughly fourteen thousand rows behind it. Check before
+touching:
+
+```bash
+grep -ho '"cert_fp":"[0-9a-f]*"' ../cert_sigma_v1_lane*.jsonl | sort | uniq -c
+```
+
+More than one fingerprint in that census means the run has already been split by
+an edit (or by a deliberate code fix) and the rows are keyed to different code.
+Bring these two into line only once no fleet is running, and apply the rename
+together with the `--accept-fp <old fp>` migration the file itself describes.
 
 **Released artifacts stay as they are, permanently.** A pointer recorded in one
 of them is a historical path: check out the generator commit it names and the
