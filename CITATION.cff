@@ -5,6 +5,7 @@ type: software
 authors:
   - family-names: Seto
     given-names: Yusuke
+    orcid: "https://orcid.org/0000-0002-5423-2136"
     email: seto77@gmail.com
     # 260811Cl: 統合前の .github/CITATION.cff にだけ入っていた所属を引き継いだ
     affiliation: "Osaka Metropolitan University, Japan"
@@ -57,6 +58,7 @@ references:
     authors:
       - family-names: Seto
         given-names: Yusuke
+        orcid: "https://orcid.org/0000-0002-5423-2136"
     version: "5.0.0"
     year: 2026
     doi: "10.5281/zenodo.21872050"
@@ -78,6 +80,7 @@ references:
     authors:
       - family-names: Seto
         given-names: Yusuke
+        orcid: "https://orcid.org/0000-0002-5423-2136"
     version: "1.0.0"
     year: 2026
     url: "https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0"
@@ -153,16 +156,21 @@ references:
         given-names: Sandra
       - family-names: Nellist
         given-names: Peter D.
-    year: 2024
-    doi: "10.48550/arXiv.2405.10151"
+    year: 2025
+    journal: "Ultramicroscopy"
+    volume: 269
+    start: 114083
+    doi: "10.1016/j.ultramic.2024.114083"
     notes: >-
       No code, parameters or tabulated values from this work are bundled here.
       It is cited because (a) the relativistic-electrodynamics interaction
       kernel, the small-component radial matrix element and the kappa-resolved
       angular factor are implemented from the equations as presented in this
-      paper (equations 38-41; the underlying physics is standard relativistic
-      scattering theory, and equation 38 as printed is missing a q^2 in the
-      transverse denominator, corrected here and cross-checked against the
-      paper's own equation 42), and (b) the authors' open Dirac GOS database
+      paper (equations 38-41, numbered as in the 2024 preprint arXiv:2405.10151
+      -- that is the numbering this documentation follows throughout; the
+      underlying physics is standard relativistic scattering theory, and
+      equation 38 as printed is missing a q^2 in the transverse denominator,
+      corrected here and cross-checked against the paper's own equation 42),
+      and (b) the authors' open Dirac GOS database
       (Zenodo 10.5281/zenodo.7729585, CC-BY) is used as an external comparison
       target during verification. The database itself is not redistributed.

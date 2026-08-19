@@ -83,6 +83,12 @@ operator and in what is reported.
     crystallographic variable — a momentum transfer of $q = 4\pi s$, so
     $s = 0.5$ Å⁻¹ is $q = 6.28$ Å⁻¹.
 
+    **ALCHEMI** (Atom Location by CHannelling-Enhanced MIcroanalysis) estimates
+    site occupancy from the way characteristic X-ray yields change with crystal
+    orientation. Temari supplies the off-diagonal ionization shape factors that
+    the downstream Bloch-wave simulation needs; it does not perform the
+    occupancy refinement itself.
+
 The form factor is normalized to $F(0) = 1$ and carries the delocalization of
 the inelastic image; the absolute scale is supplied by the cross section.
 See [The physics](physics.md) for the prescription and its known limits, and
