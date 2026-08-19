@@ -165,6 +165,12 @@ end
 # ---------------------------------------------------------------------
 # 集計
 # ---------------------------------------------------------------------
+# JSON の null (= NaN: 運動学的上限の外の s) を NaN に戻す
+_lf(x) = x === nothing ? NaN : Float64(x)
+_lfv(v) = Float64[_lf(x) for x in v]
+"NaN を除いた最大 (全部 NaN なら 0)"
+_maxfin(v) = (w = filter(isfinite, v); isempty(w) ? 0.0 : maximum(w))
+
 function lks_summary(paths::Vector{String})
     recs = Dict{String,Any}[]
     nerr = 0
@@ -192,9 +198,9 @@ function lks_summary(paths::Vector{String})
         v = bytag[tag]
         dn = [abs(Float64(d["res"]["krc12"]["dN0_rel"])) for d in v]
         iw = argmax(dn)
-        dF05 = [maximum(abs.([Float64(x) for x in d["res"]["krc12"]["dF_abs"]][i05])) for d in v]
-        dF2 = [maximum(abs.([Float64(x) for x in d["res"]["krc12"]["dF_abs"]][i2])) for d in v]
-        dFa = [maximum(abs.([Float64(x) for x in d["res"]["krc12"]["dF_abs"]][iall])) for d in v]
+        dF05 = [_maxfin(abs.(_lfv(d["res"]["krc12"]["dF_abs"])[i05])) for d in v]
+        dF2 = [_maxfin(abs.(_lfv(d["res"]["krc12"]["dF_abs"])[i2])) for d in v]
+        dFa = [_maxfin(abs.(_lfv(d["res"]["krc12"]["dF_abs"])[iall])) for d in v]
         iw05 = argmax(dF05)
         @printf("  %-3s n=%3d  ΔN0: med %.2e p90 %.2e max %.2e [Z=%d @%.0f]   |ΔF|max: s≤0.5 %.2e [Z=%d @%.0f] / s≤2 %.2e / all %.2e\n",
                 tag, length(v), q(dn, 0.5), q(dn, 0.9), dn[iw], Int(v[iw]["z"]), Float64(v[iw]["e0_keV"]),
@@ -213,9 +219,9 @@ function lks_summary(paths::Vector{String})
             isempty(v) && continue
             dn = [abs(Float64(d["res"][b][key_n])) for d in v]
             iw = argmax(dn)
-            dF05 = [maximum(abs.([Float64(x) for x in d["res"][b][key_f]][i05])) for d in v]
-            dF2 = [maximum(abs.([Float64(x) for x in d["res"][b][key_f]][i2])) for d in v]
-            dFa = [maximum(abs.([Float64(x) for x in d["res"][b][key_f]][iall])) for d in v]
+            dF05 = [_maxfin(abs.(_lfv(d["res"][b][key_f])[i05])) for d in v]
+            dF2 = [_maxfin(abs.(_lfv(d["res"][b][key_f])[i2])) for d in v]
+            dFa = [_maxfin(abs.(_lfv(d["res"][b][key_f])[iall])) for d in v]
             ncap = count(d -> Int(d["res"][a]["n_at_cap"]) > 0, v)
             @printf("  %-3s n=%3d  ΔN0: med %.2e max %.2e [Z=%d @%.0f]   |ΔF|max: s≤0.5 %.2e / s≤2 %.2e / all %.2e   (%s が cap に張り付く行 %d)\n",
                     tag, length(v), q(dn, 0.5), dn[iw], Int(v[iw]["z"]), Float64(v[iw]["e0_keV"]),
@@ -224,11 +230,11 @@ function lks_summary(paths::Vector{String})
     end
     println("\n## 最悪 12 行 (krc12 − src、|ΔF| s≤0.5)")
     allv = [d for d in recs if haskey(d["res"], "krc12")]
-    sc = [maximum(abs.([Float64(x) for x in d["res"]["krc12"]["dF_abs"]][i05])) for d in allv]
+    sc = [_maxfin(abs.(_lfv(d["res"]["krc12"]["dF_abs"])[i05])) for d in allv]
     ord = sortperm(sc; rev=true)
     for k in ord[1:min(12, length(ord))]
         d = allv[k]; r = d["res"]["krc12"]
-        dF = [Float64(x) for x in r["dF_abs"]]
+        dF = _lfv(r["dF_abs"])
         @printf("  Z=%2d %-3s @%3.0f keV  r_core %5.2f 6/Z %.3f  l_max src %d..%d krc12 %d..%d  ΔN0 %+.2e  ΔF(0.25) %+.2e ΔF(0.5) %+.2e ΔF(1) %+.2e ΔF(2) %+.2e\n",
                 Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"]), Float64(d["r_core"]), Float64(d["six_over_z"]),
                 Int(d["res"]["src"]["l_max_min"]), Int(d["res"]["src"]["l_max_max"]),

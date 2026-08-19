@@ -38,6 +38,9 @@ function run_NK_policy(ch, policy::Symbol; settings=HIGH_SETTINGS, l_cap::Int=se
     idx = clamp(searchsortedfirst(cum, 1.0 - 1e-12), 1, length(ch.r_b))
     r_core = clamp(ch.r_b[idx] * 1.15, 0.4, 20.0)
     K_nodes = 4.0 * pi .* LK_S .* BOHR_ANG
+    # ⚠ 運動学的上限: 出荷は s_cert = min(16, 0.98/λ) の先を 0 埋めにする (K ≥ 2k_i は `angular_integral` が拒否)。
+    #   ここでは K ≥ 0.98·2k_i のノードを評価せず NaN にする (E₀ ≤ 35 keV で s=16 が該当。2026-08-19 深夜の実測)
+    K_ok = K_nodes .< 0.98 * 2.0 * k_i
     ne = length(eps)
     dNde = zeros(ne, length(K_nodes))
     lused = zeros(Int, ne)
@@ -57,7 +60,8 @@ function run_NK_policy(ch, policy::Symbol; settings=HIGH_SETTINGS, l_cap::Int=se
             ch.l_b, settings.sig_thresh, k_i + kf; rel=ch.rel, dirac=ch.dirac)
         ws = AngWS(k_i, kf, settings.n_x, settings.n_phi, rl.lam_max)
         RaT = precompute_RaT(ws, rl)
-        dNde[ie, :] = [kf / k_i * angular_integral(ws, rl, K, ch.occ_init; tr=nothing, RaT=RaT) for K in K_nodes]
+        dNde[ie, :] = [K_ok[ik] ? kf / k_i * angular_integral(ws, rl, K, ch.occ_init; tr=nothing, RaT=RaT) : NaN
+                       for (ik, K) in enumerate(K_nodes)]
         lused[ie] = lm
     end
     N = dNde' * we
