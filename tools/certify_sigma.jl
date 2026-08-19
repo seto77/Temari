@@ -399,7 +399,12 @@ function summarize(paths::Vector{String})
                 pfp = haskey(p, "cert_fp") ? String(p["cert_fp"]) : ""
                 if pfp != CERT_FP && fp == CERT_FP
                     bykey[k] = d
-                    rows[findfirst(===(p), rows)] = d
+                    # ⚠ `===(p)` はカリー化できない (`==` と違い `===` は builtin で
+                    #   Fix2 のメソッドを持たない)。無名関数で書く。
+                    #   ⚠ この経路は**指紋の違う重複があるときだけ**通るので、
+                    #   本走が終わるまで発火しなかった (260819Cl に完走直後で発覚)
+                    i = findfirst(x -> x === p, rows)
+                    i === nothing || (rows[i] = d)
                 end
                 continue
             end

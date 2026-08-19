@@ -378,6 +378,67 @@ reproduced — 1.11.9 for the F(s, E₀) datasets, 1.12.6 for dataset-factors
 v1.0.0. A result that passes only on a newer Julia is not accepted — see
 [Reproducibility](reproducibility.md).
 
+## The error budget, and why it is not a single number { #the-error-budget }
+
+Every figure on this page describes a *different kind* of thing, and the kinds
+cannot be added. The full table lives in
+[`docs/notes/error_budget_2026-08-19.md`](https://github.com/seto77/Temari/blob/main/docs/notes/error_budget_2026-08-19.md);
+what matters here is the taxonomy it enforces.
+
+| Kind | What it is | Example |
+| --- | --- | --- |
+| Acceptance budget | A threshold chosen for release. **Not an error.** | the C6 gate, 5×10⁻³ |
+| Direct measurement | Measured under stated conditions | refcheck, 9.0×10⁻⁸ |
+| Observed maximum over a sample | The largest value *seen*, not a bound on the population | C6 on the shipped bytes, 1.16×10⁻³ |
+| Discrepancy against an external reference | A difference, with no attribution of blame | the shape against µSTEM |
+| Unexplained discrepancy | The same, with the cause not identified | the Bethe ridge, 12–36 % |
+| Scenario sensitivity | "If all of it were ours, then…" | the propagated ≤1.2×10⁻⁴ |
+| Not measured | An empty row, kept visible | the ρ ∈ [0.3, 0.8) band |
+
+!!! warning "The three that are misread most often"
+    - **The C6 gate (5×10⁻³) minus the direct measurement (3.0×10⁻³) is not a
+      margin.** In the risky stratum the gate falls *below* the direct
+      measurement in 20 of 25 channels — see
+      [C6 is not a bound](#c6-is-not-a-bound).
+    - **The worst E₀ interpolation error, 3.0×10⁻³, sits at s ≈ 6.65 Å⁻¹**, and
+      the tested observable is insensitive there. Restricted to s ≤ 2 Å⁻¹ the
+      same sweep gives 8.5×10⁻⁵. Use the second number for propagation, not the
+      first — and neither is a bound.
+    - **The absolute cross section carries 10–24 % from Bote–Salvat**, which
+      dwarfs everything else — but it does not enter the budget for F at all,
+      because F is normalized to F(0) = 1 and carries no absolute scale.
+
+## A benchmark an independent group can run { #benchmark }
+
+Nothing on this page has been reproduced by anyone else. To make that possible
+rather than merely invited, there is a specification with the target fixed in
+advance:
+[`docs/notes/benchmark_spec_2026-08-19.md`](https://github.com/seto77/Temari/blob/main/docs/notes/benchmark_spec_2026-08-19.md).
+
+- **Ten channels**, chosen by a rule stated before the numbers were looked at:
+  the lightest and heaviest Z of each shell family (C K, Sn K, Ca L1, Rn L3,
+  Zn M1, Rn M5), the channels where an external reference exists or the v3→v4
+  prescription change was largest (Si K, Fe K, Au L3), and the lightest channel
+  whose F changes sign inside the published nodes (Ca L2).
+- **170 points**: 17 s nodes, s = 0 … 8 Å⁻¹ in steps of 0.5, at E₀ = 200 keV.
+  Both axes are *exact* — 200 keV is a real row in every one of the ten, and
+  those s values are grid nodes, so nothing is resampled.
+- **Reference values are already public**:
+  [`tables/F_200keV_preview.csv`](https://github.com/seto77/Temari/blob/main/tables/F_200keV_preview.csv),
+  CC-BY-4.0, no download of the 45 MB archive required. It is rounded to six
+  decimals, which measurably costs ≤5×10⁻⁷ against the shipped JSON.
+- **Acceptance is in two tiers.** For a reimplementation of the *same*
+  prescription, 10⁻⁵ absolute — not a certificate of correctness but a threshold
+  above which some knob differs. For a *different* prescription there is
+  **deliberately no tolerance**: the honest output is a deviation curve and a
+  statement of which knob differs.
+
+The specification spends most of its length on the traps, because the ones that
+bite are not physics: the CLI's quadrature default is PROD and not the shipping
+HIGH, the function defaults correspond to no shipped generation at all, `X_ALPHA`
+is 1.0 rather than 2/3, the transverse term is absent by construction, and the
+edge energies must come from Bote–Salvat or every row shifts.
+
 ## What is deliberately not verified here
 
 - **Absolute cross sections.** They are Bote–Salvat values; the engine's own
