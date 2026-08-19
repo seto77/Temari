@@ -127,7 +127,7 @@ tools ローカル repo) を足した。**v3 の表と v5 の表の実際の差*
 2.45e-03 で、シナリオ値の下側 (帯別の最悪を符号無視で積んだ見積りが実際より大きく出る方向)。
 ⚠ **これは 1 配置の `direct-measurement`** であって、§3.2 の母集団 (246 チャネル、中央 8.6e-03) へ
 広げない。⚠ v3 を「当時の native loader (指数 tail) のまま」通す release-to-release 比較は別立て
-(未実施。処方差だけでなく s 範囲・tail 契約・loader 挙動の差が全部入る)。
+(未実施。処方差だけでなく s 範囲・tail の保証・loader 挙動の差が全部入る)。
 
 再現: `dotnet build -c Release tools/AlchemiCheck/AlchemiCheck.csproj` のあと
 `AlchemiCheck.exe sens-v3v5 --v3dir <prod_v3_jl> --v5dir <Temari/src/prod_v5_jl>` (ReciPro 側)。
@@ -168,6 +168,6 @@ dataset version が記録されていない研究 / 高 s 寄与や tail 処理�
 チャネルを固定して報告すること。
 
 ⚠ また、codex は **release-to-release 比較** (各 release を当時の native loader と
-範囲契約のまま ReciPro へ通す) を §3 とは**別立て**にすべきだと言っている。
-そちらには continuum 処方・s 範囲・tail/padding 契約・チャネル範囲・loader 挙動の
+範囲の保証のまま ReciPro へ通す) を §3 とは**別立て**にすべきだと言っている。
+そちらには continuum 処方・s 範囲・tail/padding の保証・チャネル範囲・loader 挙動の
 差が全部入るので、**「κ-Dirac だけの効果」とは呼べない**。

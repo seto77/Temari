@@ -18,7 +18,7 @@ Julia 以外の追加パッケージを入れず、selftest を走らせ、イ�
 | Julia | 1.11 以上 (`Project.toml` の `[compat]` の下限)。F(s, E₀) データセット (v3/v4/v5) がピン留めしている処理系は **1.11.9**、dataset-factors v1.0.0 がピン留めしているのは **1.12.6** です ([再現性の規律](reproducibility.md) を参照)。CI は Ubuntu と Windows で 1.11.9 と 1.12 を回しており、どちらも検証スイートを通ります。 |
 | パッケージ | Julia 標準ライブラリ (`LinearAlgebra`, `Serialization`, `Printf`, `SHA`, `Sockets`, `Dates`) 以外は不要です。 |
 | OS | Windows・Linux・macOS。Windows での長時間マルチスレッドバッチは Julia ランタイム側の問題を踏みます — [トラブルシューティング](troubleshooting.md) を参照してください。 |
-| Python | 2 つ目の独立実装 (`src/ionization.py`) と、`tools/` 以下のデータセット契約スクリプトを動かすときだけ必要です。エンジンの実行には不要です。 |
+| Python | 2 つ目の独立実装 (`src/ionization.py`) と、`tools/` 以下のデータセット適合テストのスクリプトを動かすときだけ必要です。エンジンの実行には不要です。 |
 
 `Pkg.add` もビルド手順もありません。リポジトリのルートには `Project.toml` が
 ありますが、これは**パッケージではなく環境**です。`name`/`uuid` を持たず、
@@ -193,7 +193,7 @@ julia -t auto src/ionization.jl 79 L3 300 --high --json au_l3_300.json
 (`s_nodes_A_inv`)、$F(s)$ (`F`)、束縛エネルギー (`E_bound_eV`) と小成分の割合、
 両方の断面積 (`sigma_bote_nm2`, `sigma_own_nm2`)、閾値と過電圧 (`e_th_keV_bote`,
 `overvoltage_u`)、診断値 (`diag`)、model id (`model_id`)、そして求積プリセットと
-その数値設定です。このファイルが、GUI を含む下流すべてに対するエンジンの契約です。
+その数値設定です。このファイルが、GUI を含む下流すべてに対するエンジンの仕様です。
 処方フラグ (`--rel`, `--no-kdirac`, `--kli`, `--frozen`, …) は [CLI ページ](cli.md)
 に一覧があります。既定が出荷処方なので、フラグは要りません。
 
@@ -306,7 +306,7 @@ key には SCF 処方が含まれ、数値基盤と原子 SCF のソースから
 
 - [コマンドリファレンス](cli.md) — すべてのサブコマンド・フラグ・ツール
 - [物理 (処方)](physics.md) — 処方が実際に何であるか
-- [データ](data.md) — 出荷テーブルとその契約
+- [データ](data.md) — 出荷テーブルとその仕様
 - [検証](verification.md) — 数値をどこまで信じてよいか
 
 ## 参考文献

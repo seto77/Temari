@@ -164,7 +164,7 @@ v4 の連続状態がスカラー相対論的なものを置き換えたのは�
 
 `--json` は 1 つのオブジェクトを書き出します。中身は s グリッドと `F`、束縛
 エネルギーと小成分ノルム比、両方の断面積、経過時間、model id、そして収束診断を
-収めた `diag` ブロックです。このファイルが下流のすべてに対するエンジンの契約です —
+収めた `diag` ブロックです。このファイルが下流のすべてに対するエンジンの仕様です —
 GUI はこれ以外を読みません。
 
 「両方の断面積」とは: `sigma_bote_nm2` は出荷値で、Bote–Salvat の解析フィット
@@ -433,8 +433,8 @@ julia -t 1 src/gen_factors.jl --print-recipe                       # print the p
 | コマンド | 役割 |
 | --- | --- |
 | `julia tools/check_factor_tables.jl src/prod_factors_v1 [--certify-dir DIR] [--golden schema/factors_golden_v1.json] [--allow-dev]` | リリース QC F1–F10 (元素集合、メタデータの一様性、s 格子の SHA-256、値の構造、Mott–Bethe 恒等式、ゲート台帳、loader の端条件、tight 参照との停止誤差、golden ベクトル)。 |
-| `tools/factors_loader.jl` (`include` して使います。`fl_load_element(dir, z)`、`fx_at`、`fe_at`) | Julia の参照 loader: 契約のスプライン規約だけを実装し、それ以外は何もしません — SCF コードは不要です。 |
-| `python tools/temari_factors_contract.py DIR [--negative] [--make-golden …] [--allow-dev]` | **実行可能な契約**と Python 参照 loader。`--negative` は、18 種のミュータント loader (誤った端条件、t = s² ではなく s 上のスプライン、γ を掛ける、補外を受け付ける、…) が検知されることを実演します。 |
+| `tools/factors_loader.jl` (`include` して使います。`fl_load_element(dir, z)`、`fx_at`、`fe_at`) | Julia の参照 loader: 仕様のスプライン規約だけを実装し、それ以外は何もしません — SCF コードは不要です。 |
+| `python tools/temari_factors_contract.py DIR [--negative] [--make-golden …] [--allow-dev]` | **実行可能な仕様**と Python 参照 loader。`--negative` は、18 種のミュータント loader (誤った端条件、t = s² ではなく s 上のスプライン、γ を掛ける、補外を受け付ける、…) が検知されることを実演します。 |
 
 規約そのもの (s ノード s_i = 6i/7680、スプラインの端条件、定義域 [0, 6]、有効数字
 11 桁) は [データ](data.md) ページにあります。
@@ -453,7 +453,7 @@ julia -t auto src/gui.jl --port 9000    # non-default port
 仕組みと、その理由:
 
 - GUI は `src/ionization.jl ... --json <tmpfile>` を**別プロセスとして**起動し、
-  そのファイルを返します。in-process 結合は設計上ありません — CLI が契約です。
+  そのファイルを返します。in-process 結合は設計上ありません — CLI が仕様です。
 - サブプロセス分離は Windows の GC クラッシュも封じ込めます: エンジンが死んでも
   サーバは生き残り、終了コードとログの末尾を表示します。
 - エンジンは `-t 4` に固定されているので、対話的な計算が、バッチを走らせている
@@ -472,7 +472,7 @@ s グリッドはエンジンの既定。E₀ 掃引や複数曲線の重ね描�
 
 ## 検証・解析ツール { #verification-and-analysis-tools }
 
-完全な一覧 — ビット同一ツールを 1 つの表に、データセット QC と契約ツールをもう
+完全な一覧 — ビット同一ツールを 1 つの表に、データセット QC と実行可能な仕様のツールをもう
 1 つの表に — は [検証](verification.md) ページにあります。開発者が最もよく手を
 伸ばす数本を挙げます:
 
