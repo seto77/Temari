@@ -53,9 +53,14 @@ const QUICK_SETTINGS = (n1=8, n2=16, n3=8, l_cap=72, n_x=32, n_phi=16,
 # 260820Cl: l_cap 128 → 256 (LKIN_RULE :v6 では cap が律速 — M1 @400 keV は l ≈ 280 まで効く。
 #   cap 128 では ΔF 1.1e-05 / cap 256 で ≤ 1e-06 (要因計画)。費用は v5 生成の ≈ 4 倍を見込む)
 const LEGACY_V5_CUTOFF = get(ENV, "TEMARI_LEGACY_V5_CUTOFF", "0") == "1"
-#   (TEMARI_LEGACY_V5_CUTOFF=1 のときだけ 128 = v5 の組)
+#   (TEMARI_LEGACY_V5_CUTOFF=1 のときだけ v5 の組 = l_cap 128 / n_x 96 / n_phi 48 / n_q 360)
+# 260820Cl (v6): 部分波を直した後の 3s/3p (M1/M2 低 Z × 最大 E₀) の残差は **角度求積 (n_x/n_phi) と Q 表 (n_q)** が支配 —
+#   HIGH (96/48/360) は最強 (288/144/1080) から ΔF 7e-06 (Zn M1 @400)、**n_x 192 / n_phi 96 / n_q 720 で ≤ 8e-08** (M1/M2/M4
+#   4 行、scratchpad `m1_nx_nq.jl` → `../qcamp/m1_nx_nq.log`)。計算量は +45 % (角度・Q 表は連続状態の解に比べ安い)。
+#   ⇒ HIGH v6 = n_x 192 / n_phi 96 / n_q 720 / l_cap 256 / 部分波 v6
 const HIGH_SETTINGS = (n1=20, n2=56, n3=20, l_cap=LEGACY_V5_CUTOFF ? 128 : 256,
-                       n_x=96, n_phi=48, n_q=360, sig_thresh=1e-13, ppw=30.0, dt_log=1.0e-3)
+                       n_x=LEGACY_V5_CUTOFF ? 96 : 192, n_phi=LEGACY_V5_CUTOFF ? 48 : 96,
+                       n_q=LEGACY_V5_CUTOFF ? 360 : 720, sig_thresh=1e-13, ppw=30.0, dt_log=1.0e-3)
 
 # 単発出口の JSON 契約。model_id は物理処方を表すが、求積プリセットは意図的に
 # 含めないため、再現に必要な数値設定を別フィールドで必ず保存する。

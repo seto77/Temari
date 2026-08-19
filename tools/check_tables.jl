@@ -409,6 +409,7 @@ function provenance_consistency(files::Vector{String})
         st = get(d, "settings", Dict{String,Any}())
         dv_calc = presc_dataset_version(pr; lkin_rule=String(get(st, "lkin_rule", "v5")),
                                         l_cap=Int(get(st, "l_cap", 128)),        # lkin_rule の無い旧ファイル = v5 (l_cap 128)
+                                        n_x=Int(get(st, "n_x", 96)), n_phi=Int(get(st, "n_phi", 48)), n_q=Int(get(st, "n_q", 360)),
                                         lkin_radius_frac=(x = get(st, "lkin_radius_frac", nothing); x === nothing ? LKIN_RADIUS_FRAC : Float64(x)),
                                         lkin_margin=Int(get(st, "lkin_margin", 12)))
         if dv_calc != dv

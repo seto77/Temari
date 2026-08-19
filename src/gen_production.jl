@@ -592,13 +592,16 @@ dataset_version と model_id が**一致すること**しか見ないので、�
 #   QUICK/PROD で作った一式も "5.0.0" を名乗れていた (l_cap を見ていなかった) 弱点も同時に塞ぐ。
 #   `tools/check_tables.jl` C16 は JSON の settings から同じ引数で引き直す (lkin_rule が無い旧ファイル = v5)。
 function presc_dataset_version(p; lkin_rule::AbstractString=string(LKIN_RULE), l_cap::Integer=HIGH_SETTINGS.l_cap,
-                               lkin_radius_frac=LKIN_RADIUS_FRAC, lkin_margin::Integer=LKIN_MARGIN)
+                               lkin_radius_frac=LKIN_RADIUS_FRAC, lkin_margin::Integer=LKIN_MARGIN,
+                               n_x::Integer=HIGH_SETTINGS.n_x, n_phi::Integer=HIGH_SETTINGS.n_phi,
+                               n_q::Integer=HIGH_SETTINGS.n_q)
     (is_shipping_format() && p == PRESC_V4) || return "0.0.0-dev"
-    lkin_rule == "v5" && l_cap == 128 && return "5.0.0"
-    # ⚠ v6 の範囲 (等比 s 格子 / M1 の n_q / ppw などを束ねるか) は作者が凍結するまで **"6.0.0-dev"** を名乗る
+    (lkin_rule == "v5" && (l_cap, n_x, n_phi, n_q) == (128, 96, 48, 360)) && return "5.0.0"
+    # ⚠ v6 の範囲 (等比 s 格子 / ppw / コメント・旧パス などを束ねるか) は作者が凍結するまで **"6.0.0-dev"** を名乗る
     #   (codex 2026-08-20: 版は処方 + 正確な S_GRID + schema + HIGH 全設定 + 部分波規則 + 量子化の一式で定義し、
     #   生成側の名乗りと C16 を同じ定義から引く — その一式を `V6_SPEC` として作るのは凍結時)
-    (lkin_rule == "v6" && l_cap == 256 && lkin_radius_frac == 0.999 && lkin_margin == 12) && return "6.0.0-dev"
+    (lkin_rule == "v6" && (l_cap, n_x, n_phi, n_q) == (256, 192, 96, 720) &&
+     lkin_radius_frac == 0.999 && lkin_margin == 12) && return "6.0.0-dev"
     return "0.0.0-dev"
 end
 
@@ -783,7 +786,8 @@ function run_channel(z::Int, tag::String, outdir::String;
         "j_lower" => j_lower, "occ_init" => occ_init,
         "s_grid_A_inv" => S_GRID,
         "model_id" => presc_model_id(presc),
-        "dataset_version" => presc_dataset_version(presc; l_cap=settings.l_cap),
+        "dataset_version" => presc_dataset_version(presc; l_cap=settings.l_cap, n_x=settings.n_x,
+                                                   n_phi=settings.n_phi, n_q=settings.n_q),
         "schema_version" => SCHEMA_VERSION,
         "generator" => "ionization.jl (Julia)",
         "generator_commit" => _git_head(),
@@ -866,8 +870,8 @@ function audit(; presc=PRESC_V4)
         ("lkin margin 12→20",       (; HIGH_SETTINGS..., lkin_margin=20)),
         ("lkin 含有率 0.999→0.9999", (; HIGH_SETTINGS..., lkin_frac=0.9999)),
         ("cap320 + margin20 + 0.9999", (; HIGH_SETTINGS..., l_cap=320, lkin_margin=20, lkin_frac=0.9999)),
-        ("角度 n_x/n_phi ×1.5",     (; HIGH_SETTINGS..., n_x=144, n_phi=72)),
-        ("n_q 360→540",             (; HIGH_SETTINGS..., n_q=540)),
+        ("角度 n_x/n_phi ×1.5",     (; HIGH_SETTINGS..., n_x=288, n_phi=144)),
+        ("n_q 720→1080",            (; HIGH_SETTINGS..., n_q=1080)),
         ("ppw 30→38",               (; HIGH_SETTINGS..., ppw=38.0)),
         ("dt_log 1e-3→7e-4",        (; HIGH_SETTINGS..., dt_log=7e-4)),
         ("sig_thresh 1e-13→1e-15",  (; HIGH_SETTINGS..., sig_thresh=1e-15)),
@@ -1029,7 +1033,8 @@ function main_gen(args)
             "(lane $lane_i/$lane_n, tags=$(join(tags,",")), " *
             (quick ? "QUICK" : "HIGH") * ", スレッド $(Threads.nthreads()))")
     println("処方: ", presc_model_id(presc),
-            "  dataset_version=", presc_dataset_version(presc; l_cap=settings.l_cap))
+            "  dataset_version=", presc_dataset_version(presc; l_cap=settings.l_cap, n_x=settings.n_x,
+                                                          n_phi=settings.n_phi, n_q=settings.n_q))
     println("出力: $outdir\n")
     warn_if_dirty()                            # 260809Cl 追加 (指示書 §1.3)
     n_done = n_skip = 0
