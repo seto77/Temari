@@ -48,6 +48,12 @@ end
 include(joinpath(@__DIR__, "..", "src", "gen_production.jl"))
 include(joinpath(@__DIR__, "beta_spike.jl"))
 
+"★ `:sin2` 座標が使う運動学上限 ε_max [Ha]。呼び出し側が毎行入れる"
+const WC_EMAX = Ref(0.0)
+
+"★ `:geo` のパネル数"
+const WC_NPAN = Ref(8)
+
 "窓 [d1, d2] を指定した座標の GL n 点で積む"
 function wc_nodes(d1_eV::Float64, d2_eV::Float64, n::Int, coord::Symbol)
     e1 = d1_eV / HARTREE_EV; e2 = d2_eV / HARTREE_EV
@@ -63,6 +69,33 @@ function wc_nodes(d1_eV::Float64, d2_eV::Float64, n::Int, coord::Symbol)
         l1 = log(e1); l2 = log(e2); h = l2 - l1
         u = exp.(l1 .+ h .* x)
         return (u, w .* h .* u)
+    elseif coord === :sin2          # ★ codex 推奨: 両端の √ を同時に正則化
+        # ε = ε_max sin²θ ⇒ √ε ∝ sin θ、√(ε_max−ε) ∝ cos θ
+        # ⚠ ε_max は呼び出し側が WC_EMAX[] に入れておく (窓の上端ではなく運動学上限)
+        em = WC_EMAX[]
+        em <= 0.0 && error("WC_EMAX が未設定")
+        t1 = asin(sqrt(clamp(e1/em, 0.0, 1.0)))
+        t2 = asin(sqrt(clamp(e2/em, 0.0, 1.0)))
+        h = t2 - t1
+        th = t1 .+ h .* x
+        return (em .* sin.(th) .^ 2, w .* h .* em .* sin.(2.0 .* th))
+    elseif coord === :geo           # ★ ε 上の等比パネル (山がどこにあっても拾う)
+        # [Δ₁, Δ₂] を等比に P 分割し、各パネルで √ε GL。
+        # 最下パネル [Δ₁, Δ₁+δ] は √ε で正則化する (Δ₁=0 のとき閾値の立ち上がり)
+        P = WC_NPAN[]
+        lo = e1 > 0 ? e1 : e2 * 1e-8
+        edges = e1 > 0 ? (e1 .* (e2/e1) .^ range(0, 1, length=P+1)) :
+                         vcat(0.0, lo .* (e2/lo) .^ range(0, 1, length=P))
+        eps = Float64[]; we = Float64[]
+        for p in 1:(length(edges)-1)
+            a = edges[p]; b = edges[p+1]
+            sa = sqrt(a); sb = sqrt(b); h = sb - sa
+            for j in eachindex(x)
+                u = sa + h*x[j]
+                push!(eps, u*u); push!(we, w[j]*h*2.0*u)
+            end
+        end
+        return (eps, we)
     elseif coord === :ship          # 出荷の分岐そのもの
         return d1_eV == 0.0 ? (e2 .* x .^ 2, w .* 2.0 .* e2 .* x) :
                               (e1 .+ (e2 - e1) .* x, w .* (e2 - e1))
@@ -164,6 +197,7 @@ function main_width(args)
         try; ch, r_core, T0, k_i = wc_setup(z, tag, e0)
         catch; continue end
         emax = (T0 - ch.E_th) * HARTREE_EV
+        WC_EMAX[] = T0 - ch.E_th        # ★ :sin2 が使う (Ha)
         @printf("== Z=%d %s @%.0f keV  (ε_max = %.0f eV) ==\n", z, tag, e0, emax)
         ws = [1e3, 1e4, 1e5, 0.5*emax, 0.99*emax]
         for d1 in (0.0, 10.0)
@@ -172,6 +206,8 @@ function main_width(args)
             for n in WC_NS; @printf(" %10s", "出荷 GL$n"); end
             print(" |")
             for n in WC_NS; @printf(" %10s", "√ε GL$n"); end
+            print(" |")
+            for n in WC_NS; @printf(" %10s", "sin²θ GL$n"); end
             println()
             for w in ws
                 d2 = d1 + w
@@ -186,6 +222,11 @@ function main_width(args)
                 print(" |")
                 for n in WC_NS
                     e, ww = wc_nodes(d1, d2, n, :sqrt)
+                    @printf(" %10.2e", reldiff(wc_eval(ch, r_core, k_i, T0, beta, e, ww), ref))
+                end
+                print(" |")
+                for n in WC_NS
+                    e, ww = wc_nodes(d1, d2, n, :sin2)
                     @printf(" %10.2e", reldiff(wc_eval(ch, r_core, k_i, T0, beta, e, ww), ref))
                 end
                 println()
