@@ -120,3 +120,4 @@ v1 §4 と同一 + `rule_version` (`v1`/`v2`) + `l_max_policy` + `rule_config` (
 - 並走: `tools/lkin_sweep.jl` (3 レーン × 6 スレッド、22:53 起動、HEAD 334c35b の版 — ⚠ E₀ ≤ 35 keV の行は s=16 が
   運動学的上限の外で例外 → `b04ccfe` で修正、完走後に当該行だけ再開)
 - 結果は `docs/notes/certification_v2_pilot_2026-08-19.md` の続き (§6 以降) に書く
+- **完走 (04:4x)**: 合格 187 / 不合格 5 (β = 200 mrad: Ca M1 ×4 (格子外)、Zn M3 ×1)。正本 = `certification_v2_pilot_2026-08-19.md` §6
