@@ -113,3 +113,10 @@ v1 §4 と同一 + `rule_version` (`v1`/`v2`) + `l_max_policy` + `rule_config` (
 ## 7. 実施記録 (走らせたあとに追記)
 
 ### 7.1 pilot (v2) — (起動時に記入)
+
+- 起動 **2026-08-19 23:14–23:18** (9 レーン × 2 スレッド、`CERT_RULE=v2 STAGGER=30 bash tools/run_cert_v2_fleet.sh pilot 9 2 cert_v2b_pilot`)。
+  commit **`184a65c`** (dirty 0)、Julia 1.11.9、指紋 **`b447496bf5c31a45`**
+  (fp.rule = `…/ppw30.0/dt0.001/lcap128/sig1.0e-13/lmax:kappa_rc+12`)。出力 = `../cert_v2b_pilot_lane*.jsonl` (リポ外)
+- 並走: `tools/lkin_sweep.jl` (3 レーン × 6 スレッド、22:53 起動、HEAD 334c35b の版 — ⚠ E₀ ≤ 35 keV の行は s=16 が
+  運動学的上限の外で例外 → `b04ccfe` で修正、完走後に当該行だけ再開)
+- 結果は `docs/notes/certification_v2_pilot_2026-08-19.md` の続き (§6 以降) に書く
