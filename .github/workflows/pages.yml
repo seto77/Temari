@@ -9,6 +9,9 @@ on:
       - main
     paths:
       - docs/**
+      # 両 schema は $id として Pages 上の絶対 URL を名乗るので、site へ複製する
+      # (下の "Stage the schemas" を参照)。schema/ だけの変更でも再配信が要る。
+      - schema/**
       - .github/workflows/pages.yml
   workflow_dispatch:
 
@@ -35,6 +38,27 @@ jobs:
 
       - name: Install documentation dependencies
         run: python -m pip install -r docs/requirements.txt
+
+      # 両 schema は "$id" として Pages 上の絶対 URL を名乗っており、その URL は
+      # 解決できなければならない。⚠ 両ファイルは公開済 SHA-256 の tarball に
+      # 同梱されているので **1 バイトも変えられない** — 中身を直すのではなく、
+      # ビルド時に docs/src/ へ複製して同じバイトをその URL で配信する。
+      # ⚠ 複製はリポにコミットしない (.gitignore 済。二重管理の禁止)。
+      - name: Stage the schemas at the URL their $id names
+        run: |
+          set -eu
+          mkdir -p docs/src/schema
+          for f in temari_dataset_v2 temari_factors_v1; do
+            src="schema/$f.schema.json"
+            cp "$src" "docs/src/schema/$f.schema.json"
+            cmp "$src" "docs/src/schema/$f.schema.json"
+            want="\"https://seto77.github.io/Temari/schema/$f.schema.json\""
+            if ! grep -qF "$want" "$src"; then
+              echo "::error::$f does not name the URL it is served at"
+              exit 1
+            fi
+            echo "$f: staged, byte-identical, id matches"
+          done
 
       # --strict turns broken internal links into build failures.
       - name: Build documentation

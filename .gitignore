@@ -51,3 +51,6 @@ dist/
 
 # Claude Code のプロジェクト指示 (内部文書。ローカルパス・作業経緯を含むため公開しない)
 CLAUDE.md
+
+# $id が名乗る URL で配信するための schema 複製 (pages.yml がビルド時に作る。二重管理しない)
+docs/src/schema/

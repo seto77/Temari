@@ -30,11 +30,31 @@ Build it locally exactly the way CI does, **from the repository root**:
 
 ```bash
 python -m venv .venv-docs && .venv-docs/bin/pip install -r docs/requirements.txt
+mkdir -p docs/src/schema                     # see "The schemas are served, not stored"
+cp schema/temari_dataset_v2.schema.json schema/temari_factors_v1.schema.json docs/src/schema/
 mkdocs build -f docs/mkdocs.yml --strict     # --strict turns broken links into failures
 mkdocs serve -f docs/mkdocs.yml              # live preview on 127.0.0.1:8000
 ```
 
 `docs/site/` is generated output and is git-ignored.
+
+### The schemas are served, not stored
+
+`schema/temari_dataset_v2.schema.json` and `schema/temari_factors_v1.schema.json`
+each declare
+
+```json
+"$id": "https://seto77.github.io/Temari/schema/<name>.schema.json"
+```
+
+so that URL has to resolve — it is the one external reference point of an
+artifact that calls itself self-describing. ⚠ **Neither file can be edited**:
+both are packaged into release archives whose SHA-256 is published. So instead
+of changing the bytes, `pages.yml` copies them into `docs/src/schema/` at build
+time and serves *the same bytes* at the URL they name, checking `cmp` and the
+`$id` string as it goes. **The copies are git-ignored and must not be
+committed** — two copies in the repository would be two things to keep in sync.
+The `cp` above is what makes a local `--strict` build match CI.
 
 Adding a language is two steps: a `locale:` entry under the `i18n` plugin in
 `mkdocs.yml` (with `nav_translations`), and a branch in `overrides/main.html`
