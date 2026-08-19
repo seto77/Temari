@@ -102,7 +102,35 @@ min 2.85e-04 / p10 3.11e-03 / **中央 8.57e-03** / p90 2.69e-02 / max 5.72e-02�
 ⚠ 呼び方: これは `scenario-sensitivity`。**上界ではない** — 伝達係数は任意の δF(s)
 に対する作用素ノルムとして証明されていないし、符号・s 依存・チャネル間相関を
 無視している。**実経路へ通した測定でもない** (それは `AlchemiCheck sens` +
-`ChannelDataOverride` が要る = ReciPro 側の作業)。
+`ChannelDataOverride` が要る = ReciPro 側の作業 → §3.3 で実施した)。
+
+### 3.3 ★ 実経路へ通した直接測定 (2026-08-19 実施 — `direct-measurement`)
+
+ReciPro 側に **`AlchemiCheck sens-v3v5`** (`ReciPro/tools/AlchemiCheck/PrescriptionTests.cs`、
+tools ローカル repo) を足した。**v3 の表と v5 の表の実際の差** δF(s) = F_v3(s) − F_v5(s)
+(両 JSON の E₀ = 200 keV の行。E₀ 節点は一致、v5 の先頭 161 点は v3 の s 格子と厳密一致、
+同じ PCHIP、s ≤ 8 Å⁻¹) を `ChannelDataOverride` で足して、同じ Bloch 解の上で 2 回走らせた
+(δ ≡ 0 の差し替えで Total が厳密に一致することを確認済)。配置 = §3.1 と同じ
+β-AlCo B2 / 200 keV / h00 系統反射列 / ±2.2 θ_B × 41 点 / 厚み 20, 50, 100 nm / 基底 504 本:
+
+| | Al K | Co K |
+|---|---:|---:|
+| max\|F_v3 − F_v5\| (s ≤ 8 Å⁻¹) | 3.18e-03 (s = 1.75) | 2.62e-02 (s = 4.60)、s ≤ 2 では 1.69e-02 |
+| σ_own v3/v5 | 0.9935 | 0.9589 |
+
+| 観測量 | 20 nm | 50 nm | 100 nm | 最悪 |
+|---|---:|---:|---:|---:|
+| **サイト比 Y(Al)/Y(Co) の相対差** | 1.33e-03 | **2.45e-03** | 1.34e-03 | **2.45e-03** |
+| 生の収量の相対差 | 1.29e-03 | 3.04e-03 | 2.14e-03 | 3.04e-03 |
+
+⇒ **§3.1 のシナリオ見積り (Al K 2.81e-03 / Co K 5.67e-03 の寄与の和) と同じ桁**。直接測定のサイト比は
+2.45e-03 で、シナリオ値の下側 (帯別の最悪を符号無視で積んだ見積りが実際より大きく出る方向)。
+⚠ **これは 1 配置の `direct-measurement`** であって、§3.2 の母集団 (246 チャネル、中央 8.6e-03) へ
+広げない。⚠ v3 を「当時の native loader (指数 tail) のまま」通す release-to-release 比較は別立て
+(未実施。処方差だけでなく s 範囲・tail 契約・loader 挙動の差が全部入る)。
+
+再現: `dotnet build -c Release tools/AlchemiCheck/AlchemiCheck.csproj` のあと
+`AlchemiCheck.exe sens-v3v5 --v3dir <prod_v3_jl> --v5dir <Temari/src/prod_v5_jl>` (ReciPro 側)。
 
 ## 4. v3 を使った過去の結果について
 
