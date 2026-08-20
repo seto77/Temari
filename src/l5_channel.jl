@@ -341,7 +341,7 @@ function compute_NK(pot_ion, r_b, u_b, E_th::Float64, T0::Float64,
         bad[ie] = bd
         rtail[ie] = rtl
         d = Threads.atomic_add!(done, 1) + 1
-        progress && print("\r  eps $d/$ne   ")
+        progress && (print("\r  eps $d/$ne   "); flush(stdout))   # 260820Cl: flush — heartbeat をログの mtime に届かせる
     end
     progress && println()
     N = dNde' * we                             # N(K) = Σ_ε w_ε dN/dε (BLAS gemv 'T')

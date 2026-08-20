@@ -909,7 +909,7 @@ function run_channel(z::Int, tag::String, outdir::String;
                     z, tag, e0, d["bad_significant_l"], d["max_match_resid"],
                     d["r_tail_max"])
             o = compute_channel(z, tag, e0; settings=(; settings..., ppw=35.0),
-                                s_nodes=s_nodes_row, verbose=false, presc...)
+                                s_nodes=s_nodes_row, verbose=PRODUCTION_HEARTBEAT, presc...)
             retried = 1
             d = o["diag"]
             if d["bad_significant_l"] > 0 || d["max_match_resid"] > GATE_MRES ||

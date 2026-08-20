@@ -36,6 +36,27 @@ cpu_of_lane() {
     tr -d '' | head -1
 }
 
+# 260820Cl: **プロセス木ごと kill する** — `julia` は juliaup のランチャで、実体の julia.exe は子プロセス。
+#   ランチャだけ kill すると子が孤児として残り、再起動したレーンと同じ partial / 完成 JSON を競合更新しうる (codex)。
+#   MSYS pid → WINPID → `taskkill /T /F` で木ごと落とし、消えるまで待つ
+kill_tree() {
+  local msys_pid=$1 winpid
+  winpid=$(ps -W 2>/dev/null | awk -v p="$msys_pid" '$1==p {print $4}' | head -1)
+  if [ -n "$winpid" ]; then
+    taskkill //PID "$winpid" //T //F > /dev/null 2>&1
+  fi
+  kill -9 "$msys_pid" 2>/dev/null
+  # 子 julia.exe が消えるのを最大 30 s 待つ (残っていればログに残す — 二重起動の証拠になる)
+  local i
+  for i in $(seq 1 30); do
+    [ -z "$winpid" ] && break
+    powershell -NoProfile -Command "if (Get-CimInstance Win32_Process -Filter \"ParentProcessId=$winpid\" -ErrorAction SilentlyContinue) { exit 1 } else { exit 0 }" > /dev/null 2>&1 && break
+    sleep 1
+  done
+}
+# 恒久エラー (再試行しても同じ結果になるもの): fail-closed の拒否・RUN_SPEC 不一致・引数・既存ファイル不一致・spec 不一致
+PERMANENT_RE='本番生成は --profile|出荷版を名乗れない|RUN_SPEC.json の|未知の引数|に値が無い|検証ゲート専用|が今の生成と違う|repo の中|2 回指定されている|--lane は i/n|--tags に未知'
+
 lane=${1:?レーン番号 (0 始まり)}
 nlane=${2:-8}
 nthr=${3:-4}
@@ -91,13 +112,13 @@ for attempt in $(seq 1 60); do
     # ログ停滞 3 分以上 かつ CPU が 2 回連続で伸びていない = wedged
     if [ $stall -gt 180 ] && [ $zero_cpu -ge 2 ]; then
       echo "=== watchdog: wedged (log stalled ${stall}s, CPU frozen at ${cpu}s), killing pid $jpid $(date '+%F %T') ===" >> "$log"
-      kill -9 $jpid 2>/dev/null
+      kill_tree $jpid
       sleep 10
       break
     fi
     if [ $stall -gt $stall_s ]; then   # 停滞 = wedged とみなす (従来の backstop。既定 15 分)
       echo "=== watchdog: log stalled >${stall_s}s, killing pid $jpid $(date '+%F %T') ===" >> "$log"
-      kill -9 $jpid 2>/dev/null
+      kill_tree $jpid
       sleep 10
       break
     fi
@@ -108,6 +129,11 @@ for attempt in $(seq 1 60); do
   if [ $rc -eq 0 ]; then
     echo "=== lane $lane/$nlane COMPLETE $(date '+%F %T') ===" >> "$log"
     exit 0
+  fi
+  # 260820Cl: 恒久エラーは再試行しない (60 回 × 同じ拒否を繰り返さない)
+  if tail -n 40 "$log" | grep -qE "$PERMANENT_RE"; then
+    echo "=== lane $lane/$nlane PERMANENT ERROR (fail-closed / 引数 / run の不一致) — 再試行しない $(date '+%F %T') ===" >> "$log"
+    exit 2
   fi
   sleep 10
 done
