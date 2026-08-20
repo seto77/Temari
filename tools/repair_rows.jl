@@ -80,15 +80,28 @@ function main(args)
         error("指定した E0 $(drop) がどの行にも一致しない (行の E0 を確認)")
     p = partial_path(outdir, tag, z)
     isfile(p) && error("既にチェックポイントがある: $p (先に退避すること)")
+    # ⚠⚠ 260821Cl (敵対的監査で発覚): ここは長い間**生の行**を書いていたので、`load_partial` の
+    #   `checkpoint_row` が「legacy checkpoint without provenance」で全部捨て、修復した行が 1 つも
+    #   再利用されていなかった (症状は「再計算が遅い」だけなので気付けなかった)。
+    #   チェックポイントの包 (checkpoint_schema / context_sha256 / row_sha256 / row) で書く。
+    #   文脈 hash は**修復対象のファイルから引く** — 処方を推測すると、少しでも違えば再開が拒否される
+    haskey(d, "generation_context_sha256") ||
+        error("$path に generation_context_sha256 が無い (v4 以前の形式? 手で再生成すること)")
+    ctx = String(d["generation_context_sha256"])
     open(p, "w") do io
         for r in keep
-            write_json(io, r)
+            write_json(io, checkpoint_record(r, ctx))
             println(io)
             println(io, PARTIAL_SEP)
         end
     end
+    # 自己検査: 書いたものを load_partial が実際に読み戻せるか (これが無かったので上の欠陥が残った)
+    back = load_partial(outdir, tag, z, ctx)
+    length(back) == length(keep) ||
+        error("書き戻したチェックポイントを load_partial が $(length(back))/$(length(keep)) 行しか読めない " *
+              "— 形式が合っていない。$p を消してから調べること")
     mv(path, path * ".broken"; force=true)
-    println("→ 良品 $(length(keep)) 行を $p へ書き戻し、")
+    println("→ 良品 $(length(keep)) 行を $p へ書き戻し、load_partial で $(length(back)) 行の読み返しを確認した。")
     println("  破損版を $(basename(path)).broken へ退避した。")
     println("  捨てた E0: ", join(drop, ", "))
     # そのチャネルだけを回すレーン指定を作る (--tags だけだと、同じ殻の
@@ -96,9 +109,17 @@ function main(args)
     ch = all_channels((tag,))
     k = findfirst(==((z, tag)), ch)
     lane = k === nothing ? "" : " --lane $(k - 1)/$(length(ch))"
+    # 260821Cl: 本番入口は fail-closed — `--profile` の明示と repo 外の `--out` を要求する。
+    #   profile はファイルの settings から引く (v6 以降。無ければ v6_high を既定にせず警告する)
+    prof = get(get(d, "settings", Dict{String,Any}()), "profile", nothing)
+    profarg = prof === nothing ? "" : " --profile $(prof)"
     println("\n次: 生成時と**同じフラグ**で回すと、捨てた行だけが再計算される:")
-    println("  julia +1.11 -t 4 --gcthreads=1 src/gen_production.jl " *
-            "--tags $tag$lane --out $outdir")
+    println("  julia +1.11 -t 3 --gcthreads=1 src/gen_production.jl " *
+            "--tags $tag$lane --out $outdir$profarg")
+    prof === nothing && println("  ⚠ settings.profile が無い (v5 以前の形式)。本番入口は --profile を要求するので、" *
+                                "その一式を作った profile を自分で指定すること")
+    println("  ⚠ --out は repo の外でなければ拒否される。⚠ 生成 commit と同じ worktree から回すこと " *
+            "(source fingerprint が違うと文脈が合わず、書き戻した行が隔離される)")
     return 0
 end
 

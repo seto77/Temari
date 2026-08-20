@@ -309,6 +309,22 @@ function check_file(path::String)
     f8 = d["failures"]
     (f8 !== nothing && !isempty(f8)) &&
         push!(probs, "C8: 生成ゲート失敗 $(length(f8)) 件")
+    # ---- C8b (260821Cl 追加、監査で発覚) ----
+    # ⚠ **再開 (load_partial) は failures 配列を復元しない** — クラッシュ前に記録されたゲート失敗は
+    #   C8 から消える (rows は partial から戻るが failures は毎回空から始まる。gen_production.jl の
+    #   run_channel 冒頭)。行に残る診断値から同じ判定をやり直せば、再開を跨いでも検出できる。
+    #   閾値は生成側と同じ (GATE_MRES / GATE_RTAIL / badL は 0)。retried は記録のみ (ppw 再試行は正常経路)
+    n_retried = 0
+    for (i, r) in enumerate(rows)
+        dg = get(r, "diag", nothing)
+        dg isa Dict || continue
+        bl = Float64(get(dg, "badL", 0)); mr = Float64(get(dg, "mres", 0)); rt = Float64(get(dg, "rtail", 0))
+        n_retried += Float64(get(dg, "retried", 0)) > 0 ? 1 : 0
+        (bl > 0 || mr > GATE_MRES || rt > GATE_RTAIL) &&
+            push!(probs, "C8b: 診断値がゲート違反 @E0=$(e0[i]) (badL=$bl, mres=$mr, rtail=$rt)")
+    end
+    # ppw 再試行は正常な回復経路なので**合否にしない** — ただし件数は見えるようにする (再開を跨いでも残る)
+    n_retried > 0 && println("  [note] $(basename(path)): ppw 再試行で通った行 $n_retried 件 (diag.retried)")
     # ---- C11: N0 の桁外れ (260808Cl 追加) ----
     # v3 で Cd-K の 1 行が GC クラッシュ由来のメモリ破損を受けたときの**指紋**。
     # そのとき N0 と σ_own が中央値の ~10²⁵ 倍になっていたのに、diag は正常値
@@ -677,12 +693,42 @@ function main(args)
                     "schema_version = $sv")
     # ---- C16: model_id ↔ 生成処方 ↔ dataset_version (260811Cl 追加) ----
     ok16 = provenance_consistency(files)
-    # 260820Cl: 承認 spec との独立な適合判定 (6.0.0 のみ)。三値 — --expect-version 6.0.0 なら SKIP も不合格
+    # 260820Cl: 承認 spec との独立な適合判定 (6.0.0 のみ)。三値 — --expect-version <版> なら SKIP も不合格。
+    # ⚠ 260821Cl (監査): 旧版は (i) 値を一度も比較せず (ii) `--expect-version=6.0.0` 表記だと findfirst が
+    #   外れて **ゲートが黙って無効化**された。⇒ 表記を厳密に解析し、値を実際に名乗っている版と比べる
+    any(a -> startswith(a, "--expect-version="), args) &&
+        error("--expect-version=<版> の表記は使えない (値は次の引数として渡す): " *
+              args[findfirst(a -> startswith(a, "--expect-version="), args)])
     expect_i = findfirst(==("--expect-version"), args)
-    expect_v = expect_i === nothing ? nothing : args[expect_i+1]
+    expect_v = nothing
+    if expect_i !== nothing
+        expect_i < length(args) || error("--expect-version に値が無い")
+        expect_v = args[expect_i+1]
+        startswith(expect_v, "--") && error("--expect-version の値が無い ($expect_v はオプション)")
+        occursin(r"^[0-9]+\.[0-9]+\.[0-9]+(-dev)?$", expect_v) || error("--expect-version の値が版の形式でない: $expect_v")
+    end
     r16b = spec_conformance(files)
     ok16b = r16b.status == :pass || (r16b.status == :skip && expect_v === nothing)
-    expect_v !== nothing && r16b.status == :skip && println("[NG] C16b: --expect-version $expect_v なのに 6.0.0 の一式ではない ($(r16b.reason))")
+    if expect_v !== nothing
+        # 値そのものを比べる: 一式が名乗っている版 (C10 で一致を確認済み) と一致しなければ不合格
+        got = only(meta["dataset_version"])
+        if String(got) != expect_v
+            println("[NG] C16b: --expect-version $expect_v なのに一式は $got を名乗っている")
+            ok16b = false
+        else
+            # 承認 spec を持つ版 (registry にある版) を要求したときだけ、SKIP を不合格に数える。
+            # v5 のように spec の無い版では SKIP が正しい状態なので、版の一致だけで合格にする
+            reg_path = joinpath(SPEC_DIR_CT, "RELEASES.json")
+            has_spec = isfile(reg_path) && haskey(parse_json_file(reg_path), expect_v)
+            if has_spec && r16b.status != :pass
+                println("[NG] C16b: --expect-version $expect_v (承認 spec あり) なのに spec 照合が PASS でない ($(r16b.status): $(r16b.reason))")
+                ok16b = false
+            elseif !has_spec
+                println("C16b: --expect-version $expect_v — 版は一致 (この版に承認 spec は無いので照合は適用外)")
+                ok16b = true      # 版が一致し、その版に spec が無い ⇒ SKIP は正しい状態
+            end
+        end
+    end
     if !isempty(flips)
         # 260813Cl: 文言を C2 の窓に合わせた (旧「s>4」は C2 の窓が 4 だった頃の記述)。
         # ⚠ **回数はゲートにしない** — v5 の K 実測は 0 回 1254 行 / 1 回 150 行 /

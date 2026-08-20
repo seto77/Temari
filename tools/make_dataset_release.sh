@@ -25,6 +25,11 @@ outdir=${2:-dist}
 cd "$(dirname "$0")/.."
 
 [ -f "$prod/manifest.json" ] || { echo "manifest.json が無い: $prod" >&2; exit 1; }
+# 260821Cl (監査): **INCOMPLETE のあるディレクトリは梱包しない。**昇格の途中 (QC 済みの bytes をコピーし
+#   終えて MANIFEST.md を書く前) の staging を配布物にしてしまうと、検査を通っていない一式が外へ出る。
+#   INCOMPLETE は昇格の最後の操作として消える (qcamp/.../promote_v6.sh の手順)
+[ -f "$prod/INCOMPLETE" ] && { echo "INCOMPLETE がある: $prod — 昇格が完了していないので梱包しない" >&2; exit 1; }
+[ -f "$prod/MANIFEST.md" ] || { echo "MANIFEST.md が無い: $prod" >&2; exit 1; }
 ver=$(python -c "import json,sys; print(json.load(open('$prod/manifest.json',encoding='utf-8'))['dataset_version'])")
 name="temari-dataset-v${ver}"
 stage="$outdir/$name"

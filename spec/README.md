@@ -35,6 +35,33 @@ spec と registry を**揃って**間違えれば通る。ここで検出でき�
 と独立な数値検証 (監査・代表生成・C1–C16) が担う。実装の変更は `generator_commit` と
 `generator_source_fingerprint` (各テーブルの provenance) が固定し、spec の hash では検出しない。
 
+## 凍結 6.0.0 spec の散文の穴 (2026-08-21 の敵対的監査で判明。**spec の bytes は直さない**)
+
+spec の生バイト SHA-256 が版の定義そのもので、走行中の run の `RUN_SPEC.json`・全 partial の
+`context_sha256`・既に書かれた JSON の `spec_sha256` に焼き込まれている。⇒ **1 byte 直すと 525 本が
+C16b で落ちる**ので、誤りではない (が誤解を招く) 散文はここで補う。
+
+| spec のフィールド | 実際 | なぜそう書かれているか |
+|---|---|---|
+| `channels.z_ranges` の M4/M5 = `[30, 86]` | 出荷は **Z = 33..86 (各 54 本)** | `z_ranges` は `all_channels` が回す**候補**範囲 (`src/gen_production.jl` の `zr`) で、`available_channels(z)` (`src/l5_channel.jl`) の篩の**前**。Zn/Ga/Ge (Z=30–32) は Bote 表に 9 番目の副殻を持たないので落ちる。**出荷集合の正本は同ブロックの `count` (525) と `temari_e0_inventory_v6.json`** — 候補どおりに数えると 531 になるが出荷は 525 |
+| `eps_quadrature.segments` の「Low overvoltage (D <= 2 E_th): segments 1 and 3 only」 | 低過電圧分岐では**区間 1 のスケールも変わる**: ε = (D/2)·x² (範囲 [0, D/2])、区間 3 は ε = D − (D/2)·y²。高過電圧分岐の区間 1 (ε = E_th·x²、範囲 [0, E_th]) とは別物 | 「中央を省く」だけに読めるが、実装 (`eps_nodes`) は 2 区間構成で端点を D/2 に取り直す。⚠ **spec から再実装すると u ≲ 3 の行で節点が変わる** |
+
+### 実行時に照合されないフィールド
+
+`settings_match_spec` (生成側) と C16b (検査側) が**フィールド単位で**比べるのは:
+処方 / model_id / schema / S_GRID の bit 表現 / settings 全値 / lkin (規則・含有率・margin) / x_alpha /
+s_cert の margin / tail (kind・窓・safety・floor) / E₀ 格子規則 (絶対ノード・u ノード・min/max) / tags /
+count / **実行時に組み直した E₀ 目録の hash** / gates。
+
+比べていないのは `z_ranges`・`eps_quadrature.n` (= settings の n1/n2/n3 と重複)・`channels.e0_inventory_file`・
+`dataset_version`・`spec_format`・散文欄 (`lkin.l_max` / `lkin.containment` / `s_cert.rule` / `tail.eps_rule` /
+`eps_quadrature.segments` / `e0_grid_rule.merge` / `boundary` / `json_float_repr`)。これらは**生バイト SHA と
+registry** が固定する — 中身が変われば hash が変わるので drift は検出できるが、「散文が実装と合っているか」は
+人のレビューでしか担保されない (上の表がその実施記録)。
+
+⚠ したがって `spec/README.md` の「spec の**全フィールド**と突き合わせる」は**上の一覧の範囲**という意味である。
+次に spec を切るとき (6.0.1 / 7.0.0) に `z_ranges` を `z_ranges_candidate` へ改名し、低過電圧の 1 文を直す。
+
 ## 更新の手順
 
 1. src の設定を変える → 2. `julia tools/make_v6_spec.jl` (spec と目録を書き直す) → 3. レビュー →
