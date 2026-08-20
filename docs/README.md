@@ -79,6 +79,16 @@ ratios and deviations only, never reference values.
 | [`architecture.md`](architecture.md) | The layer structure L0–L5 and which file holds what. Also published as the Architecture page through a snippet. |
 | [`bibliography.md`](bibliography.md) | The citation style and the canonical form of every work cited anywhere on the site. Consult it before adding a reference to a page. |
 
+## 2.5 `spec/` — the approved version specs (since 2026-08-20)
+
+`spec/temari_dataset_v6.0.0.spec.json` (canonical JSON: UTF-8, LF, sorted keys, no whitespace, non-integers as
+`repr` strings, no `null`), `spec/temari_e0_inventory_v6.json` (the E₀ grid and `s_cert` of all 525 channels as binary64
+bit patterns) and `spec/RELEASES.json` (version → approved raw-byte SHA-256). A table file may call itself `6.0.0`
+only when the generator's resolved settings match every field of the approved spec (checked at run time, including
+the E₀ inventory rebuilt on the fly); `tools/check_tables.jl` C16b re-reads the same files with its own logic.
+`tools/make_v6_spec.jl` writes them, `spec/README.md` explains the rules and the limits (it detects drift and
+self-agreement, not correctness). ⚠ `.gitattributes` marks them `-text` — a CRLF checkout breaks the hash.
+
 ## 3. Working documents
 
 Not part of the site. Development records kept next to the code rather than in
@@ -161,6 +171,7 @@ deleted.
 | [`speedup_audit_2026-08-05.md`](notes/speedup_audit_2026-08-05.md) / `.json` | The optimization ledger: 43 candidates, verdicts and measurements. Items without a verdict are still open. |
 | [`speedup_v4_2026-08-08.md`](notes/speedup_v4_2026-08-08.md) | **The v4 optimization record**: 3.9× on a production row, every step bit-identical, with the profile before and after and the reason the next lever was declined. |
 | [`host_stability_2026-08-19.md`](notes/host_stability_2026-08-19.md) | The BSODs that stopped the full-grid certification, and what was changed on the machine. |
+| [`distributed_queue_design_2026-08-20.md`](notes/distributed_queue_design_2026-08-20.md) | **Spreading long fleets over the lab's ~10 Windows PCs** (first target: the deep σ(β,Δ) certification, 14–24 days on one machine): a NAS directory queue (`\\10.31.108.5\jobq`; the protocol the scripts follow is `tools/jobq/PROTOCOL.md`), allow-listed JSON tickets, one Task-Scheduler worker per slot, atomic `rename` as the single ownership rule (claim / self-recovery / reaper), append-only leases watched with a monotonic clock, result names that the existing `_lane\d+.jsonl` glob already accepts, provenance in sidecar manifests so CERT_FP does not move, one-line host registration. Two codex rounds; the extra conditions for production F (cross-CPU bit identity canary) are §7. Design only — nothing built yet. |
 | [`recipro_requests_2026-08-18.md`](notes/recipro_requests_2026-08-18.md) | What ReciPro wants next, in ReciPro's own priority order. Requests, not specifications. |
 | [`work_list_2026-08-19.md`](notes/work_list_2026-08-19.md) | **What to do next, in order.** The 35 items that survived a parallel audit and a review pass, sorted by what a third party's trust depends on rather than by effort. Carries the sequencing constraints (which items must wait for the certification fleet, which must be written before others pick their numbers), the items deliberately not taken, and the four lenses that audit did not have. |
 | [`evaluation_report_2026-08-19.md`](notes/evaluation_report_2026-08-19.md) | **Where Temari sits and what it is for**: the novelty claim, the competing codes and datasets it must be told apart from, what is honestly still missing, and the priority order that follows. This is the positioning document the 2026-08-19 messaging overhaul was executed against — the narrowed headline (off-diagonal F(s, E₀)) comes from its priority A. |
@@ -174,7 +185,10 @@ instructions to follow.
 
 | File | Role |
 | --- | --- |
-| [`next_chat_2026-08-21.md`](handover/next_chat_2026-08-21.md) | **Current.** What remains after the messaging overhaul and after B9, B10, B6, B8 and B3 — and what the finished certification changed about it. Read this first. |
+| [`next_chat_2026-08-24.md`](handover/next_chat_2026-08-24.md) | **Current.** Written 2026-08-20 night: the four v6 scope decisions taken as working assumptions (recommended side), the version naming by an approved canonical spec (`spec/`), the commit chain with its bit-identity gates, the v5 errata, the memory-swap benchmark, and the F v6 fleet launched at 21:02 (8 lanes × 3 threads, run dir outside the repo, promotion procedure for after it finishes). |
+| [`next_chat_2026-08-23.md`](handover/next_chat_2026-08-23.md) | Written 2026-08-20 early morning: the partial-wave rule v6 in src, the 525-channel sweep of the v5 cutoff sensitivity, pilots v2/v3/v4 of the σ(β, Δ) certification, the ε-node finding. Executed by the above. |
+| [`next_chat_2026-08-22.md`](handover/next_chat_2026-08-22.md) | Written 2026-08-19 night: the window rule, the ppw floor, the σ(β, Δ) candidate v1 pilot and the discovery of the partial-wave cutoff sensitivity. Executed overnight by the above. |
+| [`next_chat_2026-08-21.md`](handover/next_chat_2026-08-21.md) | What remains after the messaging overhaul and after B9, B10, B6, B8 and B3 — and what the finished certification changed about it. Read this first. |
 | [`next_chat_2026-08-20.md`](handover/next_chat_2026-08-20.md) | Written 2026-08-19: the certification run and that day's work. Superseded by the above. |
 | [`next_chat_2026-08-19.md`](handover/next_chat_2026-08-19.md) | The plan for 2026-08-19; superseded by the above, which reports what executing it produced. |
 | [`next_phase_2026-08-18.md`](handover/next_phase_2026-08-18.md) | Sets the direction for the release after this one (σ(β, Δ)). Still the statement of direction. |
