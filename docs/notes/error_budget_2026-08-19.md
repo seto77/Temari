@@ -25,7 +25,8 @@
 
 | 量 | 値 | KIND | 出所 |
 |---|---|---|---|
-| HIGH preset 自己収束監査 (6 ケース × 7 つまみ) | 最悪 **6.8e-06** (Rn L1 @30 kV, u=1.663。\|F\|≈0.115 ⇒ 相対 6e-05)。Fe K @200 3.8e-07 / Au M5 @200 2.5e-06 | `observed-max-over-sample` | `src/prod_v5_jl/MANIFEST.md:104-119`, `:307-329` |
+| HIGH preset 自己収束監査 (6 ケース × 7 つまみ) | 最悪 **6.8e-06** (Rn L1 @30 kV, u=1.663。\|F\|≈0.115 ⇒ 相対 6e-05)。Fe K @200 3.8e-07 / Au M5 @200 2.5e-06。⚠ **標本が最悪行を含んでいなかった — 下の ε ノード行を見よ** | `observed-max-over-sample` | `src/prod_v5_jl/MANIFEST.md:104-119`, `:307-329` |
+| ★★ **ε 求積の閾値側区間 (n1=20) の未収束** (重 Z、K 以外の全殻、全 E₀。出荷経路の写しで実測 2026-08-20) | 最悪 **Rn M5: maxdF 6.0e-05 (s ≤ 2、絶対) / ΔN0 2.4e-04** (n1=64 参照比)。Z に急峻なランプ (M5 @30: Z=74 3e-08 → 80 1.5e-06 → 86 5.2e-05)、K は ≤ 2e-08。**v5 出荷データにも同一に存在** (ε ノードは同じ)。n1=40 で全副殻 ≤ 3.1e-07 (実時間 +10 % 以下) — v6 の判断 #2 | `observed-max-over-sample` (機構特定済み) | `docs/notes/eps_nodes_threshold_2026-08-20.md` |
 | s > 8 の求積打ち切り | **3.218e-07** (s>8) / 1.394e-07 (s>12) | `observed-max-over-sample` | `src/prod_v5_jl/MANIFEST.md:113`, `:116-118` |
 | 分母 N(0) 自体の打ち切り | δ0/N0 ≤ **1.3e-05** (6 ケース) | `observed-max-over-sample` | `docs/handover/next_phase_2026-08-13.md:140-149` |
 | 二重実装の一致 (refcheck) | **9.044e-08** | `direct-measurement` | `docs/src/en/verification.md:119-126` |
