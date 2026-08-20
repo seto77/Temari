@@ -1061,7 +1061,10 @@ function audit(; presc=PRESC_V4)
              (30, "M1", 400.0), (6, "K", 400.0),
              (86, "M5", 30.0), (86, "M5", 100.0)]
     bumps = [
-        ("eps nodes n1/n2/n3 ×1.4", (; HIGH_SETTINGS..., n1=28, n2=80, n3=28)),
+        # 260820Cl (夜): リテラル (28, 80, 28) は HIGH n1=20 時代の ×1.4 で、n1=40 では**下げる**振りになっていた。
+        #   現在の HIGH から ×1.4 を引く (切り上げ)。低過電圧の行 (2 区間分岐) では n1/n3 だけが効く
+        ("eps nodes n1/n2/n3 ×1.4", (; HIGH_SETTINGS..., n1=ceil(Int, 1.4 * HIGH_SETTINGS.n1),
+                                     n2=ceil(Int, 1.4 * HIGH_SETTINGS.n2), n3=ceil(Int, 1.4 * HIGH_SETTINGS.n3))),
         # 260820Cl: 部分波規則 v6 (l_cap 256) に合わせて上へ振る。cap / margin / 含有半径を別々に、最後に同時に
         ("l_cap 256→320",           (; HIGH_SETTINGS..., l_cap=320)),
         ("lkin margin 12→20",       (; HIGH_SETTINGS..., lkin_margin=20)),
