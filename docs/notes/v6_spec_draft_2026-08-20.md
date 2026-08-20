@@ -14,6 +14,30 @@ codex の批評 (2026-08-20 朝、1 巡) は反映済み — 反映内容は §6
 | 3 | Python 参照実装 (`src/ionization.py`) の扱い | (e) v6 移植 + 参照値再生成 / 恒久 v5 固定 | **v6 移植** (循環検証を避ける構成は §2 (e)) |
 | 4 | 出荷中 v5 への処方感度の注記 | (§3.3、08-23) **errata 別立て** / data.md 追記 / しない | **errata 別立て** (凍結 MANIFEST は直接編集しない。codex) |
 
+## 0.5 採用の記録 (2026-08-20 夜 — 作者不在の自律セッションで、§0 の推奨を**作業仮定**として採用)
+
+作者の常設指示 (資産保護より正確な物理量・再生成の費用は許容・検証の規律は緩めない) と整合する側を採り、
+逆方向 (等比格子の束ね = 形式変更 + ReciPro 改修 / deep の起動 = 2〜3 週間) は**採らなかった**。作者が別の判断なら
+再生成の前に止める (起動後は 1.5 日の計算を捨てることになる)。codex と 3 巡 (設計 → 実装方針 → 実装) 議論した。
+
+| # | 採用 | 実装 |
+|---|---|---|
+| 1 | 等比 s 格子は **束ねない** | S_GRID は v5 と同じ 321 点 (spec に bit 表現の SHA) |
+| 2 | n1 **20 → 40** 全行一律 | `HIGH_SETTINGS_V6` (l0_numerics.jl)、profile は組ごとに原子的に切替 |
+| 3 | Python 参照実装は **v6 移植** | `lkin_rule` は必須引数 (既定なし)、refcheck は case ごとの規則、v6 case 5 本 (K/L のみ) |
+| 4 | v5 への注記は **ERRATA.md 別立て** | `src/prod_v5_jl/ERRATA.md` (部分波 + ε ノード) + data.md (ja/en) に 1 項目。MANIFEST 不変 |
+
+**`V6_SPEC` の実装は §3 の形を codex 3 巡目で改めた**: Julia オブジェクトの hash ではなく **checked-in の canonical JSON**
+(`spec/temari_dataset_v6.0.0.spec.json`、UTF-8 / LF / キー昇順 / 空白なし / 非整数は repr 文字列 / null 禁止、
+`tools/make_v6_spec.jl` が書く) の**生バイト** SHA-256 = **`749fadc5af79c975…`** を `spec/RELEASES.json` に承認値として置く。
+E₀ 格子 (525ch / 14,796 行) は `spec/temari_e0_inventory_v6.json` に Float64 の bit 表現で固定し、生成側は実行時に
+同じ目録を組み直して hash を照合する。版の名乗り = 解決済み設定・処方・S_GRID・構造定数 (x_alpha / s_cert / tail /
+E₀ 規則 / gates) が spec の全フィールドと一致 (純関数。呼出元や ENV は見ない)。本番入口は fail-closed
+(`--profile v6_high` と repo 外の `--out` を要求、legacy ENV は拒否、`--allow-dev` は出力を 0.0.0-dev に固定)。
+検査側 C16b は生成側の関数を呼ばず独自に spec を読んでフィールド単位で比べる (三値 PASS/FAIL/SKIP、
+`--expect-version 6.0.0` で SKIP も不合格)。負のテスト 37 件 (`tools/c16_negative_test.jl`)。
+⚠ これは drift と自己一致の検出であって spec の正しさの証明ではない — 正しさは本書のレビューと数値検証が担う。
+
 ## 1. 確定済みの核 (作者指示 2026-08-20 02:2x に由来。src 実装済み `381e777`→`1dcaf5a`)
 
 - **部分波打ち切り規則 v6**: `l_kin = ⌈κ·r(含有率 0.999)⌉ + 12`、`l_cap = 256`

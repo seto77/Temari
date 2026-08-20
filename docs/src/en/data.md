@@ -235,6 +235,16 @@ uses — `f_at(ch, 160.0, 2.5)` evaluates a row that does not exist in the file.
   threshold and the 400 keV side are structurally blind to it. Direct
   measurement inside the intervals exceeds it in part of the range (worst
   3.0×10⁻³, just above threshold; see [Verification](verification.md#c6-is-not-a-bound)).
+- ⚠ **Partial-wave cutoff prescription sensitivity (measured after release, 2026-08-20)**: replacing the
+  shipped partial-wave rule (`⌈κ·min(r_core, 6/Z)⌉+12`) by `⌈κ·r_core⌉+12` moves the M-shell F(s) by
+  6.3×10⁻⁴ (3d) to 1.65×10⁻³ (3s) absolute near s ≈ 0.15–0.3 and σ_own by 1.2×10⁻³ to 5.7×10⁻³
+  (light-element L shells ≤ 1.6×10⁻⁴ / 6×10⁻⁴; K shells ≤ 3×10⁻⁷). This is a two-prescription
+  sensitivity, not an error bound; the second prescription is the more converged side. It exceeds the
+  s ≤ 2 E₀-interpolation term (8.5×10⁻⁵) by an order of magnitude for M shells and is changed in the
+  next generation (v6). The same day the threshold-side segment of the ε quadrature (20 nodes) was found
+  under-converged for heavy elements (Z ≳ 80, all shells but K; worst Rn M5: F 6.0×10⁻⁵ absolute,
+  σ_own 2.4×10⁻⁴; v6 uses 40 nodes). `src/prod_v5_jl/ERRATA.md`, placed beside the released data, is the
+  record of both; the MANIFEST is unchanged.
 - ⚠ **External yardsticks are few, and none reaches 16 Å⁻¹.** For the
   generalized oscillator strength the most recent published database in the
   field, the Dirac GOS database (Zhang et al., 2023), stops at q = 50 Å⁻¹,
