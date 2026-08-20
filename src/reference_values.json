@@ -212,6 +212,135 @@
      4.0
     ]
    }
+  },
+  {
+   "z": 20,
+   "channel": "L1",
+   "e0_keV": 400.0,
+   "lkin_rule": "v6",
+   "note": "light L1 x max E0: v6 raises l_kin strongly (2s is wide; 6/Z was the binding term in v5); QUICK l_cap=72 saturates at high eps -> also exercises the cap path",
+   "s_A_inv": [
+    0.0,
+    0.5,
+    1.0,
+    2.0,
+    4.0
+   ],
+   "F": [
+    1.0,
+    0.2894955442434839,
+    0.06690365445785203,
+    0.010392551520550455,
+    0.002037827985609119
+   ],
+   "N0": 1.3313104239325892e-05,
+   "E_bound_eV": -435.8242816583365,
+   "l_used_max": 72,
+   "elapsed_s": 702.2,
+   "provenance": {
+    "generator": "src/ionization.py",
+    "generator_sha256": "5ab32b29491255942a19cd218a91acae2484f9dfaa3a794ff8d39e571ee21997",
+    "python": "3.10.9",
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "command": "python -X utf8 tools/make_reference_values.py",
+    "parent_commit": "d8228f3",
+    "spec_sha256": "749fadc5af79c9753a7718455d6a29cbe428891863b18b8ab908cac1ef4bf211",
+    "settings": "QUICK_SETTINGS + lkin_rule",
+    "s_nodes_A_inv": [
+     0.0,
+     0.5,
+     1.0,
+     2.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "z": 47,
+   "channel": "L1",
+   "e0_keV": 200.0,
+   "lkin_rule": "v6",
+   "note": "mid-Z L1: v5 bound 6/Z = 0.128 a0 vs containment radius ~1 a0",
+   "s_A_inv": [
+    0.0,
+    0.5,
+    1.0,
+    2.0,
+    4.0
+   ],
+   "F": [
+    1.0,
+    0.831549000896165,
+    0.5846795382214672,
+    0.22824877384058873,
+    0.023395137834719606
+   ],
+   "N0": 2.5874474125425564e-06,
+   "E_bound_eV": -3822.6518033212287,
+   "l_used_max": 58,
+   "elapsed_s": 1043.1,
+   "provenance": {
+    "generator": "src/ionization.py",
+    "generator_sha256": "5ab32b29491255942a19cd218a91acae2484f9dfaa3a794ff8d39e571ee21997",
+    "python": "3.10.9",
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "command": "python -X utf8 tools/make_reference_values.py",
+    "parent_commit": "d8228f3",
+    "spec_sha256": "749fadc5af79c9753a7718455d6a29cbe428891863b18b8ab908cac1ef4bf211",
+    "settings": "QUICK_SETTINGS + lkin_rule",
+    "s_nodes_A_inv": [
+     0.0,
+     0.5,
+     1.0,
+     2.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "z": 79,
+   "channel": "L3",
+   "e0_keV": 200.0,
+   "lkin_rule": "v6",
+   "note": "heavy L3: v5 bound 6/Z = 0.076 a0; QUICK l_cap=72 saturates at high eps -> also exercises the cap path",
+   "s_A_inv": [
+    0.0,
+    0.5,
+    1.0,
+    2.0,
+    4.0
+   ],
+   "F": [
+    1.0,
+    0.9619604664393544,
+    0.8653110407144394,
+    0.6149291655430655,
+    0.22674187661366535
+   ],
+   "N0": 1.5818128088052576e-06,
+   "E_bound_eV": -12218.712433506273,
+   "l_used_max": 36,
+   "elapsed_s": 1354.0,
+   "provenance": {
+    "generator": "src/ionization.py",
+    "generator_sha256": "5ab32b29491255942a19cd218a91acae2484f9dfaa3a794ff8d39e571ee21997",
+    "python": "3.10.9",
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "command": "python -X utf8 tools/make_reference_values.py",
+    "parent_commit": "4f7fc88",
+    "spec_sha256": "749fadc5af79c9753a7718455d6a29cbe428891863b18b8ab908cac1ef4bf211",
+    "settings": "QUICK_SETTINGS + lkin_rule",
+    "s_nodes_A_inv": [
+     0.0,
+     0.5,
+     1.0,
+     2.0,
+     4.0
+    ]
+   }
   }
  ],
  "_scope": "partial-wave cutoff rule + nonrelativistic continuum integrals only (large-component bound orbital, K/L shells); not an independent oracle of the Dirac two-component shipping physics. provenance is recorded per case."
