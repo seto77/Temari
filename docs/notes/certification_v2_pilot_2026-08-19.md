@@ -317,3 +317,9 @@ Ca M1 @400 [0,1e5] 3.94e-06・[0.01,ε_max] 2.36e-06・[0.01,1e5] 3.87e-07・[0,
 `../qcamp/cert_runs/pilot_v3/`。⚠ v3 の `:kappa_rc` (r_core+12, cap 128) は src の v6 規則
 (r(0.999)+12, cap 256) と違う — 最終候補 **v4 = `:src` + 24 パネルの pilot は 07:56 起動済**
 (`certification_v4_preregistration_2026-08-20.md` §7、指紋 `0b10f74e9c4e398c`)。
+
+**pilot v4 — 確定 (完走 2026-08-20 12:56、9 レーン全部 attempt 1 / exit 0、指紋 1 種 `0b10f74e9c4e398c`)**:
+**11 行 / 仕様内 192 窓 = 全合格 + 仕様外 6**。最悪 scaled **9.11e-08** (v3 と同じ窓 = Ca M1 @400 [0.01,1e5]
+β=200、同じ床)。cap 256 張り付き 12 窓も床 (打ち切り感度は P−O に出ない — 登録どおり refA/refB ≤ 4.1e-07 を引く)。
+**F(s) と σ(β,Δ) が部分波処方を共有する最終候補 v4 が pilot 通過** ⇒ deep は作者判断。確定の記録 =
+事前登録 v4 §7.2、集計 = `../qcamp/cert_v4_pilot_report_final.txt` / `cert_v4_pilot_summary_final.txt`。
