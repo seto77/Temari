@@ -1,0 +1,3 @@
+# 260820Cl: canonical JSON (spec と E0 目録、registry) は生バイトの SHA-256 で承認される — checkout で改行を変換してはいけない
+# (autocrlf=true の Windows で worktree を切ると CRLF になり、承認 hash と一致しなくなる。2026-08-20 の起動時に実際に起きた)
+spec/*.json -text
