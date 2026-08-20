@@ -76,8 +76,15 @@ HIGH の既定 = (n1, n2, n3) = (20, 56, 20)。
   全副殻で半歩の下** (n1=20 では M4 も 5.3e-05 と M5 並み)。Fe K (対照) は n1=20 で既に 1.0e-08。
   **実時間**: n1 20→40 (総 96→116) で 1 行 +0〜2 s (≈ +10 % 以下。M5: 15.9→13.2 s と逆転すらする =
   測定ゆらぎの内)、n1=64 (総 184) は ≈ +80 %。閾値近傍のノードが安い (κ 小 → l_max 最小) という見込みは実測どおり
-- **言えない**: (64,56,64) 参照自身の収束 (階段の加速性 (20→28→40 で ×8, ×30) からの傍証のみ。
-  独立求積での照合はしていない — codex の指摘)。**W (Z=74) と Rn (Z=86) を分ける微視的機構は未同定** —
+- **参照の独立照合 (C、`../qcamp/eps_indep_ref2.log`)**: 区間 1 を **tanh-sinh (別の求積族、x = √(ε/scale)
+  座標)** に置換した合成が、n1=64 の GL 参照と **Rn L1 @45 で相対 9.0e-12、Rn M5 @30 で ≤ 2e-06** (後者は
+  TS 自身の h 収束 (0.12→0.08 で −3.4e-05 → +1.6e-06) が律速) で一致 — 参照は求積族に依らない
+  (codex の「nested でない階段の一致は偶然相殺しうる」を閉じた)。
+  ⚠ 照合器の最初の走行は **+10.6 % を出したがプローブ側のバグ** — 低過電圧 (D ≤ 2E_th ⟺ u ≤ 3) の行は
+  eps_nodes が 2 区間分岐 (区間 1 のスケールが E_th でなく D/2) なのに E_th スケールで置換し、
+  [D/2, E_th] を二重計上した ([[oracle-can-break-first]] の再演。修正 = `eps_indep_ref2.log`)。
+  なお n1=40 の結論 (A3/A4) は両分岐の行 (L1 @45 = 2 区間 / M 殻 @30 = 3 区間) で確認済み
+- **言えない**: **W (Z=74) と Rn (Z=86) を分ける微視的機構は未同定** —
   高密度スキャン B (`eps_integrand_scan.csv`、240 点 log 一様) では区間 1 の被積分関数は両 Z とも滑らか
   (極値 1、符号反転 0、l_max 階段も同じ 6..17) で、感度が 2000 倍違う理由は 10 点/桁の分解能では見えない
   (より狭い構造が節点間に落ちている可能性)。⚠ B の CSV はヘッダが `eps_keV` だが**値は Hartree**
@@ -104,7 +111,8 @@ n1 は「どの行に効くか」を選ばず全行に掛かり、階段 (20→2
 ## 6. 道具とログ
 
 台本 = scratchpad (`low_u_eps_probe{,2,3,4}.jl`, `eps_region_probe{,2}.jl`, `eps_n1_verify.jl`,
-`eps_integrand_scan.jl` — セッション限り)。結果 = `../qcamp/low_u_eps_probe*.log`,
-`eps_region_probe*.log`, `eps_n1_verify.log`, `eps_integrand_scan.csv`。
+`eps_integrand_scan.jl`, `eps_indep_ref.jl` — セッション限り)。結果 = `../qcamp/low_u_eps_probe*.log`,
+`eps_region_probe*.log`, `eps_n1_verify.log`, `eps_integrand_scan.csv`, `eps_indep_ref{,2}.log`
+(無印は低過電圧分岐のバグ入り — 2 が正)。
 測定条件: HEAD (`48abccb` 時点、部分波 v6 + HIGH v6)、`run_NK_policy(policy=:src)`、maxdF は LK_S の
 s ≤ 2 (F 絶対)、dN0 は N(0) の相対差。⚠ LK_S は峰を 3〜13 % 過小評価しうる (§6.3 の教訓) — 桁の判断には十分。
