@@ -74,6 +74,9 @@ ReciPro 側の `check_tables.py` (v3 の QC に使ったもの) を Julia へ移
 include(joinpath(@__DIR__, "..", "src", "gen_production.jl"))
 
 const GATE_C6 = 5e-3
+# 260821Cl (監査): σ_bote / e_th の因果入力である係数表の SHA-256。ソース指紋にも spec にも入っていないので、
+#   ここで drift だけを見る (承認ではない — 次に spec を切るとき spec 側へ移すこと)
+const BOTE_SALVAT_SHA256 = "4a787956df332931bce6775330c2a73d1330ef30aa7dcd1450b62e1694a988c9"
 
 # ---- C2 の検査窓 (260813Cl 再設計。指示書 §2 P2) ----------------------------------
 #
@@ -617,6 +620,12 @@ function main(args)
     flips = Tuple{String,Int}[]
     meta = Dict{String,Set{Any}}("model_id" => Set(), "dataset_version" => Set(),
                                  "schema_version" => Set())
+    # 260821Cl (監査): C10 の 3 キーは処方と版しか見ないので、**別 run の成果物が混ざっても通る**。
+    #   生成文脈 (settings + 指紋 + spec + S_GRID + gates の hash) と spec_sha256 の一致を別に数える。
+    #   ⚠ generator_commit は一致を要求しない (フリート中のコミットで割れる。v5 で実際に 2 種類あった)
+    prov = Dict{String,Set{Any}}("generation_context_sha256" => Set(),
+                                 "generator_source_fingerprint" => Set(), "spec_sha256" => Set())
+    commits = Dict{Any,Int}()
     sgrid = nothing
     chans = Tuple{Int,String}[]
     for p in files
@@ -627,6 +636,11 @@ function main(args)
         for k in keys(meta)
             push!(meta[k], d[k])
         end
+        for k in keys(prov)
+            haskey(d, k) && push!(prov[k], d[k])
+        end
+        haskey(d, "generator_commit") &&
+            (commits[d["generator_commit"]] = get(commits, d["generator_commit"], 0) + 1)
         g = Float64[x for x in d["s_grid_A_inv"]]
         if sgrid === nothing
             sgrid = g
@@ -655,6 +669,43 @@ function main(args)
         if length(v) != 1
             println("[NG] C10: $k が一致しない: ", collect(v))
             ok10 = false
+        end
+    end
+    # ---- C10b: 生成文脈の一致 (260821Cl 追加、監査で発覚) ----
+    ok10b = true
+    for (k, v) in prov
+        isempty(v) && continue          # v5 以前の形式にはこのキーが無い (適用外)
+        if length(v) != 1
+            println("[NG] C10b: $k が一式の中で一致しない ($(length(v)) 種) — **別 run の成果物が混ざっている** " *
+                    "疑い: ", first(sort(collect(String.(v))), 3))
+            ok10b = false
+        end
+    end
+    if ok10b && !isempty(prov["generation_context_sha256"])
+        println("C10b: 生成文脈 $(only(prov["generation_context_sha256"])[1:16])… / 指紋 " *
+                "$(isempty(prov["generator_source_fingerprint"]) ? "—" : only(prov["generator_source_fingerprint"])) " *
+                "が全ファイルで一致" *
+                (isempty(prov["spec_sha256"]) ? "" : "  spec $(only(prov["spec_sha256"])[1:16])…"))
+    end
+    length(commits) > 1 && println("  [note] generator_commit が複数 (フリート中のコミット。src/ と tools/ の " *
+                                   "差分がゼロであることを確認すること): ", commits)
+    # ---- C16c: σ 係数表の drift (260821Cl 追加) ----
+    # ⚠ src/bote_salvat.json は sigma_bote_nm2 と e_th_keV_bote の因果入力だが、PRODUCTION_SOURCE_FILES にも
+    #   spec にも入っていない (2026-08-21 の監査で発覚)。⇒ 係数だけ差し替えても版も文脈 hash も動かない。
+    #   ここでの照合は **drift の検出**であって承認ではない (期待値は「この commit の repo の値」)
+    ok16c = true
+    let bp = joinpath(@__DIR__, "..", "src", "bote_salvat.json")
+        if isfile(bp)
+            got = bytes2hex(sha256(read(bp)))
+            if got != BOTE_SALVAT_SHA256
+                println("[NG] C16c: src/bote_salvat.json の SHA-256 が記録値と違う ($(got[1:16])… vs " *
+                        "$(BOTE_SALVAT_SHA256[1:16])…) — σ_bote と e_th の因果入力が変わっている")
+                ok16c = false
+            else
+                println("C16c: σ 係数表 (src/bote_salvat.json) は記録値と一致 $(got[1:16])…")
+            end
+        else
+            println("[NG] C16c: src/bote_salvat.json が無い"); ok16c = false
         end
     end
     ok10 && println("C10: model_id = $(only(meta["model_id"]))  " *
@@ -782,7 +833,7 @@ function main(args)
                 "$(round(worst_sp, sigdigits=3))")
         (bad9 + bad9b) > 0 && (n_bad += bad9 + bad9b)
     end
-    return n_bad == 0 && ok10 && ok15 && ok16 && ok16b ? 0 : 1
+    return n_bad == 0 && ok10 && ok10b && ok15 && ok16 && ok16b && ok16c ? 0 : 1
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
