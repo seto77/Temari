@@ -37,9 +37,10 @@ kin_k(T_ha) = sqrt(2.0 * T_ha * (1.0 + T_ha / (2.0 * C_LIGHT^2)))
 #               テーブルは PCHIP で補間されるので誤差は補間由来
 #   sig_thresh  部分波の有意性フィルタ (寄与がこの比率未満の l' を捨てる)。
 #               計算量の節約用で、F への影響は実測 ~1e-12 級
-# 収束監査: 各つまみを個別に増やして F の変化を実測済み (Python 版で
-# |ΔF|<2e-6、Julia HIGH は gen_production.jl audit で K ~7e-6 / L ~2e-6。
-# ただし後者の支配項は下の CONT_DT_LOG 系で、つまみ由来ではない)
+# 収束監査: 各つまみを個別に増やして F の変化を実測する (`gen_production.jl audit`)。
+# ⚠ 260820Cl: 上に書いてあった「K ~7e-6 / L ~2e-6、支配項は CONT_DT_LOG 系」は v3 時代の値。
+# 世代ごとの監査値は docs/notes/lkin_truncation_2026-08-19.md §6.6 と
+# docs/notes/eps_nodes_threshold_2026-08-20.md (ε ノード n1 の項) を正本にし、ここには数値を書かない
 
 const PROD_SETTINGS = (n1=16, n2=40, n3=16, l_cap=96, n_x=64, n_phi=32,
                        n_q=240, sig_thresh=1e-12)   # 本番 (収束監査済み)
@@ -62,7 +63,7 @@ const HIGH_SETTINGS = (n1=20, n2=56, n3=20, l_cap=LEGACY_V5_CUTOFF ? 128 : 256,
                        n_x=LEGACY_V5_CUTOFF ? 96 : 192, n_phi=LEGACY_V5_CUTOFF ? 48 : 96,
                        n_q=LEGACY_V5_CUTOFF ? 360 : 720, sig_thresh=1e-13, ppw=30.0, dt_log=1.0e-3)
 
-# 単発出口の JSON 契約。model_id は物理処方を表すが、求積プリセットは意図的に
+# 単発出口の JSON 仕様。model_id は物理処方を表すが、求積プリセットは意図的に
 # 含めないため、再現に必要な数値設定を別フィールドで必ず保存する。
 const SINGLE_RUN_SCHEMA_VERSION = 1
 
@@ -113,10 +114,14 @@ const LKIN_MARGIN = 12
 #   ⚠ Dirac 経路の含有半径は 2 成分密度 G²+F² で測る (行列要素が G_aG_b+F_aF_b なので。codex 2026-08-20)。
 #   非相対論 / SRC 経路は u_b²。`lkin_partial_waves` (l5_channel.jl)
 const N_FIT = 8              # Coulomb マッチ窓の点数
-# ⚠ 260818Cl 訂正: 下の「(テスト用)」は成り立たない。イオン化経路 (z_asym = 1) では
-#   確かに通らないが、phase / mott 出口は中性場 (z_asym = 0) で走るのでこの枝が本番
-#   経路になる。参照ペアが Riccati-Bessel になり δ_l の全体符号が一意に決まるのは
-#   その帰結 (l5_exit_phase.jl 冒頭 / l2_continuum.jl の δ_l コメント)
+# ⚠ 260818Cl 訂正: 下の「(テスト用)」は成り立たない。phase / mott 出口は中性場 (z_asym = 0) で
+#   走るのでこの枝が本番経路になる。参照ペアが Riccati-Bessel になり δ_l の全体符号が一意に
+#   決まるのはその帰結 (l5_exit_phase.jl 冒頭 / l2_continuum.jl の δ_l コメント)。
+# ⚠⚠ 260820Cl 再訂正: 260818Cl の「イオン化経路 (z_asym = 1) では確かに通らない」も**誤り**。
+#   η = −z_asym(1+ε/c²)/k から |η| = ETA_BESSEL を解くと **ε_c = 1390.4872 Ha = 37.8371 keV** で、
+#   E₀ ≥ 40 keV の行では出荷の ε 積分域がこの切替点を跨ぐ (Coulomb 参照 → Riccati-Bessel 参照)。
+#   段差は相対 4e-06〜2e-05、σ(β,Δ) への寄与 ≤ 2.5e-09 (`tools/eta_bessel_probe.jl`、
+#   docs/notes/window_quadrature_2026-08-19.md §8.1)。σ(β,Δ) の窓求積は ε_c をパネル境界に置く
 const ETA_BESSEL = 0.02      # |η| がこれ未満なら球ベッセルで代用 (テスト用)
 
 # ====================================================================

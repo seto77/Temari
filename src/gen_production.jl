@@ -18,13 +18,13 @@ v3 (Julia 初代、2026-08-05 出荷) が v2 から変えたもの:
 
   5. 連続状態を **κ 分解 Dirac + 小成分の行列要素** に差し替えた (第 3.6 章)。
      v3 の SRC は「真の相対論効果 (≤0.3 %) の 5〜20 倍の偽項」を持つことが
-     判明している (`docs/src_defect_2026-08-07.md`。機構は角括弧
+     判明している (`docs/notes/src_defect_2026-08-07.md`。機構は角括弧
      [G′+(κ/r)G] = 2cM·F の相殺を落としたことによる Darwin 項の偽装)
   6. **M 殻 (M1–M5) を追加**して 246 → 525 チャネル
 
 ⚠ **既定処方は v4。**v3 (SRC) を再現するには `--v3` を明示すること。
 欠陥のある処方が既定であり続ける方が危ない、という判断
-(`docs/next_phase_2026-08-08.md` §2.1(b))。
+(`docs/handover/next_phase_2026-08-08.md` §2.1(b))。
 
 使い方 (レーン分割で複数プロセス並行可。出力先が同じでも resume 安全)。
 ⚠ --gcthreads=1 を必ず付ける: Julia 1.12/Windows の並列 GC は高負荷の
@@ -61,12 +61,12 @@ const OUT_DEFAULT = joinpath(@__DIR__, "prod_v5_jl")   # 260810Cl: v4 → v5 (s 
 # s 方向の刻みを粗くして上限を伸ばす案は補間誤差 2-4e-2 (E0 補間誤差の 100 倍) で不可。
 # ノード追加のコストは実測 +48 % (L1 Z=38 QUICK: 2.77s → 4.11s)。
 # 260810Cl 変更: s 上限 8.0 → 16.0 Å⁻¹ (161 → 321 点)。dataset v5.0.0 / formatVersion 4。
-# 正本 = docs/tail_contract_2026-08-09.md、実施手順 = docs/next_phase_2026-08-10.md。
+# 正本 = docs/notes/tail_contract_2026-08-09.md、実施手順 = docs/handover/next_phase_2026-08-10.md。
 # 理由: ALCHEMI は μ_hg が 2 反射の差 ΔG で決まるので要求 s = max|g| に達する。
 # **出荷中の指数 tail は上界でも近似でもない** — 43 % の行で hard fail し、残りのうち
 # 高 l では符号の逆の値を返す (Au L3 @300kV s=12 で +4.15e-5 vs 真値 −1.62e-3)。
 # 外挿をやめて実データで覆うのが唯一の正直な解。16 の根拠は指示書 §1.2。
-const S_GRID = collect(0.0:0.05:16.0)          # 321 点 [Å⁻¹] (C# 側の契約)
+const S_GRID = collect(0.0:0.05:16.0)          # 321 点 [Å⁻¹] (C# 側との規約)
 # const S_GRID = collect(0.0:0.05:8.0)         # 260809Cl まで: 161 点 (s≤8, dataset v4)
 # const S_GRID = collect(0.0:0.05:4.0)         # 260804Cl まで:  81 点 (s≤4, dataset v1/v2)
 # E0 絶対ノード: v2 の 13 点 → 22 点 (中間点を挿入)
@@ -89,7 +89,7 @@ const GATE_RTAIL = 1e-4
 # `kz = sqrt(k_i² − K²/4)` が実数である条件 `K < 2·k_i` と `K = 4π·s·a0`
 # (`l5_exit_edx.jl`) から **s_kin = 1/λ**。
 # ⚠ **これは近似の限界ではない。**「Ewald 球上に差ベクトル K を持つビーム対が
-# 存在しない」という幾何的不可能性なので、契約をどう書いても越えられない。
+# 存在しない」という幾何的不可能性なので、仕様をどう書いても越えられない。
 # 30 kV で 14.33 Å⁻¹ しかないため、**E0 が低い行は 16 Å⁻¹ に届かない**。
 
 "相対論的電子波長 λ [Å] (加速電圧 [kV])。"
@@ -157,7 +157,7 @@ function checkpoint_sha256(row)
     return bytes2hex(sha256(take!(io)))
 end
 
-# 行の値だけでなく、それを作ったコード・求積・物理処方も再開契約に含める。
+# 行の値だけでなく、それを作ったコード・求積・物理処方も再開の規約に含める。
 # git commit だけでは dirty tree を識別できないため、実際に読み込むソースをハッシュする。
 const PRODUCTION_SOURCE_FILES = (
     "ionization.jl", "l0_numerics.jl", "l0_json.jl", "l1_atomic.jl",
@@ -277,7 +277,7 @@ const VALIDATED_NOTE_V4 =
     "of physical effect, F(s) 5.9e-06 vs 4.3e-03, T23d/e). v4 replaces the v3 " *
     "scalar-relativistic continuum (SRC), whose one-component reduction drops a " *
     "cancellation and leaves a spurious Darwin-like term 5-20x larger than the " *
-    "true relativistic effect; see docs/src_defect_2026-08-07.md. Absolute cross " *
+    "true relativistic effect; see docs/notes/src_defect_2026-08-07.md. Absolute cross " *
     "sections remain Bote-Salvat, whose own uncertainty against experiment is " *
     "10 % (K), 15 % (L) and 24 % (M) RMS."
 
@@ -317,7 +317,7 @@ end
 まだ v3 だったからで、実際の生成器は「その commit + 未コミットの v4 変更」
 だった。JSON だけを見て再現しようとした人は必ず失敗する。
 
-運用は **「生成の直前に必ず commit する」** (`docs/next_phase_2026-08-09.md` §1.3、
+運用は **「生成の直前に必ず commit する」** (`docs/handover/next_phase_2026-08-09.md` §1.3、
 作者判断)。ここはその規律を機械で支える 2 段構えの片方:
 
   1. **`generator_commit` に `-dirty` が残る** — 出荷 JSON 自体が「この hash では
@@ -352,7 +352,7 @@ function warn_if_dirty()
       出力の generator_commit には $h-dirty と記録されます。
 
       出荷世代を生成しているなら **今すぐ止めて commit してください。**
-      (規律: 生成の直前に必ず commit する — docs/next_phase_2026-08-09.md §1.3。
+      (規律: 生成の直前に必ず commit する — docs/handover/next_phase_2026-08-09.md §1.3。
        dataset v4.0.0 はこれが無かったために、記録された hash から再現できない)
     ################################################################""")
     for f in first(files, 12)
@@ -410,7 +410,7 @@ function e0_grid(z::Int, tag::String)
     return out, eth
 end
 
-#=== s > s_cert の契約 (260810Cl。指数 tail からの置き換え) ==========================
+#=== s > s_cert の保証 (260810Cl。指数 tail からの置き換え) ==========================
 ⚠⚠ **旧 `tail_fit` (a·exp(−b·s)) は撤去した。**上界でも近似でもなかったため:
 
 - 14,796 行中 6,359 行 (43.0 %) で条件を満たせず `null` → C# が hard fail
@@ -421,7 +421,7 @@ end
   (null 行の 91.6 % が s ≤ 8 内でゼロ交差)
 
 代わりに **実測した上界 ε だけ**を宣言する。主張してはならないことは
-docs/tail_contract_2026-08-09.md §4 に列挙してある (指数減衰・べき則・
+docs/notes/tail_contract_2026-08-09.md §4 に列挙してある (指数減衰・べき則・
 |F(s_max)| が上界・ε の E0 内挿・符号の引き継ぎ — **すべて実データで否定済み**)。
 =================================================================================#
 
@@ -526,7 +526,7 @@ end
 
 ⚠ v4 で **交換は Xα のまま** (KLI ではない)。f_x / f_e 出口だけが KLI で、
 イオン化出口は業界標準・既存 GOS DB・比較データが全て Xα 系なので合わせる
-(`docs/release_readiness_2026-08-07.md` §3.4、作者判断済)。
+(`docs/notes/release_readiness_2026-08-07.md` §3.4、作者判断済)。
 
 ⚠⚠ **260808Cl 修正: `dirac_scf` を処方に含めた。**出荷済み v3 の model_id には
 `-DSCF` が無い = **原子場は非相対論 SCF (Schrödinger) だった**。完全 Dirac SCF が
@@ -537,7 +537,7 @@ end
 書いているのは誤り)。
 
 ⚠⚠ **260811Cl: `numerics` を処方に明示した。**数値 backend が版付けされ
-(`legacy_v5` / `dirac_true_midpoint_v1`)、f_x/f_e 側は予算を満たすために
+(`legacy_v5` / `dirac_true_midpoint_v1`)、f_x/f_e 側は許容誤差を満たすために
 後者へ移る見込みがある。**出荷 F の数値を「その時点の既定」に委ねてはいけない** —
 既定が動いた瞬間に、同じ `--v3` / 既定実行が別の数値方式で走る。
 これは**将来の既定変更に対する防御**であって、現在の正しさの問題ではない
@@ -570,7 +570,7 @@ presc_provenance(p) =
 `s_cert_A_inv` が行に増えたのも 2 から。"""
 const SCHEMA_VERSION = 2
 
-"出荷形式 (s グリッド + スキーマ版) が v5 の契約どおりか"
+"出荷形式 (s グリッド + スキーマ版) が v5 の仕様どおりか"
 is_shipping_format() =
     SCHEMA_VERSION == 2 && length(S_GRID) == 321 && S_GRID[end] == 16.0 &&
     S_GRID == collect(0.0:0.05:16.0)                 # 260820Cl: 端点だけでなく格子そのもの (codex)
@@ -736,7 +736,7 @@ function run_channel(z::Int, tag::String, outdir::String;
             end
         end
         # 260810Cl: 届かなかった上端を 0 で埋めて全行を 321 点に揃える
-        # (C# 側は固定長グリッド契約。埋め草は s_cert によって補間基底から外れる)
+        # (C# 側は固定長グリッドの規約。埋め草は s_cert によって補間基底から外れる)
         F = o["F"]
         if length(F) < length(S_GRID)
             F = vcat(F, zeros(length(S_GRID) - length(F)))

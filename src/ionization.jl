@@ -145,7 +145,7 @@ end
 **★ 既定は出荷処方 (v4 = κ 分解 Dirac 連続状態 + 小成分の行列要素)** — 作者判断
 2026-08-09。それまで単発 CLI の既定は v2 (非相対論) で、`gen_production.jl` の既定
 (v4) と食い違っていた。「`julia src/ionization.jl 26 K 200` が出荷処方ではない」のは
-公開リポでは罠なので揃えた (`docs/next_phase_2026-08-09.md` §1.1)。
+公開リポでは罠なので揃えた (`docs/handover/next_phase_2026-08-09.md` §1.1)。
 
 戻し口は 2 つ。どちらも model_id に出るので、出力を見れば必ず判別できる:
 
@@ -156,7 +156,7 @@ end
 | `--no-kdirac` | 非相対論 | v2 (**旧既定**) |
 
 ⚠ **`--rel` (SRC) には欠陥がある** — 真の相対論効果の 5〜20 倍の偽項を持つ
-(`docs/src_defect_2026-08-07.md`)。v3 の再現のためだけに残してある処方で、
+(`docs/notes/src_defect_2026-08-07.md`)。v3 の再現のためだけに残してある処方で、
 新しい計算に選ぶ理由は無い。
 
 ⚠⚠ **`compute_channel` / `compute_gos` / `compute_edge` の既定は変えていない。**
@@ -183,7 +183,7 @@ function main_fx(args)
     z = parse(Int, args[1])
     s_nodes = nothing
     json_path = nothing
-    # 260811Cl: 数値 backend。⚠ 既定は `legacy_v5` のまま — f_x の予算を満たすには
+    # 260811Cl: 数値 backend。⚠ 既定は `legacy_v5` のまま — f_x の許容誤差を満たすには
     # `dirac_true_midpoint_v1` が要るが、**既定を動かすのは処方の変更**なので
     # 採用を決めてから (計画書 §4.21)。fx 出口は get_neutral しか使わないので、
     # EDX 出口と違って backend をそのまま通してよい

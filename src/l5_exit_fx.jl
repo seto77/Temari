@@ -50,7 +50,7 @@
 """補償和 — **Neumaier の改良 Kahan** (260815Cl、作者決定 §4.23.8-(ii) の上乗せ側)。
 
 逐次和の丸め蓄積 (~n·eps 級。n = 32 万点で ~1e-12 電子の床) を ~eps 級に抑える。
-f_x 自身の予算 (1e-7) には不要な精度だが、**f_e の検証測定の床** (δf_x の床 ε が
+f_x 自身の許容誤差 (1e-7) には不要な精度だが、**f_e の検証測定の床** (δf_x の床 ε が
 2a₀/K² 倍に増幅される) を ~100 倍下げる。
 
 ⚠ classic Kahan ではなく **Neumaier 形**にする理由 (T12c で実測):
@@ -124,7 +124,7 @@ one_minus_j0(x::Float64) = x < 0.1 ?
 
 Mott–Bethe を f_x から組むと、f_x の求積丸め床 ε が低 s で 2a₀/K² 倍に増幅され、
 最小非零節点 (s = 7.8125e-4) では Au 級で B_num,e を超える (実測 1.41×。
-正本 = docs/repr_measurement_2026-08-14.md §3.3–3.5)。補償和で ε を下げても
+正本 = docs/notes/repr_measurement_2026-08-14.md §3.3–3.5)。補償和で ε を下げても
 **差 Z − f_x の桁落ちは残る** (相対 ~1e-11 で頭打ち)。δ 形は被積分関数が
 非負・全項同符号なので桁落ちが構造的に無く、(Z−f_x) を相対 ~1e-15 で持てる。
 
@@ -206,7 +206,7 @@ fe_zero_limit_a0(m2::Float64) = m2 / 3.0
 f_x/f_e の出口は **`get_neutral` の ρ しか使わない**ので、EDX 出口と違って
 束縛始状態の穴 (`prepare_channel` の docstring) を踏まない。したがって
 **`dirac_true_midpoint_v1` をそのまま通してよい**。
-⚠ 誤差予算 T_comp = 1e-7 電子を満たすには legacy では届かず、この経路が要る
+⚠ 許容誤差 T_comp = 1e-7 電子を満たすには legacy では届かず、この経路が要る
 (計画書 §4.17・§4.21)。⚠ 解決済み設定は出力の `settings.numerics_config` に残す。
 """
 function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,

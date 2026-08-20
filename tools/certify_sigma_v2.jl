@@ -200,8 +200,8 @@ end
 
 """認証する窓の一覧 [(window_id, d1, d2, in_domain)]。`window_id` は**生成規則由来の安定 ID**
 (丸めた端点の文字列ではない)。`to_epsmax` の上端は `d2 = ε_max` を正本にし、幅から再構成しない
-(丸めで 1 ULP 上へ出ると自分の検証に拒否される)。契約外 (Δ₂ > ε_max) の窓は**黙って落とさず**、
-`out_of_domain=true` の行として記録する (sentinel の [0,1000] eV は ε_max < 1000 eV の行で契約外)。"""
+(丸めで 1 ULP 上へ出ると自分の検証に拒否される)。仕様外 (Δ₂ > ε_max) の窓は**黙って落とさず**、
+`out_of_domain=true` の行として記録する (sentinel の [0,1000] eV は ε_max < 1000 eV の行で仕様外)。"""
 function window_list(emax_eV::Float64; sentinel_only::Bool=false)
     ws = Tuple{String,Float64,Float64,Bool}[]        # (id, d1, d2, in_domain)
     if sentinel_only
@@ -449,7 +449,7 @@ function summarize_v2(paths::Vector{String}; allow_mixed::Bool=false, only_fp::S
     worst = (0.0, ""); npass = 0; nfail = 0
     per = Dict{String,Vector{Float64}}()
     n_ood = count(d -> get(d, "out_of_domain", false) == true, recs)
-    n_ood > 0 && @printf("契約外 (Δ₂ > ε_max 等) として記録した窓: %d\n", n_ood)
+    n_ood > 0 && @printf("仕様外 (Δ₂ > ε_max 等) として記録した窓: %d\n", n_ood)
     recs = [d for d in recs if get(d, "out_of_domain", false) != true]
     for d in recs
         r = [Float64(x) for x in d["rel"]]; s = [Float64(x) for x in d["scaled"]]

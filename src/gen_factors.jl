@@ -13,7 +13,7 @@ F(s, E0) の `gen_production.jl` に相当するもの。**別 dataset family** 
 | 数値 backend | `dirac_true_midpoint_v1` | §4.20–4.21 |
 | 動径格子 | **dt/16 = 6.25e-05** (n_r = 323,400)、r₀ = 1e-7、r_max = 60 | §4.22 作者決定 |
 | SCF 停止 | production 閾値 (τ_ρ = 1e-8 / τ_e = 1e-9)、未収束なら `SCF_RETRY` | §4.22.2 |
-| s 格子 | **s_i = 6 i / 7680** (i = 0..7680、7681 点) — 式で契約に定義 | §4.17・§4.23.8-(iii) |
+| s 格子 | **s_i = 6 i / 7680** (i = 0..7680、7681 点) — 式で仕様に定義 | §4.17・§4.23.8-(iii) |
 | f_x | Simpson (対数格子) + Neumaier 補償和、f_x(0) = Z へ一様規格化 | §4.23.8-(ii) |
 | f_e | **δ 形求積** 2a₀(q_net + corr·∫ρ(1−j₀)r²dr)/K²、s=0 は a₀M₂/3 | §4.23.8-(ii) |
 | 十進丸め | **有効数字 11 桁** (f_x・f_e のみ。モーメント等は往復精度のまま) | §4.23.8-(iii) |
@@ -29,17 +29,17 @@ dt=GRID_DT/16, numerics=:dirac_true_midpoint_v1)` を直接呼び、未収束な
 同一プロセスで Au を 2 回解いても ρ の hash まで同一) だが、**認証 (2026-08-11) の
 `prod_stage5` とは一部の元素で別の反復で止まっている** (Z=79 等。固有値の相対差 ~2e-10、
 停止許容内。原因未特定 = 認証プロセスの文脈依存)。だから `check_factor_tables.jl --certify-dir`
-は「同一解か」を記録するだけで、ゲートは**出荷解 − 認証 tight (τ/10) ≤ 停止予算** (F8b/F8d)。
+は「同一解か」を記録するだけで、ゲートは**出荷解 − 認証 tight (τ/10) ≤ 停止誤差の許容値** (F8b/F8d)。
 ⚠ 260818Cl 訂正: 上の byte 同一は **H・Au で観測しただけで規則ではなく**、原因の当たり
 (「認証プロセスの文脈依存」) も外れた — 非決定論は**散発的**で、同じ台本の別プロセス間でも
-起きる (run 1↔2 で 85 元素中 6、run 2↔3 で 86 中 5 が別反復。docs/next_chat_2026-08-16.md
+起きる (run 1↔2 で 85 元素中 6、run 2↔3 で 86 中 5 が別反復。docs/handover/next_chat_2026-08-16.md
 §4 の 18:30 追記)。下の provenance 節の「保証ではなく観測」が正しい。
 
 ## 生成時ゲート (作者決定とセット。落ちたら JSON を書かない。全ゲートを
 ## 値・閾値・合否つきで JSON の `gates` に記録する — codex レビュー 2026-08-16)
 
   G0  実際に解いた原子の cfg (`cache_tag(a.cfg)`) が処方と一致 / スレッド数 1 /
-      中性 (a.nel == Z ちょうど) / 節点列の SHA-256 が契約値
+      中性 (a.nel == Z ちょうど) / 節点列の SHA-256 が規定値
   G1  SCF が収束している (再試行後も未収束なら失敗 = フリートの次 pass で拾う)
   G2  δ 形 ↔ Mott–Bethe 構成の整合 (s ≥ 0.2 で相対 ≤ 1e-10。`compute_fx` 内)
   G3  s→0 でモーメント展開と整合: |f_e(s_i) − a₀[M₂/3 − K²M₄/60 + K⁴M₆/2520 − K⁶M₈/181440]|
@@ -94,7 +94,7 @@ const S_MAX_A_INV = 6.0
 const FACTORS_DIGITS = 11                 # 有効数字 (作者決定 §4.23.8-(iii))
 const FACTORS_ADOPTED_STAGE = 5           # dt = GRID_DT / 2^(stage−1) = dt/16
 
-"""予算 (計画書 §4.17 / §4.23.8。QC が参照する。生成器は判定に使わない)。
+"""許容誤差の内訳 (計画書 §4.17 / §4.23.8。QC が参照する。生成器は判定に使わない。JSON のキー名 `budget` は出荷済み v1.0.0 の形式なので変えない)。
 検査可能な等式で書く: T_comp = B_num + B_repr (= T/1.1 + T/11)、
 B_num = B_grid + B_scf + B_reserve (f_x)。f_e 側は格子/停止の個別配分を置いていない
 (合成の実測 0.71×B_num,e で収まることを認証で示した) ので B_num_e 一本 + B_repr_e。"""
@@ -294,7 +294,7 @@ recipe_cfg(p::FactorsRecipe) =
 factors_filename(z::Int) = @sprintf("SF_Z%03d.json", z)
 runlog_filename(z::Int) = @sprintf("SF_Z%03d.run.json", z)
 
-"出荷 s 節点の SHA-256 (契約値。2026-08-16 に 7681 点で確定)"
+"出荷 s 節点の SHA-256 (規定値。2026-08-16 に 7681 点で確定)"
 const SHIP_S_SHA256 = "1476113c622ccb9e62d4b56973277b7e550fef44357cf42d7923a9dde84f32fb"
 
 """1 元素を生成して JSON を書く。ゲートに落ちたら `GateFailure` を投げて**書かない**。
@@ -316,7 +316,7 @@ function generate_element(z::Int, outdir::String; recipe::FactorsRecipe=FactorsR
     s_sha = nodes_sha256(s)
     if is_ship_recipe(recipe)
         s_sha == SHIP_S_SHA256 ||
-            throw(GateFailure("Z=$z: 節点列の SHA-256 が契約値と違う ($s_sha)"))
+            throw(GateFailure("Z=$z: 節点列の SHA-256 が規定値と違う ($s_sha)"))
     end
     verbose && @printf("[Z=%d %s] SCF (dt=%.3e, %s, %s) 開始 %s\n", z, FACTORS_SYMBOLS[z],
                        recipe_dt(recipe), recipe.numerics, recipe.exchange, started)

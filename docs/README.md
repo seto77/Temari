@@ -218,20 +218,20 @@ mechanical — **filenames are unchanged**, so `docs/foo.md` is now one of
 `docs/notes/foo.md`, `docs/handover/foo.md` or `docs/release/foo.md`, and the
 table above says which.
 
-Three places still spell the old flat paths, deliberately. **Do not "finish the
+Two places still spell the old flat paths, deliberately. **Do not "finish the
 job" by running a sed over them** — each one is load-bearing:
 
 | Where | Why it was not updated |
 | --- | --- |
-| `src/*.jl` comments and provenance strings (34 references across 11 files) | Every byte of `src/` feeds the source fingerprint recorded in generated datasets, and `physics_pointer` is written verbatim into the shipped JSON. Editing them would make a regenerated table differ from the released one. |
+| `src/gen_factors.jl` — the six strings that are **written into the shipped factors JSON** (`pointer`, `physics_pointer`, `certification_pointers`) | dataset-factors v1.0.0 is released and `tools/factors_regen_check.sh` compares a regenerated table byte-for-byte against it. These strings change only together with the next factors generation. |
 | Released dataset trees under `src/prod_*` — the JSON files **and** their `MANIFEST.md` (15 distinct filenames) | Published data, frozen by SHA-256. |
 | `schema/temari_dataset_v2.schema.json` | Packaged into the release archive; see the warning above. |
 
-Two further entries used to sit in this table and were cleared on 2026-08-19
-(commit `ae82361`), after the certification fleet had finished:
+Three further entries used to sit in this table and were cleared later:
 
 | Where | Status |
 | --- | --- |
+| `src/*.jl` comments and docstrings (the other 27 references across 11 files) | Updated on 2026-08-20, together with the terminology pass (契約 → 仕様/保証/規約), as a deliberately behaviour-invariant commit gated by bit-identical snapshots (legacy v5 cutoff on/off × v3/v4 prescription, both sides from an empty SCF cache). The source fingerprint moved — that is intended: the F v6 generation (`LKIN_RULE :v6`, HIGH v6) starts from this state, and the author ruled on 2026-08-20 that the fingerprint is not an asset to protect. |
 | `tools/temari_factors_contract.py` | Its one old path (a docstring pointer added 2026-08-18, *after* dataset-factors v1.0.0 was packaged — the copy inside that archive carries no `docs/` pointer at all) was updated in `ae82361`. The archive is unaffected. |
 | ⚠ **`tools/certify_sigma.jl` and `tools/beta_spike.jl` (7 references)** | Updated in `ae82361`, once the σ(β, Δ) fleet was over. **The constraint re-applies whenever a certification fleet is running**: `cert_fingerprint()` hashes the CRLF-normalized bytes of *both* files into `CERT_FP`, stamps it on every row, and the resume filter and the summary census key off it. Change one byte mid-run and a restarted lane stops seeing the rows already written. |
 

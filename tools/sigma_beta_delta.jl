@@ -15,10 +15,10 @@ tools/ に置く。将来 CLI サブコマンド化するときは `model_id` / 
 | 参照関数の切替 ε_c | パネル内部に段差 | **ε_c を必ずパネル境界にする** (開区間 (Δ₁,Δ₂) にあるとき) |
 | 角度 | log-x 単一 GL n_x=64 | **PCHIP 継ぎ目 + `bt2=0` で分割した GL (npt=12)**、`Q² = dq²·e^x` |
 | Q 表 | n_q = 240 | **n_q = 1216** |
-| 入力検証 | 無し | 契約 §3 のとおり (負の β / NaN / 逆順の窓 / ε_max 超過) |
+| 入力検証 | 無し | 仕様 §3 のとおり (負の β / NaN / 逆順の窓 / ε_max 超過) |
 
 正本 = `docs/notes/window_quadrature_2026-08-19.md` §7–§8、`docs/notes/nq_nx_2026-08-19.md` §12–§14、
-契約 = `docs/notes/sigma_beta_delta_contract_2026-08-18.md`。
+仕様 = `docs/notes/sigma_beta_delta_contract_2026-08-18.md`。
 
 ## 返り値に入れる診断 (⚠ 誤差の上界ではない — 「指標」と呼ぶ)
 
@@ -392,7 +392,7 @@ end
 # ---------------------------------------------------------------------
 # 本体
 # ---------------------------------------------------------------------
-"入力検証 (契約 §3)。問題があれば (false, 理由)、無ければ (true, \"\")"
+"入力検証 (仕様 §3)。問題があれば (false, 理由)、無ければ (true, \"\")"
 function validate_inputs(betas::Vector{Float64}, beta_in::Float64, d1_eV::Float64,
                          d2_eV::Float64, emax_eV::Float64, clip::Bool)
     for b in betas
@@ -589,7 +589,7 @@ function sigma_beta_delta(z::Int, tag::String, e0_keV::Float64;
                             "rule_version" => rule_version(rule),
                             "rule_config" => rule_config(rule),
                             "zero_reason" => r.zero_reason))
-    # 契約 §1/§3: own と bote の**両方を常に返す** (`normalize` は主値 `sigma_nm2` の選択だけ)。
+    # 仕様 §1/§3: own と bote の**両方を常に返す** (`normalize` は主値 `sigma_nm2` の選択だけ)。
     # 分母 σ_own,total は**同じ規則**で窓 [0, ε_max]・β = π (横断の設定も同じ)。
     # 出荷 JSON の `sigma_own_nm2` (別の求積) を分母にしない — 新規則の closure が壊れる
     if all(iszero, r.sigma_nm2)

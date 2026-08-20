@@ -443,7 +443,7 @@ const MODEL_ID_REL = "DHFS-KS23-DiracB-SRC-jsplit-fullrange-sym-v3"
 # 付けると「非相対論なのに相対論の上位版」という矛盾した ID になる。
 # 260808Cl: **出荷世代 v4 に昇格**した (暫定名 `-v3k` から改称)。作者判断で
 # 連続状態を SRC → κ 分解 Dirac に差し替えることが確定したため
-# (`docs/src_defect_2026-08-07.md` が理由、`docs/next_phase_2026-08-08.md` §1 が決定)。
+# (`docs/notes/src_defect_2026-08-07.md` が理由、`docs/handover/next_phase_2026-08-08.md` §1 が決定)。
 # ⚠ `-v3k` を名乗る出荷テーブルは存在しない (開発中の測定にしか使っていない) ので、
 #   改称で読めなくなるデータは無い
 const MODEL_ID_KD = "DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4"

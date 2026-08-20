@@ -7,7 +7,7 @@
 #   (prod_v5_jl / prod_factors_v1) の JSON 本体と本番チェックポイントもこの codec が
 #   書き (gen_production.jl / gen_factors.jl の write_json)、公開 loader
 #   (tools/factors_loader.jl) は parse_json_file に依存する。canonical は JSON なので
-#   (docs/dataset_contract_2026-08-09.md)、ここは補助の小道具ではなく出荷物の
+#   (docs/notes/dataset_contract_2026-08-09.md)、ここは補助の小道具ではなく出荷物の
 #   直列化器そのもの。下の 260809Cl エスケープ欠陥が重かったのもそのため。
 
 # ---- 最小 JSON パーサ (自前の JSON 一式用。260818Cl: 「2 ファイル専用」ではない) ----

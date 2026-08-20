@@ -341,7 +341,7 @@ function selftest()
     # ⚠ 260818Cl 訂正: 「実 c の効果は物理」は誤り。d_rel の経路 (SRC = 第 3.5 章、
     #   `--rel` = v3 処方) は Darwin 項由来の偽の項がずれの ~95 % を占め、真の
     #   相対論効果 (κ 分解 Dirac と非相対論の差、s ≤ 1.25 で ≤0.3 %) の 5-20 倍ある
-    #   (docs/src_defect_2026-08-07.md §0・§2)。既定処方の v4 はこの経路を通らない
+    #   (docs/notes/src_defect_2026-08-07.md §0・§2)。既定処方の v4 はこの経路を通らない
     let z = 26, tag = "K", e0 = 200.0
         s = [0.0, 1.0, 2.0, 4.0]
         base = compute_channel(z, tag, e0; settings=QUICK_SETTINGS, s_nodes=s,
@@ -568,7 +568,7 @@ function selftest()
 
     # ---- T12c: δ 形求積と補償和 (260815Cl、作者決定 計画書 §4.23.8-(ii)) ----
     # f_e の低 K は Z − f_x の桁落ちで Mott–Bethe 直接構成が使えない (それが
-    # δ 形採用の動機 — docs/repr_measurement_2026-08-14.md §3.3)。水素 1s では
+    # δ 形採用の動機 — docs/notes/repr_measurement_2026-08-14.md §3.3)。水素 1s では
     # deficit = 1 − [1+(K/2)²]⁻² が閉形式 x(2+x)/(1+x)² (x = (K/2)²) で
     # **桁落ちなく**書けるので、δ 形の低 K 精度を厳密解に対して直接検査できる。
     let dt = GRID_DT
@@ -688,7 +688,7 @@ function selftest()
     # あわせて **整数占有の自己項補正 (exchange_weight の第 2 項) が効いていること**を、
     # 遠方漸近 V_x·r → −1 で確認する。補正前は −q_h/(2(2l_h+1)) で、C (2p²) は −1/3、
     # Au (6s¹) は −1/2 にしかならなかった。**閉殻・開殻を問わず −1 になるのが要点**で、
-    # これが Latter 補正を捨てられる根拠 (docs/exchange_diagnosis_2026-08-07.md)。
+    # これが Latter 補正を捨てられる根拠 (docs/notes/exchange_diagnosis_2026-08-07.md)。
     for (z, want) in ((10, -1.0), (6, -1.0), (79, -1.0))
         at = SCFAtom(z, ORBITALS[z]; latter_charge=1.0)
         ks = sort(collect(keys(at.orbitals)))

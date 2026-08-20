@@ -86,7 +86,7 @@ function hartree(r::AbstractVector, rho::AbstractVector)
 end
 
 # ==== 260807Cl 追加: 厳密交換の材料 (KLI/OEP へ向けた段階 1) ================
-# docs/exchange_diagnosis_2026-08-07.md の結論を受けた作業。局所交換の「強さ」を
+# docs/notes/exchange_diagnosis_2026-08-07.md の結論を受けた作業。局所交換の「強さ」を
 # スカラー α で合わせるのをやめ、厳密交換を局所ポテンシャルとして表す道へ進む。
 # 本段階では**その材料である動径 Slater 関数だけ**を作り、解析解で検査する。
 
@@ -139,7 +139,7 @@ Slater ポテンシャルは交換エネルギー密度を密度で割ったも�
 −V_H/2 = 正解だが、q=1 では −V_H/2 と半分にしかならない (正解は −V_H)。
 遠方漸近も V_x^S·r → −q_h/(2(2l_h+1)) となり、**最外殻が閉じているときだけ −1** に
 なる。これは交換の汎関数ではなく枠組み (スピン非分極・分数占有) 側の欠陥で、
-解消にはスピン分極が要る (docs/exchange_diagnosis_2026-08-07.md の案 B)。
+解消にはスピン分極が要る (docs/notes/exchange_diagnosis_2026-08-07.md の案 B)。
 """
 function exchange_gk(P::Vector{Vector{Float64}}, l::Vector{Int},
                      r::AbstractVector{Float64}, a::Int, b::Int, k::Int)
@@ -499,7 +499,7 @@ xc_tag(a::Float64, exchange::Symbol) = exchange === :kli ? "kli" : xa_tag(a)
 # ⚠⚠ **`high_order_v1` と呼ばない。**中点を真値にしても full SCF は実測で
 #   **2 次のまま**である (H の累積台形と N の trapz 規格化が残るため)。
 #   名前と保証を一致させる ⇒ `dirac_true_midpoint_v1`。
-#   詳細と実測は `docs/scattering_factor_dataset_plan_2026-08-10.md` §4.18–4.19。
+#   詳細と実測は `docs/notes/scattering_factor_dataset_plan_2026-08-10.md` §4.18–4.19。
 
 """数値 backend の版。**意味は公開後に変更しない** (別 ID を作る)。
 
@@ -988,7 +988,7 @@ legacy 経路は今までどおり 9 引数版へ落ちる。
 
 ⚠ 端点平均 `(va+vb)/2` は真の中点 V(r_m) に対して h²V''/8 の誤差を持つので、
 式が RK4 でも**大域 2 次に落ちる**。実測は
-`docs/scattering_factor_dataset_plan_2026-08-10.md` §4.18 (単体で 2.00 → 3.99)。"""
+`docs/notes/scattering_factor_dataset_plan_2026-08-10.md` §4.18 (単体で 2.00 → 3.99)。"""
 @inline function _dirac_rk4_step(ra::Float64, rb::Float64, va::Float64, vm::Float64,
                                  vb::Float64, E::Float64, G0::Float64, F0::Float64,
                                  kap::Float64, c::Float64)
@@ -1147,7 +1147,7 @@ end
 Au 1s では frac_small ≈ 9 %、2p3/2 では 1.9 % なので、両者は振幅
 (1/√(1−frac_small)) で 4.7 % / 1.0 % 違う。⚠ 260818Cl 訂正: 旧記述
 「frac_small = 4.7 %、振幅で 1-2 %」は **1s の振幅差を frac_small に取り違えていた**
-(4.7 % は docs/next_phase_2026-08-07.md §2 が挙げた振幅差。frac_small ~9 % は
+(4.7 % は docs/handover/next_phase_2026-08-07.md §2 が挙げた振幅差。frac_small ~9 % は
 `dirac_orbital_on_grid` の注記と、Fe 1s の frac_small 0.88 % ↔ 振幅 0.44 % に整合)。
 どちらが正しいかは**どの行列要素を使うか**で決まり、混ぜてはいけない。"""
 function solve_dirac_bound_2c(pot_V, z::Int; kappa::Int=-1, n_nodes::Int=0,

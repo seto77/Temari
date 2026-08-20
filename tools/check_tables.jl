@@ -24,7 +24,7 @@ ReciPro 側の `check_tables.py` (v3 の QC に使ったもの) を Julia へ移
       **窓の外と L/M 殻は符号反転が物理的に起きるので回数を記録するだけ** —
       符号反転の回数はゲートにしない (v5 の実測最大 2 回を仕様に固定すると、
       正常な 3 本目の交差を持つ次世代を「破損」と判定する)
-  C3  tail 契約 (schema 2): 全行に kind があり、kind=2 / s_cert がグリッド点 /
+  C3  tail の仕様 (schema 2): 全行に kind があり、kind=2 / s_cert がグリッド点 /
       s_cert_A_inv と valid_to が一致
       ⚠ 旧 (schema 1) は「有効なら a,b>0 かつ F(s_max)=a·e^{−b·s_max}」だった。
         **指数 tail は撤去**した — 上界でも近似でもなかったため
@@ -57,7 +57,7 @@ ReciPro 側の `check_tables.py` (v3 の QC に使ったもの) を Julia へ移
   C14 s > s_cert の埋め草が厳密に 0 (低 E0 行は運動学的に 16 Å⁻¹ へ届かない)
   C16 s_cert が運動学的に成立する (≤ 0.98/λ)。⚠ **s_kin はデータに入れない** —
       E0 だけの関数なので消費側が計算する (真実の出所を 2 つにしない)。
-      3 領域の契約は `tools/temari_contract.py` の罠 C7
+      3 領域の規約は `tools/temari_contract.py` の罠 C7
 
   C4 (廃止) E0 方向の 2 階差分 — 不等間隔グリッド上の真の曲率を誤検知する
   C5 (無効) Z 方向平滑性 — 自動判定できる閾値が見つからなかった
@@ -103,7 +103,7 @@ const C2_MIN_NODES = 20        # 窓に最低これだけノードが無けれ�
 
 **窓を引数にしてあるのは負のテスト (`tools/c2_negative_test.jl`) のため** —
 旧窓 (s≤4) を同じコードで再現して「旧窓では見逃す欠陥」を実演できるようにする。
-`rows` から `s_cert_A_inv` を直接引くのは、C2 が C3 (tail 契約) より前に走るため。"""
+`rows` から `s_cert_A_inv` を直接引くのは、C2 が C3 (tail の仕様) より前に走るため。"""
 function c2_problems(s, F, rows, e0; s_max=C2_S_MAX)
     probs = String[]
     for (i, r) in enumerate(rows)
@@ -225,7 +225,7 @@ function check_file(path::String)
         nflip = max(nflip, count(!=(0), diff(sign.(nz))))
     end
     tag == "K" && append!(probs, c2_problems(s, F, rows, e0))
-    # ---- C3 / C12 / C13 / C14 (260810Cl: schema 2 の tail 契約) ----
+    # ---- C3 / C12 / C13 / C14 (260810Cl: schema 2 の tail の仕様) ----
     # 旧 C3 は指数 tail の a,b>0 と F(s_max) 整合を見ていた。schema 2 では
     # tail は **実測上界 ε** なので、検査するのは「規則どおりに作られているか」
     # (C12)・「床を割っていないか」(C13)・「保証域の外が埋め草か」(C14)。
