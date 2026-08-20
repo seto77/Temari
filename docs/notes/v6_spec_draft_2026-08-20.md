@@ -115,6 +115,8 @@ const V6_SPEC = (
     s_grid_sha       = "…",   # S_GRID 321 点の canonical dump の SHA (点数・端点もフィールドで並記)
     s_grid_n         = 321,
     schema           = 2,
+    # ⚠ 260821Cl 訂正: この例は判断 #2 (n1 20→40) より前に書いたもの。**承認された 6.0.0 の spec は n1=40**
+    #   (spec/temail… → spec/temari_dataset_v6.0.0.spec.json、sha 749fadc5…)。ここは起草時の形として残す
     high             = (n1=20, n2=56, n3=20, l_cap=256, n_x=192, n_phi=96, n_q=720,
                         sig_thresh=1.0e-13, ppw=30.0, dt_log=1.0e-3),
     lkin             = (rule=:v6, radius_frac=0.999, margin=12),

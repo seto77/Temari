@@ -50,7 +50,20 @@ cp tools/temari_contract.py "$stage/tools/"
 # **どちらの条件で配られたのか読み手が判断できない**。
 cp licenses/CC-BY-4.0.txt licenses/MIT.txt "$stage/licenses/"
 cp docs/release/dataset_release_LICENSE.md "$stage/LICENSE.md"
-cp docs/release/dataset_release_README.md "$stage/README.md"
+# 260821Cl (監査): **同梱 README の版が一致しなければ梱包を止める。**この README はタイトル・sha256 の
+#   ファイル名・**DOI** に版を直書きしているので、更新を忘れると「v6 のデータが v5 の DOI を引用しろと言う」
+#   archive が出来る。⇒ 版の文字列を機械的に照合し、DOI 行は人に確認させる (DOI は作者判断なので自動で書き換えない)
+readme_src=docs/release/dataset_release_README.md
+bad_ver=$(grep -oE "dataset[ -]v[0-9]+\.[0-9]+\.[0-9]+" "$readme_src" | grep -v "dataset[ -]v${ver}$" | sort -u)
+if [ -n "$bad_ver" ]; then
+  echo "同梱 README ($readme_src) が別の版を指している (梱包する版は $ver):" >&2
+  echo "$bad_ver" | sed "s/^/  /" >&2
+  echo "  → タイトル・sha256 のファイル名・引用文・DOI を $ver 用に更新してから再実行すること" >&2
+  exit 1
+fi
+echo "  ⚠ 同梱 README の DOI 行を確認すること (版ごとに違う。自動では書き換えない):"
+grep -nE "doi\.org|zenodo\.[0-9]+" "$readme_src" | sed "s/^/     /"
+cp "$readme_src" "$stage/README.md"
 
 n=$(ls "$stage"/F_*.json | wc -l)
 echo "  チャネル $n / schema・manifest・contract・README 同梱"
