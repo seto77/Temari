@@ -54,14 +54,26 @@ const QUICK_SETTINGS = (n1=8, n2=16, n3=8, l_cap=72, n_x=32, n_phi=16,
 # 260820Cl: l_cap 128 → 256 (LKIN_RULE :v6 では cap が律速 — M1 @400 keV は l ≈ 280 まで効く。
 #   cap 128 では ΔF 1.1e-05 / cap 256 で ≤ 1e-06 (要因計画)。費用は v5 生成の ≈ 4 倍を見込む)
 const LEGACY_V5_CUTOFF = get(ENV, "TEMARI_LEGACY_V5_CUTOFF", "0") == "1"
-#   (TEMARI_LEGACY_V5_CUTOFF=1 のときだけ v5 の組 = l_cap 128 / n_x 96 / n_phi 48 / n_q 360)
+#   (TEMARI_LEGACY_V5_CUTOFF=1 のときだけ v5 の組 = HIGH_SETTINGS_V5 + LKIN_RULE :v5 に**まとめて**戻る。
+#    ⚠ 検証ゲート専用 — gen_production.jl の本番入口はこの状態では走らない (fail-closed))
 # 260820Cl (v6): 部分波を直した後の 3s/3p (M1/M2 低 Z × 最大 E₀) の残差は **角度求積 (n_x/n_phi) と Q 表 (n_q)** が支配 —
 #   HIGH (96/48/360) は最強 (288/144/1080) から ΔF 7e-06 (Zn M1 @400)、**n_x 192 / n_phi 96 / n_q 720 で ≤ 8e-08** (M1/M2/M4
 #   4 行、scratchpad `m1_nx_nq.jl` → `../qcamp/m1_nx_nq.log`)。計算量は +45 % (角度・Q 表は連続状態の解に比べ安い)。
 #   ⇒ HIGH v6 = n_x 192 / n_phi 96 / n_q 720 / l_cap 256 / 部分波 v6
-const HIGH_SETTINGS = (n1=20, n2=56, n3=20, l_cap=LEGACY_V5_CUTOFF ? 128 : 256,
-                       n_x=LEGACY_V5_CUTOFF ? 96 : 192, n_phi=LEGACY_V5_CUTOFF ? 48 : 96,
-                       n_q=LEGACY_V5_CUTOFF ? 360 : 720, sig_thresh=1e-13, ppw=30.0, dt_log=1.0e-3)
+# 260820Cl (v6, 2 件目): ε 求積の閾値側 √ 区間 n1 を 20 → 40。重 Z (Z ≳ 80) の K 以外の殻で n1=20 が
+#   未収束だった (最悪 Rn M5 の F 絶対 6.0e-05 / ΔN0 2.4e-04 — v5 にも同一に存在)。総数一定の配分実験で
+#   n1 単独が律速と特定、n1=40 で全副殻 ≤ 3.1e-07 (n1=64 参照、tanh-sinh で独立照合)、実時間 +10 % 以下。
+#   正本 = docs/notes/eps_nodes_threshold_2026-08-20.md。全行一律 (Z 閾値を仕様に書かない)。
+# ⚠ profile は**組ごと**に切り替える (v5 の規則に n1=40 のような混成を ENV では作れない)。
+#   手で組んだ settings は「custom」で、出荷版を名乗れない (gen_production.jl `presc_dataset_version`)。
+const HIGH_SETTINGS_V5 = (n1=20, n2=56, n3=20, l_cap=128, n_x=96,  n_phi=48, n_q=360,
+                          sig_thresh=1e-13, ppw=30.0, dt_log=1.0e-3)   # dataset v5.0.0 の HIGH (凍結)
+const HIGH_SETTINGS_V6 = (n1=40, n2=56, n3=20, l_cap=256, n_x=192, n_phi=96, n_q=720,
+                          sig_thresh=1e-13, ppw=30.0, dt_log=1.0e-3)   # dataset v6 の HIGH
+const HIGH_SETTINGS = LEGACY_V5_CUTOFF ? HIGH_SETTINGS_V5 : HIGH_SETTINGS_V6
+"解決済みの設定がどの profile か (JSON の provenance 用)。手で組んだ設定は custom"
+settings_profile(settings) = settings == HIGH_SETTINGS_V6 ? "v6_high" :
+                            settings == HIGH_SETTINGS_V5 ? "v5_legacy" : "custom"
 
 # 単発出口の JSON 仕様。model_id は物理処方を表すが、求積プリセットは意図的に
 # 含めないため、再現に必要な数値設定を別フィールドで必ず保存する。
@@ -81,6 +93,7 @@ function settings_dict(settings)
     get!(d, "lkin_rule", string(LKIN_RULE))
     get!(d, "lkin_radius_frac", LKIN_RULE === :v6 ? Float64(get(settings, :lkin_frac, LKIN_RADIUS_FRAC)) : nothing)
     get!(d, "lkin_margin", LKIN_RULE === :v6 ? Int(get(settings, :lkin_margin, LKIN_MARGIN)) : 12)
+    get!(d, "profile", settings_profile(settings))   # 260820Cl: v6_high / v5_legacy / custom
     return d
 end
 

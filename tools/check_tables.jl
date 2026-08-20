@@ -411,7 +411,8 @@ function provenance_consistency(files::Vector{String})
                                         l_cap=Int(get(st, "l_cap", 128)),        # lkin_rule の無い旧ファイル = v5 (l_cap 128)
                                         n_x=Int(get(st, "n_x", 96)), n_phi=Int(get(st, "n_phi", 48)), n_q=Int(get(st, "n_q", 360)),
                                         lkin_radius_frac=(x = get(st, "lkin_radius_frac", nothing); x === nothing ? LKIN_RADIUS_FRAC : Float64(x)),
-                                        lkin_margin=Int(get(st, "lkin_margin", 12)))
+                                        lkin_margin=Int(get(st, "lkin_margin", 12)),
+                                        n1=Int(get(st, "n1", 20)), n2=Int(get(st, "n2", 56)), n3=Int(get(st, "n3", 20)))
         if dv_calc != dv
             println("[NG] C16 $(basename(p)): 処方から引いた dataset_version " *
                     "$dv_calc がファイルの $dv と違う")

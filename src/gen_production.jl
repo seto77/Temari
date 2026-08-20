@@ -594,13 +594,16 @@ dataset_version と model_id が**一致すること**しか見ないので、�
 function presc_dataset_version(p; lkin_rule::AbstractString=string(LKIN_RULE), l_cap::Integer=HIGH_SETTINGS.l_cap,
                                lkin_radius_frac=LKIN_RADIUS_FRAC, lkin_margin::Integer=LKIN_MARGIN,
                                n_x::Integer=HIGH_SETTINGS.n_x, n_phi::Integer=HIGH_SETTINGS.n_phi,
-                               n_q::Integer=HIGH_SETTINGS.n_q)
+                               n_q::Integer=HIGH_SETTINGS.n_q,
+                               n1::Integer=HIGH_SETTINGS.n1, n2::Integer=HIGH_SETTINGS.n2, n3::Integer=HIGH_SETTINGS.n3)
     (is_shipping_format() && p == PRESC_V4) || return "0.0.0-dev"
-    (lkin_rule == "v5" && (l_cap, n_x, n_phi, n_q) == (128, 96, 48, 360)) && return "5.0.0"
+    # 260820Cl: ε ノード (n1,n2,n3) も版キーに入れる — v6 で n1 が 20 → 40 に変わったので、見ていないと
+    #   n1 だけ違う一式が同じ版を名乗れる (codex: 版は出力に効く設定の一式で定義する)
+    (lkin_rule == "v5" && (l_cap, n_x, n_phi, n_q) == (128, 96, 48, 360) && (n1, n2, n3) == (20, 56, 20)) && return "5.0.0"
     # ⚠ v6 の範囲 (等比 s 格子 / ppw / コメント・旧パス などを束ねるか) は作者が凍結するまで **"6.0.0-dev"** を名乗る
     #   (codex 2026-08-20: 版は処方 + 正確な S_GRID + schema + HIGH 全設定 + 部分波規則 + 量子化の一式で定義し、
     #   生成側の名乗りと C16 を同じ定義から引く — その一式を `V6_SPEC` として作るのは凍結時)
-    (lkin_rule == "v6" && (l_cap, n_x, n_phi, n_q) == (256, 192, 96, 720) &&
+    (lkin_rule == "v6" && (l_cap, n_x, n_phi, n_q) == (256, 192, 96, 720) && (n1, n2, n3) == (40, 56, 20) &&
      lkin_radius_frac == 0.999 && lkin_margin == 12) && return "6.0.0-dev"
     return "0.0.0-dev"
 end
@@ -787,7 +790,8 @@ function run_channel(z::Int, tag::String, outdir::String;
         "s_grid_A_inv" => S_GRID,
         "model_id" => presc_model_id(presc),
         "dataset_version" => presc_dataset_version(presc; l_cap=settings.l_cap, n_x=settings.n_x,
-                                                   n_phi=settings.n_phi, n_q=settings.n_q),
+                                                   n_phi=settings.n_phi, n_q=settings.n_q,
+                                                   n1=settings.n1, n2=settings.n2, n3=settings.n3),
         "schema_version" => SCHEMA_VERSION,
         "generator" => "ionization.jl (Julia)",
         "generator_commit" => _git_head(),
@@ -1034,7 +1038,8 @@ function main_gen(args)
             (quick ? "QUICK" : "HIGH") * ", スレッド $(Threads.nthreads()))")
     println("処方: ", presc_model_id(presc),
             "  dataset_version=", presc_dataset_version(presc; l_cap=settings.l_cap, n_x=settings.n_x,
-                                                          n_phi=settings.n_phi, n_q=settings.n_q))
+                                                          n_phi=settings.n_phi, n_q=settings.n_q,
+                                                          n1=settings.n1, n2=settings.n2, n3=settings.n3))
     println("出力: $outdir\n")
     warn_if_dirty()                            # 260809Cl 追加 (指示書 §1.3)
     n_done = n_skip = 0
