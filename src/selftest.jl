@@ -1300,18 +1300,23 @@ function refcheck()
         # ⚠ dirac_scf=false で固定。refcheck は「Julia 実装が Python 実装の
         # **同じ処方**を再現するか」を見る検査で、参照値は非相対論 SCF で作られている。
         # 既定が DSCF になっても、ここは処方を揃えないと意味を失う。
-        # ⚠ 260820Cl: 部分波の打ち切りも同じ理由で **v5 の式に固定** (`lkin_rule=:v5`) —
-        # 参照値は ⌈κ·min(r_core, 6/Z)⌉+12 で作られており、src の既定が LKIN_RULE :v6 に
-        # 変わった日に CI の refcheck が Fe L1 の |dN0/N0| = 4.1e-04 (= 意図した処方差) で
-        # 落ちた。処方差は本検査の対象外 (lkin_truncation_2026-08-19.md §6 が正本)
+        # ⚠ 260820Cl: 部分波の打ち切り規則は **case ごとに JSON が指定する** (`lkin_rule`: "v5" / "v6")。
+        # 旧参照 (Fe K/L1/L2/L3 @200) は ⌈κ·min(r_core, 6/Z)⌉+12 (v5) で作られており、src の既定が
+        # LKIN_RULE :v6 に変わった日に CI の refcheck が Fe L1 の |dN0/N0| = 4.1e-04 (= 意図した処方差) で
+        # 落ちた。処方差は本検査の対象外なので、参照値と同じ規則を明示して比べる (既定は持たせない —
+        # 無ければ error)。v6 の case は tools/make_reference_values.py が Python 側で作る
+        haskey(c, "lkin_rule") || error("reference_values.json の case (Z=$z $tag) に lkin_rule が無い")
+        rule = Symbol(c["lkin_rule"])
+        rule in (:v5, :v6) || error("lkin_rule は v5 か v6 ($(c["lkin_rule"]))")
         o = compute_channel(z, tag, Float64(c["e0_keV"]);
-                            settings=(; QUICK_SETTINGS..., lkin_rule=:v5),
+                            settings=(; QUICK_SETTINGS..., lkin_rule=rule),
                             s_nodes=s, verbose=false,
                             dirac_scf=false, x_alpha=1.0)
         dF = maximum(abs.(o["F"] .- Float64.(c["F"])))
         dN0 = abs(o["N0"] / Float64(c["N0"]) - 1.0)
         dE = abs(o["E_bound_eV"] / Float64(c["E_bound_eV"]) - 1.0)
-        @printf("%-3s: max|dF|=%.3e  |dN0/N0|=%.3e  |dE_b/E_b|=%.3e\n", tag, dF, dN0, dE)
+        @printf("Z=%-2d %-3s @%-5g %s: max|dF|=%.3e  |dN0/N0|=%.3e  |dE_b/E_b|=%.3e\n",
+                z, tag, Float64(c["e0_keV"]), rule, dF, dN0, dE)
         worst = max(worst, dF, dN0)
     end
     @printf("\nWORST vs Python = %.3e  (%s)\n", worst,

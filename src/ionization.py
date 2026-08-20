@@ -7,9 +7,11 @@ ReciPro の STEM-EDX シミュレーションに使っているイオン化パ�
 使いません。必要なライブラリは numpy / scipy / mpmath だけです。
 
     python -X utf8 ionization.py selftest              # 解析解に対する自己検証 (~3分)
-    python -X utf8 ionization.py 26 K  200 --quick     # Fe K 殻 @200 kV (粗い求積, ~10分)
-    python -X utf8 ionization.py 79 L3 300 --json out.json
-    python -X utf8 ionization.py 26 K  200 --quick --s 0 0.5 1 2 4
+    python -X utf8 ionization.py 26 K  200 --quick --lkin v6    # Fe K 殻 @200 kV (粗い求積, ~10分)
+    python -X utf8 ionization.py 79 L3 300 --lkin v6 --json out.json
+    python -X utf8 ionization.py 26 K  200 --quick --lkin v5 --s 0 0.5 1 2 4
+  ⚠ --lkin は必須 (v5 = ⌈κ·min(r_core, 6/Z)⌉+12、dataset v5 までの式 / v6 = ⌈κ·r(含有率 0.999)⌉+12)。
+    既定を持たせないのは、暗黙の呼び出しが旧規則を使い続けないため (Julia 側 LKIN_RULE と同じ規則 ID)。
 
 初回はその元素の SCF を解くため数分かかります (atom_cache_*.pkl に保存され、
 2 回目以降は即座に読まれます)。
@@ -1256,7 +1258,8 @@ def _eps_worker(payload):
     戻り値: (ie, row[len(K)], match_resid, ortho, l_max, bad_count, r_tail)
     """
     (ie, pot_ion, r_b, u_b, e, kf, k_i, z, r_core, K_nodes,
-     l_cap, n_x, n_phi, n_q, ppw, dt_log, l_init, occ_init, sig_thresh) = payload
+     l_cap, n_x, n_phi, n_q, ppw, dt_log, l_init, occ_init, sig_thresh,
+     lkin_rule, r_eff, lkin_margin) = payload
     kappa = np.sqrt(2.0 * e)
     # 部分波の上限は 2 条件の小さい方:
     #  (i)  運動学的到達性 — 連続波が内殻領域まで届く範囲 (κ·r_core 基準)
@@ -1265,7 +1268,16 @@ def _eps_worker(payload):
     r_c = r_core + 2.0
     L_cut = 2.0 * r_c + 2.0 * e * r_c * r_c          # 障壁の転回点 = r_c となる l(l+1)
     l_barrier = int(np.sqrt(L_cut))
-    l_kin = int(np.ceil(kappa * min(r_core, 6.0 / z)) + 12)   # κ·r + 安全マージン
+    # 部分波の運動学的上限 — 規則 ID は Julia (l5_channel.jl `lkin_partial_waves`) と共有:
+    #   v5: ⌈κ·min(r_core, 6/Z)⌉ + 12  (dataset v5 までの式。3s/3p/3d の高 ε で未収束 —
+    #       docs/notes/lkin_truncation_2026-08-19.md §6)
+    #   v6: ⌈κ·r_eff⌉ + margin、r_eff = 含有率 0.999 の半径 (docs/notes/v6_spec_draft_2026-08-20.md §1)
+    if lkin_rule == "v5":
+        l_kin = int(np.ceil(kappa * min(r_core, 6.0 / z)) + 12)
+    elif lkin_rule == "v6":
+        l_kin = int(np.ceil(kappa * r_eff) + lkin_margin)
+    else:
+        raise ValueError(f"unknown lkin_rule {lkin_rule!r}")
     l_max = int(min(l_cap, max(6, min(l_kin, l_barrier))))   # 3 条件の最小 (下限 6 は保険)
     # マッチ半径は最大 l の遠心障壁を抜けた先 + 3 波長。障壁の内側で
     # Coulomb 関数にフィットすると減衰域を拾って規格化を誤る。
@@ -1307,10 +1319,23 @@ def _eps_worker(payload):
     return ie, row, mres, (c_ortho, resid_ortho), l_max, bad_count, r_tail
 
 
+def containment_radius(r_b, u_b, frac):
+    """束縛軌道の含有半径 — Julia `bound_containment_radius` (l5_channel.jl) と同じ定義:
+    cumsum(u² · gradient(r)) が frac·total に**初めて**達する格子点の r。
+    np.gradient の既定 (edge_order=1: 端は片側差分、内側は中心差分) は Julia `gradient_` と同じ。
+    searchsorted(side='left') は Julia `searchsortedfirst` と同じ (cum[i] >= target の最初の i)。
+    ⚠ Python の束縛軌道は大成分 u のみ (Julia の Dirac 経路は G²+F²)。含有半径は 5 桁一致する
+    (小成分は内側に集中。next_chat_2026-08-23.md §2.2 (iv)) ので同じ規則 ID で比べてよい。"""
+    cum = np.cumsum(u_b**2 * np.gradient(r_b))
+    i = int(np.searchsorted(cum, frac * cum[-1], side="left"))
+    return float(r_b[min(max(i, 0), len(r_b) - 1)])
+
+
 def compute_NK(pot_ion, r_b, u_b, E_th, T0, K_nodes, z,
                n1=10, n2=28, n3=12, l_cap=72, n_x=48, n_phi=24, n_q=120,
                progress=None, ppw=CONT_PPW, dt_log=CONT_DT_LOG, n_jobs=None,
-               l_init=0, occ_init=2.0, sig_thresh=1e-8):
+               l_init=0, occ_init=2.0, sig_thresh=1e-8,
+               lkin_rule=None, lkin_radius_frac=0.999, lkin_margin=12):
     """N(K) = ∫dε (k_f/k_i) ∫dΩ_f S(Q₊,Q₋,ε)/(Q₊²Q₋²) を計算する。
 
     ε 積分は**全域** (0, T0−E_th) を direct 項のみで行う。X(ε)=D(Δ−ε) と
@@ -1324,6 +1349,9 @@ def compute_NK(pot_ion, r_b, u_b, E_th, T0, K_nodes, z,
 
     戻り値: {"N": N[K], "diag": 診断辞書}
     """
+    if lkin_rule not in ("v5", "v6"):
+        raise ValueError("lkin_rule is required: 'v5' (ceil(kappa*min(r_core, 6/Z))+12, dataset <= v5) "
+                         "or 'v6' (ceil(kappa*r_containment(0.999))+margin)")
     eps_max = T0 - E_th
     if eps_max <= 0:
         raise ValueError("below threshold")
@@ -1334,10 +1362,12 @@ def compute_NK(pot_ion, r_b, u_b, E_th, T0, K_nodes, z,
     cum = np.cumsum(u_b**2 * np.gradient(r_b))       # 束縛軌道の累積確率 ∫u²dr
     r_core = float(np.clip(r_b[np.searchsorted(cum, 1.0 - 1e-12)] * 1.15, 0.4, 20.0))
 
+    # 部分波規則 v6 の含有半径 (ε に依らないのでチャネルあたり 1 回)。v5 では使わない
+    r_eff = containment_radius(r_b, u_b, lkin_radius_frac) if lkin_rule == "v6" else float("nan")
     payloads = [
         (ie, pot_ion, r_b, u_b, float(e), float(kin_k(max(T0 - E_th - e, 0.0))),
          k_i, z, r_core, K_nodes, l_cap, n_x, n_phi, n_q, ppw, dt_log,
-         l_init, occ_init, sig_thresh)
+         l_init, occ_init, sig_thresh, lkin_rule, r_eff, int(lkin_margin))
         for ie, e in enumerate(eps)
     ]
     if n_jobs is None:
@@ -1370,6 +1400,7 @@ def compute_NK(pot_ion, r_b, u_b, E_th, T0, K_nodes, z,
                 absorb(result)
 
     diag = {"eps": eps, "w": we, "r_core": r_core, "match_resid": match_resid,
+            "lkin_rule": lkin_rule, "r_eff": r_eff, "lkin_margin": int(lkin_margin),
             "ortho": ortho, "l_used": l_used, "bad_significant_l": acc["bad"],
             "r_tail_max": acc["rtail"], "dNde": dNde}
     return {"N": dNde.T @ we, "diag": diag}         # N(K) = Σ_ε w_ε dN/dε
@@ -1588,6 +1619,8 @@ def compute_channel(z, tag, e0_keV, settings=None, s_nodes=None, n_jobs=None,
         raise ValueError(f"unknown channel {tag!r} (choose from {sorted(CHANNELS)})")
     shell, j_lower, occ_init, subshell = CHANNELS[tag]
     settings = dict(PROD_SETTINGS if settings is None else settings)
+    if settings.get("lkin_rule") not in ("v5", "v6"):
+        raise ValueError("settings['lkin_rule'] must be 'v5' or 'v6' (no default — see the header)")
     if s_nodes is None:
         s_nodes = [i / 4 for i in range(17)]                  # 0..4 Å⁻¹
     if s_nodes[0] != 0.0:
@@ -1757,7 +1790,7 @@ def selftest():
     T0 = 100e3 / HARTREE_EV
     res = compute_NK(_PureCoulomb(), r_b, u_b, E_th, T0,
                      K_nodes=np.array([0.0]), z=1,
-                     n1=8, n2=20, n3=12, l_cap=48, occ_init=1.0,
+                     n1=8, n2=20, n3=12, l_cap=48, occ_init=1.0, lkin_rule="v5",
                      progress=lambda i, n: print(f"    eps {i}/{n}", end="\r"))
     sig = sigma_nm2_from_N0(res["N"][0], T0)
     ref = bote_sigma_nm2(1, 1, 100e3)
@@ -1822,6 +1855,8 @@ def _main(argv=None):
                    help="s ノード [Å⁻¹] (既定 0..4 の 0.25 刻み。先頭は 0 必須)")
     p.add_argument("--json", help="結果を JSON 保存するパス")
     p.add_argument("--jobs", type=int, help="ε ノードの並列数")
+    p.add_argument("--lkin", choices=("v5", "v6"),
+                   help="部分波規則 (必須。v5 = dataset v5 までの式 / v6 = 含有半径 0.999)")
     a = p.parse_args(argv)
 
     if a.args[0] == "selftest":
@@ -1831,8 +1866,11 @@ def _main(argv=None):
         p.error("Z channel E0keV の 3 つを指定してください (例: 26 K 200)")
     z, tag, e0 = int(a.args[0]), a.args[1].upper(), float(a.args[2])
 
-    settings = QUICK_SETTINGS if a.quick else PROD_SETTINGS
-    print(f"Z={z} {tag} @ {e0} keV   処方: {MODEL_ID}")
+    if a.lkin is None:
+        p.error("--lkin v5|v6 を指定してください (部分波規則に既定はありません)")
+    settings = dict(QUICK_SETTINGS if a.quick else PROD_SETTINGS)
+    settings["lkin_rule"] = a.lkin
+    print(f"Z={z} {tag} @ {e0} keV   処方: {MODEL_ID}   部分波規則: {a.lkin}")
     print(f"求積: {'QUICK (参考値)' if a.quick else '本番'}")
     print("初回はこの元素の SCF を解くため数分かかります "
           "(atom_cache_*.pkl に保存され、2 回目以降は即座)...", flush=True)

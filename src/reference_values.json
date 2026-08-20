@@ -1,6 +1,6 @@
 {
- "_about": "ionization.py 自身で計算した代表値。移植・改造時の突き合わせ用。同一設定なら ~1e-9、独立に SCF を解き直した場合は ~1e-6 で再現するはず",
- "_settings": "QUICK_SETTINGS (n1=8 n2=16 n3=8 l_cap=72 n_x=32 n_phi=16 n_q=120 sig_thresh=1e-12)",
+ "_about": "ionization.py (QUICK 設定) で計算した参照値。Julia 実装 (`julia src/ionization.jl refcheck`) との突き合わせ用。case ごとの lkin_rule を Julia 側も同じ規則で再現する (処方差は本検査の対象外)。同じ設定なら ~1e-9、独立に SCF を解き直した場合は ~1e-6 で再現するはず",
+ "_settings": "QUICK_SETTINGS (n1=8 n2=16 n3=8 l_cap=72 n_x=32 n_phi=16 n_q=120 sig_thresh=1e-12) + lkin_rule per case",
  "_model_id": "DHFS-KS23-Dirac-jsplit-fullrange-sym-v2",
  "cases": [
   {
@@ -28,7 +28,11 @@
    ],
    "N0": 1.497272550820967e-06,
    "sigma_own_nm2": 3.24684101393296e-08,
-   "sigma_bote_nm2": 3.184786336390988e-08
+   "sigma_bote_nm2": 3.184786336390988e-08,
+   "lkin_rule": "v5",
+   "provenance": {
+    "note": "pre-2026-08-20 reference (Python ionization.py, QUICK settings, lkin rule v5); generator hash not recorded at the time"
+   }
   },
   {
    "z": 26,
@@ -55,7 +59,11 @@
    ],
    "N0": 1.502986296912291e-05,
    "sigma_own_nm2": 3.2592312932727756e-07,
-   "sigma_bote_nm2": 3.3727290672980206e-07
+   "sigma_bote_nm2": 3.3727290672980206e-07,
+   "lkin_rule": "v5",
+   "provenance": {
+    "note": "pre-2026-08-20 reference (Python ionization.py, QUICK settings, lkin rule v5); generator hash not recorded at the time"
+   }
   },
   {
    "z": 26,
@@ -82,7 +90,11 @@
    ],
    "N0": 2.65300790887949e-05,
    "sigma_own_nm2": 5.753057373632726e-07,
-   "sigma_bote_nm2": 5.836509271696213e-07
+   "sigma_bote_nm2": 5.836509271696213e-07,
+   "lkin_rule": "v5",
+   "provenance": {
+    "note": "pre-2026-08-20 reference (Python ionization.py, QUICK settings, lkin rule v5); generator hash not recorded at the time"
+   }
   },
   {
    "z": 26,
@@ -109,7 +121,98 @@
    ],
    "N0": 5.4175119548284746e-05,
    "sigma_own_nm2": 1.1747894529132042e-06,
-   "sigma_bote_nm2": 1.1952140345365286e-06
+   "sigma_bote_nm2": 1.1952140345365286e-06,
+   "lkin_rule": "v5",
+   "provenance": {
+    "note": "pre-2026-08-20 reference (Python ionization.py, QUICK settings, lkin rule v5); generator hash not recorded at the time"
+   }
+  },
+  {
+   "z": 26,
+   "channel": "K",
+   "e0_keV": 200.0,
+   "lkin_rule": "v6",
+   "note": "control: same condition as the v5 case, rule v6 (K: r_eff exceeds 6/Z only slightly)",
+   "s_A_inv": [
+    0.0,
+    0.5,
+    1.0,
+    2.0,
+    4.0
+   ],
+   "F": [
+    1.0,
+    0.922677191030566,
+    0.7678782667345204,
+    0.4827192593563472,
+    0.16348934200254095
+   ],
+   "N0": 1.497272539994891e-06,
+   "E_bound_eV": -7099.128188628189,
+   "l_used_max": 39,
+   "elapsed_s": 501.6,
+   "provenance": {
+    "generator": "src/ionization.py",
+    "generator_sha256": "5ab32b29491255942a19cd218a91acae2484f9dfaa3a794ff8d39e571ee21997",
+    "python": "3.10.9",
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "command": "python -X utf8 tools/make_reference_values.py",
+    "parent_commit": "1ffae1e",
+    "spec_sha256": "749fadc5af79c9753a7718455d6a29cbe428891863b18b8ab908cac1ef4bf211",
+    "settings": "QUICK_SETTINGS + lkin_rule",
+    "s_nodes_A_inv": [
+     0.0,
+     0.5,
+     1.0,
+     2.0,
+     4.0
+    ]
+   }
+  },
+  {
+   "z": 6,
+   "channel": "K",
+   "e0_keV": 400.0,
+   "lkin_rule": "v6",
+   "note": "light K x max E0",
+   "s_A_inv": [
+    0.0,
+    0.5,
+    1.0,
+    2.0,
+    4.0
+   ],
+   "F": [
+    1.0,
+    0.21952031191782595,
+    0.062377696676138884,
+    0.006706284020657017,
+    0.0006287897499197205
+   ],
+   "N0": 2.7113521881715045e-05,
+   "E_bound_eV": -291.0953318233696,
+   "l_used_max": 72,
+   "elapsed_s": 326.0,
+   "provenance": {
+    "generator": "src/ionization.py",
+    "generator_sha256": "5ab32b29491255942a19cd218a91acae2484f9dfaa3a794ff8d39e571ee21997",
+    "python": "3.10.9",
+    "numpy": "2.2.6",
+    "scipy": "1.15.3",
+    "command": "python -X utf8 tools/make_reference_values.py",
+    "parent_commit": "1ffae1e",
+    "spec_sha256": "749fadc5af79c9753a7718455d6a29cbe428891863b18b8ab908cac1ef4bf211",
+    "settings": "QUICK_SETTINGS + lkin_rule",
+    "s_nodes_A_inv": [
+     0.0,
+     0.5,
+     1.0,
+     2.0,
+     4.0
+    ]
+   }
   }
- ]
+ ],
+ "_scope": "partial-wave cutoff rule + nonrelativistic continuum integrals only (large-component bound orbital, K/L shells); not an independent oracle of the Dirac two-component shipping physics. provenance is recorded per case."
 }
