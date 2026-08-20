@@ -407,12 +407,23 @@ function provenance_consistency(files::Vector{String})
         # 260820Cl: 版キーに部分波規則と l_cap が入った — JSON の settings から同じ引数で引き直す
         #   (lkin_rule が無い旧ファイル = v5 の式、l_cap は settings のもの)
         st = get(d, "settings", Dict{String,Any}())
-        dv_calc = presc_dataset_version(pr; lkin_rule=String(get(st, "lkin_rule", "v5")),
-                                        l_cap=Int(get(st, "l_cap", 128)),        # lkin_rule の無い旧ファイル = v5 (l_cap 128)
-                                        n_x=Int(get(st, "n_x", 96)), n_phi=Int(get(st, "n_phi", 48)), n_q=Int(get(st, "n_q", 360)),
-                                        lkin_radius_frac=(x = get(st, "lkin_radius_frac", nothing); x === nothing ? LKIN_RADIUS_FRAC : Float64(x)),
-                                        lkin_margin=Int(get(st, "lkin_margin", 12)),
-                                        n1=Int(get(st, "n1", 20)), n2=Int(get(st, "n2", 56)), n3=Int(get(st, "n3", 20)))
+        # 260820Cl: 欠落したキーを黙って既定で埋めない (codex)。lkin_rule が無いのは**出荷済み v5 の形式**だけ —
+        #   それは「5.0.0 を名乗り、settings のキー集合が v5 のそれと完全一致」のときに限って v5 と読む
+        V5_KEYS = Set(["n1", "n2", "n3", "l_cap", "n_x", "n_phi", "n_q", "sig_thresh", "ppw", "dt_log"])
+        if !haskey(st, "lkin_rule") && !(dv == "5.0.0" && Set(keys(st)) == V5_KEYS)
+            println("[NG] C16 $(basename(p)): settings に lkin_rule が無いのに v5 の形式でもない (キー $(sort(collect(keys(st)))))")
+            ok = false
+            continue
+        end
+        _asint(x) = (x isa Real && !(x isa Bool) && isinteger(x)) ? Int(x) : -1
+        dv_calc = presc_dataset_version(pr; permit_legacy=true,
+                                        lkin_rule=String(get(st, "lkin_rule", "v5")),
+                                        l_cap=_asint(get(st, "l_cap", -1)), n_x=_asint(get(st, "n_x", -1)),
+                                        n_phi=_asint(get(st, "n_phi", -1)), n_q=_asint(get(st, "n_q", -1)),
+                                        n1=_asint(get(st, "n1", -1)), n2=_asint(get(st, "n2", -1)), n3=_asint(get(st, "n3", -1)),
+                                        sig_thresh=get(st, "sig_thresh", NaN), ppw=get(st, "ppw", NaN), dt_log=get(st, "dt_log", NaN),
+                                        lkin_radius_frac=(x = get(st, "lkin_radius_frac", nothing); x === nothing ? LKIN_RADIUS_FRAC : x),
+                                        lkin_margin=_asint(get(st, "lkin_margin", 12)))
         if dv_calc != dv
             println("[NG] C16 $(basename(p)): 処方から引いた dataset_version " *
                     "$dv_calc がファイルの $dv と違う")
@@ -427,6 +438,117 @@ function provenance_consistency(files::Vector{String})
                  "(v5 以前は散文照合のみ)"))
     end
     return ok
+end
+
+# ==== C16b: 承認 spec との独立な適合判定 (260820Cl) ===============================================
+# dataset_version "6.0.0" を名乗る一式を、承認済み spec (spec/RELEASES.json → spec ファイル) と
+# **生成側の解決関数を呼ばずに**突き合わせる。
+#   (i)  spec ファイルの**生バイト**の SHA-256 を自分で計算して registry の承認値と比べる (目録も)
+#   (ii) spec を自分で parse して、各ファイルの settings / prescription_id / s_grid / rows の E0 格子を
+#        **フィールド単位**で比べる (キー集合の完全一致 — 欠落も余分も不可)。トップレベルのキー集合も固定
+# ⚠ これは「独立な適合判定」であって「spec の正しさの独立検証」ではない (spec と registry を揃って間違えれば通る)。
+# ⚠ 6.0.0 が 1 本も無い一式 (v5 以前) は :skip — `--expect-version 6.0.0` のときだけ不合格に数える (codex: 三値)。
+const SPEC_DIR_CT = joinpath(@__DIR__, "..", "spec")
+# 6.0.0 のファイルが持つトップレベルのキー (run_channel が書く一式。これ以外があれば NG)
+const V6_TOP_KEYS = Set(["provenance", "prescription", "prescription_id", "z", "shell", "e_th_keV_bote", "edge_source",
+                         "bote_subshell", "kappa", "j_lower", "occ_init", "s_grid_A_inv", "model_id", "dataset_version",
+                         "spec_sha256", "schema_version", "generator", "generator_commit", "generator_source_fingerprint",
+                         "generation_context_sha256", "cache_provenance", "validated", "validation_summary", "settings",
+                         "rel_continuum", "dirac_continuum", "generated_utc_note", "license_note", "rows", "failures"])
+_ct_bits64(x::Float64) = string(reinterpret(UInt64, x); base=16, pad=16)
+_ct_float_eq(s, v) = s isa AbstractString && v isa Real && !(v isa Bool) && isfinite(v) &&
+                     (p = tryparse(Float64, s); p !== nothing && isfinite(p) && p === Float64(v))
+_ct_int_eq(i, v) = i isa Real && !(i isa Bool) && isinteger(i) && v isa Real && !(v isa Bool) && isinteger(v) && Int(i) == Int(v)
+
+function spec_conformance(files::Vector{String}; dir::String=SPEC_DIR_CT, io::IO=stdout)
+    docs = Dict{String,Any}(p => parse_json_file(p) for p in files)
+    versions = Dict(p => String(get(d, "dataset_version", "")) for (p, d) in docs)
+    n6 = count(==("6.0.0"), values(versions))
+    if n6 == 0
+        reason = isempty(files) ? "ファイルが無い" : "6.0.0 を名乗るファイルが無い (版: $(join(sort(unique(collect(values(versions)))), ", ")))"
+        println(io, "C16b: SKIP — $reason (spec 照合は 6.0.0 の一式にだけ適用)")
+        return (status=:skip, reason=reason, n=length(files))
+    end
+    ok = true
+    n6 == length(files) || (println(io, "[NG] C16b: 6.0.0 を名乗るファイルが $n6/$(length(files)) 本 — 一式の中で版が混ざっている"); ok = false)
+    # ---- (i) registry と spec / 目録の生バイト ----
+    fail(msg) = (println(io, "[NG] C16b: $msg"); (status=:fail, reason=msg, n=length(files)))
+    reg_path = joinpath(dir, "RELEASES.json")
+    isfile(reg_path) || return fail("spec/RELEASES.json が無い")
+    reg = parse_json_file(reg_path)
+    haskey(reg, "6.0.0") || return fail("RELEASES.json に 6.0.0 が無い")
+    ent = reg["6.0.0"]
+    spec_path = joinpath(dir, String(ent["spec_file"])); inv_path = joinpath(dir, String(ent["e0_inventory_file"]))
+    (isfile(spec_path) && isfile(inv_path)) || return fail("spec / 目録ファイルが無い")
+    spec_bytes = read(spec_path); inv_bytes = read(inv_path)
+    spec_sha = bytes2hex(sha256(spec_bytes)); inv_sha = bytes2hex(sha256(inv_bytes))
+    occursin(r"^[0-9a-f]{64}$", String(ent["spec_sha256"])) || return fail("RELEASES.json の spec_sha256 の形式が不正")
+    spec_sha == String(ent["spec_sha256"]) || return fail("spec の SHA-256 が registry の承認値と違う ($(spec_sha[1:16])… vs $(String(ent["spec_sha256"])[1:16])…)")
+    inv_sha == String(ent["e0_inventory_sha256"]) || return fail("E0 目録の SHA-256 が registry の承認値と違う")
+    for (nm, b) in (("spec", spec_bytes), ("目録", inv_bytes))
+        any(==(UInt8('\r')), b) && (println(io, "[NG] C16b: $nm に CR が含まれる (canonical は LF のみ)"); ok = false)
+        (length(b) >= 3 && b[1:3] == [0xEF, 0xBB, 0xBF]) && (println(io, "[NG] C16b: $nm に BOM がある"); ok = false)
+        (isempty(b) || b[end] != UInt8('\n') || (length(b) >= 2 && b[end-1] == UInt8('\n'))) && (println(io, "[NG] C16b: $nm の末尾は LF 1 つ"); ok = false)
+    end
+    spec = parse_json_file(spec_path); inv = parse_json_file(inv_path)
+    String(spec["channels"]["e0_inventory_sha256"]) == inv_sha || (println(io, "[NG] C16b: spec が指す目録の SHA と目録ファイルが違う"); ok = false)
+    # ---- (ii) ファイルごとのフィールド比較 ----
+    st_keys_want = Set(vcat(collect(String.(keys(spec["settings"]))), ["lkin_rule", "lkin_radius_frac", "lkin_margin", "profile"]))
+    sgrid_sha_want = String(spec["s_grid"]["bits_sha256"])
+    seen = Set{String}()
+    for p in files
+        d = docs[p]; b = basename(p)
+        versions[p] == "6.0.0" || continue
+        bad(msg) = (println(io, "[NG] C16b $b: $msg"); ok = false)
+        key = "Z$(round(Int, d["z"]))-$(d["shell"])"
+        push!(seen, key)
+        b == "F_$(d["shell"])_Z$(round(Int, d["z"])).json" || bad("ファイル名と中身 (z=$(d["z"]), shell=$(d["shell"])) が対応しない")
+        top = Set(String.(keys(d)))
+        top == V6_TOP_KEYS || bad("トップレベルのキー集合が 6.0.0 の形式と違う: 欠落 $(sort(collect(setdiff(V6_TOP_KEYS, top))))、余分 $(sort(collect(setdiff(top, V6_TOP_KEYS))))")
+        get(d, "spec_sha256", nothing) == spec_sha || bad("spec_sha256 が承認 spec と違う (欠落含む)")
+        _ct_int_eq(get(d, "schema_version", nothing), spec["schema_version"]) || bad("schema_version が spec と違う")
+        String(get(d, "model_id", "")) == String(spec["model_id"]) || bad("model_id が spec と違う")
+        pid = get(d, "prescription_id", nothing)
+        if !(pid isa Dict) || Set(String.(keys(pid))) != Set(String.(keys(spec["prescription"])))
+            bad("prescription_id のキー集合が spec と違う")
+        else
+            for (k, v) in spec["prescription"]; pid[k] == v || bad("prescription_id.$k = $(pid[k]) (spec: $v)"); end
+        end
+        st = get(d, "settings", nothing)
+        if !(st isa Dict) || Set(String.(keys(st))) != st_keys_want
+            bad("settings のキー集合が spec と違う: 欠落 $(sort(collect(setdiff(st_keys_want, st isa Dict ? Set(String.(keys(st))) : Set{String}()))))、余分 $(st isa Dict ? sort(collect(setdiff(Set(String.(keys(st))), st_keys_want))) : String[])")
+        else
+            for (k, want) in spec["settings"]
+                got = st[k]
+                (want isa AbstractString ? _ct_float_eq(want, got) : _ct_int_eq(want, got)) || bad("settings.$k = $got (spec: $want)")
+            end
+            (st["lkin_rule"] isa AbstractString && st["lkin_rule"] == String(spec["lkin"]["rule"])) || bad("settings.lkin_rule = $(st["lkin_rule"]) (spec: $(spec["lkin"]["rule"]))")
+            _ct_float_eq(spec["lkin"]["radius_frac"], st["lkin_radius_frac"]) || bad("settings.lkin_radius_frac = $(st["lkin_radius_frac"])")
+            _ct_int_eq(spec["lkin"]["margin"], st["lkin_margin"]) || bad("settings.lkin_margin = $(st["lkin_margin"])")
+            (st["profile"] isa AbstractString && st["profile"] == "v6_high") || bad("settings.profile = $(st["profile"]) (6.0.0 は v6_high のみ)")
+        end
+        sg = [x for x in d["s_grid_A_inv"]]
+        (all(x -> x isa Real && !(x isa Bool), sg) && length(sg) == Int(spec["s_grid"]["n"]) &&
+         bytes2hex(sha256(Vector{UInt8}(join(_ct_bits64.(Float64.(sg)), ",")))) == sgrid_sha_want) || bad("s_grid_A_inv が spec の bit 表現と違う")
+        ent_inv = get(inv["channels"], key, nothing)
+        if ent_inv === nothing
+            bad("目録に無いチャネル $key")
+        else
+            rows = d["rows"]
+            e0_want = [parse(Float64, x) for x in ent_inv["e0_keV"]]; sc_want = [parse(Float64, x) for x in ent_inv["s_cert_A_inv"]]
+            e0_got = [Float64(r["e0_keV"]) for r in rows]; sc_got = [Float64(r["s_cert_A_inv"]) for r in rows]
+            (length(rows) == length(e0_want) && all(e0_got .=== e0_want)) || bad("行の E0 格子が目録と違う ($(length(rows)) 行 / 目録 $(length(e0_want)) 行)")
+            (length(rows) == length(sc_want) && all(sc_got .=== sc_want)) || bad("行の s_cert が目録と違う")
+            length(unique(e0_got)) == length(e0_got) || bad("E0 が重複する行がある")
+        end
+    end
+    want_keys = Set(String.(keys(inv["channels"])))
+    if seen != want_keys
+        println(io, "[NG] C16b: チャネル集合が目録と違う (欠落 $(length(setdiff(want_keys, seen))) / 余分 $(length(setdiff(seen, want_keys))))")
+        ok = false
+    end
+    ok && println(io, "C16b: PASS — 6.0.0 の $(length(files)) 本が承認 spec $(spec_sha[1:16])… と一致 (settings / 処方 / s 格子 / E0 格子 / s_cert / トップレベルのキー集合、目録 $(length(want_keys)) チャネル)")
+    return (status=ok ? :pass : :fail, reason=ok ? "" : "上の [NG] C16b", n=length(files))
 end
 
 """C9: 軌道の割り当て (節数・κ・占有数) が正しいことの独立確認。
@@ -555,6 +677,12 @@ function main(args)
                     "schema_version = $sv")
     # ---- C16: model_id ↔ 生成処方 ↔ dataset_version (260811Cl 追加) ----
     ok16 = provenance_consistency(files)
+    # 260820Cl: 承認 spec との独立な適合判定 (6.0.0 のみ)。三値 — --expect-version 6.0.0 なら SKIP も不合格
+    expect_i = findfirst(==("--expect-version"), args)
+    expect_v = expect_i === nothing ? nothing : args[expect_i+1]
+    r16b = spec_conformance(files)
+    ok16b = r16b.status == :pass || (r16b.status == :skip && expect_v === nothing)
+    expect_v !== nothing && r16b.status == :skip && println("[NG] C16b: --expect-version $expect_v なのに 6.0.0 の一式ではない ($(r16b.reason))")
     if !isempty(flips)
         # 260813Cl: 文言を C2 の窓に合わせた (旧「s>4」は C2 の窓が 4 だった頃の記述)。
         # ⚠ **回数はゲートにしない** — v5 の K 実測は 0 回 1254 行 / 1 回 150 行 /
@@ -608,7 +736,7 @@ function main(args)
                 "$(round(worst_sp, sigdigits=3))")
         (bad9 + bad9b) > 0 && (n_bad += bad9 + bad9b)
     end
-    return n_bad == 0 && ok10 && ok15 && ok16 ? 0 : 1
+    return n_bad == 0 && ok10 && ok15 && ok16 && ok16b ? 0 : 1
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

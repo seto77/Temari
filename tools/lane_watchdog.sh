@@ -42,6 +42,10 @@ nthr=${3:-4}
 chan=${4:-+1.11}
 tags=${5:-}
 outdir=${6:-}
+# 260820Cl: 本番入口 (gen_production.jl) は --profile の明示を要求する (fail-closed)。既定は v6_high。
+#   停滞閾値 WATCHDOG_STALL_S (既定 900 s)。v6 は生成側が ε ノードごとの heartbeat を出すので 900 のままでよい
+profile=${PROFILE:-v6_high}
+stall_s=${WATCHDOG_STALL_S:-900}
 cd "$(dirname "$0")/.." || exit 1
 # 260813Cl: ログ名を**出力先から引く** — 世代決め打ちだと、別世代の評価 (O1 の
 # 1.12 フリート実行など) のログが同名で混ざる。既定は従来どおり v5。
@@ -50,6 +54,7 @@ log="../temari_${tag}_lane${lane}_log.txt"
 opts=""
 [ -n "$tags" ] && opts="$opts --tags $tags"
 [ -n "$outdir" ] && opts="$opts --out $outdir"
+[ -n "$profile" ] && opts="$opts --profile $profile"
 for attempt in $(seq 1 60); do
   echo "=== lane $lane/$nlane attempt $attempt start julia$chan -t $nthr$opts $(date '+%F %T') ===" >> "$log"
   julia $chan -t "$nthr" --gcthreads=1 src/gen_production.jl \
@@ -90,8 +95,8 @@ for attempt in $(seq 1 60); do
       sleep 10
       break
     fi
-    if [ $stall -gt 900 ]; then   # 15 分停滞 = wedged とみなす (従来の backstop)
-      echo "=== watchdog: log stalled >15min, killing pid $jpid $(date '+%F %T') ===" >> "$log"
+    if [ $stall -gt $stall_s ]; then   # 停滞 = wedged とみなす (従来の backstop。既定 15 分)
+      echo "=== watchdog: log stalled >${stall_s}s, killing pid $jpid $(date '+%F %T') ===" >> "$log"
       kill -9 $jpid 2>/dev/null
       sleep 10
       break

@@ -50,6 +50,9 @@ resume: 出力 JSON が既に存在するチャネルは飛ばす (チャネル�
 include(joinpath(@__DIR__, "ionization.jl"))
 
 const OUT_DEFAULT = joinpath(@__DIR__, "prod_v5_jl")   # 260810Cl: v4 → v5 (s ≤ 16 Å⁻¹)
+# 260820Cl: 生成中に ε ノードごとの進捗を出す (heartbeat)。値には無関係 — lane_watchdog.sh の停滞検知が
+#   v6 の長い行を hang と誤認しないため。TEMARI_NO_HEARTBEAT=1 で黙らせる (計測時など)
+const PRODUCTION_HEARTBEAT = get(ENV, "TEMARI_NO_HEARTBEAT", "0") != "1"
 
 # ---- 出荷グリッド (v2 と同じ s、E0 は密化) ----
 # 260805Cl 変更: s 上限 4.0 → 8.0 Å⁻¹ (81 → 161 点)。
@@ -180,6 +183,7 @@ const PRODUCTION_SOURCE_FINGERPRINT = production_source_fingerprint()
 function production_context_sha256(settings, presc)
     return checkpoint_sha256(Dict{String,Any}(
         "source_fingerprint" => PRODUCTION_SOURCE_FINGERPRINT,
+        "spec_sha256" => V6_SPEC === nothing ? "none" : V6_SPEC.sha,   # 260820Cl: 承認 spec が変われば再開しない
         # 260820Cl: settings_dict で部分波規則 (lkin_rule / frac / margin) も文脈に入れる —
         #   TEMARI_LEGACY_V5_CUTOFF の有無で同じチェックポイントを受け取らないため (codex)
         "settings" => settings_dict(settings),
@@ -480,6 +484,18 @@ function load_partial(outdir, tag, z, context_sha256)
     p = partial_path(outdir, tag, z)
     done = Dict{Float64,Dict{String,Any}}()
     isfile(p) || return done
+    # 260820Cl: 文脈 (spec / 指紋 / 設定) の違う partial は**隔離して**新規に始める (codex)。読み飛ばして同じ
+    #   ファイルへ追記し続けると、再承認のたびに混成の巨大 partial になる
+    stale = count(eachline(p)) do line
+        m = match(r"\"context_sha256\":\s*\"([0-9a-f]+)\"", line)
+        m !== nothing && m[1] != context_sha256
+    end
+    if stale > 0
+        q = p * ".stale-" * string(hash(read(p)); base=16)[1:8]
+        mv(p, q; force=true)
+        @printf("  [resume-qc] Z=%d %s: 文脈の違う partial (%d レコード) を %s へ隔離して新規に計算\n", z, tag, stale, basename(q))
+        return done
+    end
     buf = IOBuffer()
     rejected = 0
     for line in eachline(p)
@@ -575,6 +591,144 @@ is_shipping_format() =
     SCHEMA_VERSION == 2 && length(S_GRID) == 321 && S_GRID[end] == 16.0 &&
     S_GRID == collect(0.0:0.05:16.0)                 # 260820Cl: 端点だけでなく格子そのもの (codex)
 
+# ====================================================================
+# 260820Cl: 承認済み spec による版の名乗り (V6_SPEC)
+# ====================================================================
+# `presc_dataset_version` は長い間「処方 NamedTuple の等値比較」だった。v5 で S_GRID、v6 で部分波規則と
+# l_cap、n1 を見るようになったが、**ppw / dt_log / sig_thresh など出力に効く設定を見ていない**ので、
+# それらを変えても同じ版を名乗れた (codex 2026-08-20)。⇒ 出力に効く設定の一式を canonical JSON
+# (`spec/temari_dataset_v6.0.0.spec.json`、`tools/make_v6_spec.jl` が書く) に出し、その**生バイト**の
+# SHA-256 を `spec/RELEASES.json` に承認値として置く。版の名乗りは「解決済みの設定が spec の全フィールドと
+# 一致する」ことで決まる (純関数。呼出元や ENV は見ない)。検査側 `tools/check_tables.jl` C16b は同じ
+# ファイルを**自分の論理**で読み直す (共有するのは JSON reader と canonical writer だけ)。
+# ⚠ spec と承認値を揃って間違えれば通る — これは drift と自己一致の検出であって正しさの証明ではない。
+const SPEC_DIR = joinpath(@__DIR__, "..", "spec")
+
+# ---- canonical JSON (spec と E0 目録の書式。UTF-8 / LF 1 つ / キー昇順 / 空白なし / 非整数は repr 文字列 / null 禁止) ----
+f64s(x) = repr(Float64(x))
+bits64(x::Float64) = string(reinterpret(UInt64, x); base=16, pad=16)
+function cjson(io::IO, v)
+    if v isa AbstractDict
+        ks = sort!(collect(String.(keys(v))))
+        print(io, "{")
+        for (i, k) in enumerate(ks)
+            i > 1 && print(io, ",")
+            print(io, "\"", json_escape(k), "\":")
+            cjson(io, v[k])
+        end
+        print(io, "}")
+    elseif v isa AbstractVector || v isa Tuple
+        print(io, "[")
+        for (i, x) in enumerate(v)
+            i > 1 && print(io, ",")
+            cjson(io, x)
+        end
+        print(io, "]")
+    elseif v isa AbstractString
+        print(io, "\"", json_escape(String(v)), "\"")
+    elseif v isa Bool
+        print(io, v ? "true" : "false")
+    elseif v isa Integer
+        print(io, v)
+    else
+        error("canonical JSON に書けない型 $(typeof(v)) ($v) — 非整数は f64s() で文字列にする、null は禁止")
+    end
+end
+canonical_bytes(v) = (io = IOBuffer(); cjson(io, v); print(io, "\n"); take!(io))
+sha_hex(bytes::AbstractVector{UInt8}) = bytes2hex(sha256(bytes))
+
+"全出荷チャネルの E0 格子と s_cert の目録 (spec の e0_inventory。生成側は実行時に同じものを組んで hash を照合する)"
+function build_e0_inventory()
+    inv = Dict{String,Any}()
+    n_rows = 0
+    for (z, tag) in all_channels(Tuple(TAGS_V4))
+        e0s, eth = e0_grid(z, tag)
+        inv["Z$(z)-$(tag)"] = Dict{String,Any}(
+            "z" => z, "tag" => tag, "e_th_keV_bote" => f64s(eth), "n_rows" => length(e0s),
+            "e0_keV" => [f64s(e) for e in e0s], "e0_keV_bits" => [bits64(e) for e in e0s],
+            "s_cert_A_inv" => [f64s(s_cert_of(e0)[1]) for e0 in e0s])
+        n_rows += length(e0s)
+    end
+    return Dict{String,Any}("channels" => inv, "count_channels" => length(inv), "count_rows" => n_rows,
+                            "note" => "E0 grid of every shipped channel: e0_grid(z, tag) = sorted union of absolute nodes and overvoltage nodes u*E_th within [30, 400] keV, nodes within 2 % of the previous one dropped (absolute wins); s_cert = S_GRID point <= min(16, 0.98/lambda(E0)). Values are repr(Float64); *_bits are the IEEE-754 binary64 bit patterns (16 hex digits).")
+end
+
+"""承認済み spec を読む。registry の承認 SHA-256 と spec ファイルの生バイトの SHA-256 が一致しなければ
+`nothing` (= その版を名乗れない)。`dir` は負のテスト用 (改変した複製を渡す)。"""
+function load_approved_spec(version::String; dir::String=SPEC_DIR)
+    reg_path = joinpath(dir, "RELEASES.json")
+    isfile(reg_path) || return nothing
+    reg = parse_json_file(reg_path)
+    haskey(reg, version) || return nothing
+    ent = reg[version]
+    path = joinpath(dir, String(ent["spec_file"]))
+    isfile(path) || return nothing
+    bytes = read(path)
+    sha = sha_hex(bytes)
+    if sha != String(ent["spec_sha256"])
+        @warn "spec $(basename(path)) の SHA-256 が RELEASES.json の承認値と違う — $version を名乗れない" sha approved = ent["spec_sha256"]
+        return nothing
+    end
+    return (spec=parse_json_file(path), sha=sha, inventory_sha=String(ent["e0_inventory_sha256"]), bytes=bytes)
+end
+const V6_SPEC = load_approved_spec("6.0.0")
+"registry が指す spec ファイル名 (負のテストが複製を作るとき用)"
+spec_file_name(version::String="6.0.0"; dir::String=SPEC_DIR) =
+    String(parse_json_file(joinpath(dir, "RELEASES.json"))[version]["spec_file"])
+
+s_grid_bits_sha256(sg) = sha_hex(Vector{UInt8}(join(bits64.(Float64.(sg)), ",")))
+# ⚠ Julia では Bool <: Integer なので、Bool を先に弾く (codex)。NaN / Inf も弾く
+"spec の非整数は repr(Float64) の文字列 — parse して bit 同一で比べる"
+_spec_float_eq(s, v) = s isa AbstractString && v isa Real && !(v isa Bool) && isfinite(v) &&
+                       (p = tryparse(Float64, s); p !== nothing && isfinite(p) && p === Float64(v))
+_spec_int_eq(i, v) = i isa Real && !(i isa Bool) && isinteger(i) && v isa Real && !(v isa Bool) && isinteger(v) && Int(i) == Int(v)
+_spec_strlist_eq(a, b) = a isa AbstractVector && length(a) == length(b) && all(String(x) == String(y) for (x, y) in zip(a, b))
+
+"""解決済みの設定 `st` (settings_dict 相当の Dict) と処方 `p` が、承認済み spec `sp` の**全フィールド**と
+一致するか。純関数 — 呼出元も ENV も見ない。実装可能な項目は全部実行時に照合する (codex): 処方・model_id・
+schema・S_GRID (bits)・settings・lkin・x_alpha・s_cert・tail・E0 格子規則・チャネル集合・E0 目録 (hash)・gates。"""
+function settings_match_spec(sp, p, st::AbstractDict; inventory_sha::Union{Nothing,String}=nothing)
+    spec = sp.spec
+    presc_model_id(p) == String(spec["model_id"]) || return false
+    _spec_int_eq(spec["schema_version"], SCHEMA_VERSION) || return false
+    length(keys(spec["prescription"])) == length(p) || return false
+    for (k, v) in spec["prescription"]
+        haskey(p, Symbol(k)) || return false
+        pv = p[Symbol(k)]
+        (pv isa Symbol ? String(pv) : pv) == v || return false
+    end
+    _spec_int_eq(spec["s_grid"]["n"], length(S_GRID)) || return false
+    s_grid_bits_sha256(S_GRID) == String(spec["s_grid"]["bits_sha256"]) || return false
+    for (k, want) in spec["settings"]
+        haskey(st, k) || return false
+        got = st[k]
+        (want isa AbstractString ? _spec_float_eq(want, got) : _spec_int_eq(want, got)) || return false
+    end
+    String(get(st, "lkin_rule", "")) == String(spec["lkin"]["rule"]) || return false
+    _spec_float_eq(spec["lkin"]["radius_frac"], get(st, "lkin_radius_frac", NaN)) || return false
+    _spec_int_eq(spec["lkin"]["margin"], get(st, "lkin_margin", -1)) || return false
+    # 出力に効く構造定数 (実装側の const と spec の値を突き合わせる)
+    _spec_float_eq(spec["x_alpha"], X_ALPHA) || return false
+    _spec_float_eq(spec["s_cert"]["margin"], S_CERT_MARGIN) || return false
+    t = spec["tail"]
+    (_spec_int_eq(t["kind"], TAIL_KIND_BOUND) && _spec_float_eq(t["eps_window_A_inv"], EPS_WINDOW_A_INV) &&
+     _spec_float_eq(t["eps_safety"], EPS_SAFETY) && _spec_float_eq(t["eps_floor"], EPS_FLOOR)) || return false
+    g = spec["e0_grid_rule"]
+    (_spec_strlist_eq(g["abs_keV"], f64s.(E0_ABS_KEV)) && _spec_strlist_eq(g["u_nodes"], f64s.(U_NODES)) &&
+     _spec_float_eq(g["min_keV"], E0_MIN) && _spec_float_eq(g["max_keV"], E0_MAX)) || return false
+    c = spec["channels"]
+    _spec_strlist_eq(c["tags"], TAGS_V4) || return false
+    _spec_int_eq(c["count"], length(all_channels(Tuple(TAGS_V4)))) || return false
+    a = spec["acceptance_profile"]
+    (_spec_float_eq(a["gate_mres"], GATE_MRES) && _spec_float_eq(a["gate_rtail"], GATE_RTAIL)) || return false
+    # E0 目録: 実行時に同じ規則で組み直して hash を比べる (チャネル集合・E0 格子・s_cert 規則の実装がそのまま検査される)
+    inv_sha = inventory_sha === nothing ? sha_hex(canonical_bytes(build_e0_inventory())) : inventory_sha
+    inv_sha == String(c["e0_inventory_sha256"]) == sp.inventory_sha || return false
+    return true
+end
+# include 時に 1 回だけ目録を組んで hash を持つ (0.3 s)。`presc_dataset_version` の毎回の呼び出しで再計算しない
+const _E0_INVENTORY_SHA = sha_hex(canonical_bytes(build_e0_inventory()))
+
 """出荷世代の番号。**処方一式に対して定義される。**つまみを 1 つでも出荷処方から
 外したら `0.0.0-dev` になる — `pack_resource.py` は全チャネルで
 dataset_version と model_id が**一致すること**しか見ないので、ここで名乗り分けないと
@@ -595,17 +749,41 @@ function presc_dataset_version(p; lkin_rule::AbstractString=string(LKIN_RULE), l
                                lkin_radius_frac=LKIN_RADIUS_FRAC, lkin_margin::Integer=LKIN_MARGIN,
                                n_x::Integer=HIGH_SETTINGS.n_x, n_phi::Integer=HIGH_SETTINGS.n_phi,
                                n_q::Integer=HIGH_SETTINGS.n_q,
-                               n1::Integer=HIGH_SETTINGS.n1, n2::Integer=HIGH_SETTINGS.n2, n3::Integer=HIGH_SETTINGS.n3)
+                               n1::Integer=HIGH_SETTINGS.n1, n2::Integer=HIGH_SETTINGS.n2, n3::Integer=HIGH_SETTINGS.n3,
+                               sig_thresh=HIGH_SETTINGS.sig_thresh, ppw=HIGH_SETTINGS.ppw, dt_log=HIGH_SETTINGS.dt_log,
+                               spec=V6_SPEC, permit_legacy::Bool=false)
     (is_shipping_format() && p == PRESC_V4) || return "0.0.0-dev"
-    # 260820Cl: ε ノード (n1,n2,n3) も版キーに入れる — v6 で n1 が 20 → 40 に変わったので、見ていないと
-    #   n1 だけ違う一式が同じ版を名乗れる (codex: 版は出力に効く設定の一式で定義する)
-    (lkin_rule == "v5" && (l_cap, n_x, n_phi, n_q) == (128, 96, 48, 360) && (n1, n2, n3) == (20, 56, 20)) && return "5.0.0"
-    # ⚠ v6 の範囲 (等比 s 格子 / ppw / コメント・旧パス などを束ねるか) は作者が凍結するまで **"6.0.0-dev"** を名乗る
-    #   (codex 2026-08-20: 版は処方 + 正確な S_GRID + schema + HIGH 全設定 + 部分波規則 + 量子化の一式で定義し、
-    #   生成側の名乗りと C16 を同じ定義から引く — その一式を `V6_SPEC` として作るのは凍結時)
-    (lkin_rule == "v6" && (l_cap, n_x, n_phi, n_q) == (256, 192, 96, 720) && (n1, n2, n3) == (40, 56, 20) &&
-     lkin_radius_frac == 0.999 && lkin_margin == 12) && return "6.0.0-dev"
+    # "5.0.0" = dataset v5.0.0 の HIGH (HIGH_SETTINGS_V5) と部分波規則 v5 の**全 10 値**一致。
+    #   ⚠ **検査側 (C16) 専用** (`permit_legacy=true`)。生成経路は v5 を名乗れない — legacy ENV で正式版名を
+    #   作れてはいけない (codex 2026-08-20)。v5 の再現は TEMARI_LEGACY_V5_CUTOFF の検証ゲートで QUICK スナップショットを
+    #   比べる用途に限る
+    v5 = HIGH_SETTINGS_V5
+    if permit_legacy && lkin_rule == "v5" && (l_cap, n_x, n_phi, n_q) == (v5.l_cap, v5.n_x, v5.n_phi, v5.n_q) &&
+       (n1, n2, n3) == (v5.n1, v5.n2, v5.n3) && sig_thresh == v5.sig_thresh && ppw == v5.ppw && dt_log == v5.dt_log
+        return "5.0.0"
+    end
+    # "6.0.0" = 承認済み spec (V6_SPEC) の全フィールドと一致。⚠ "6.0.0-dev" は廃止 — spec 照合が正本になったので、
+    #   spec の無い / 一致しない状態は全部 "0.0.0-dev" (出荷版を名乗れない)
+    if spec !== nothing
+        st = Dict{String,Any}("n1" => n1, "n2" => n2, "n3" => n3, "l_cap" => l_cap, "n_x" => n_x, "n_phi" => n_phi,
+                              "n_q" => n_q, "sig_thresh" => sig_thresh, "ppw" => ppw, "dt_log" => dt_log,
+                              "lkin_rule" => lkin_rule, "lkin_radius_frac" => lkin_radius_frac, "lkin_margin" => lkin_margin)
+        settings_match_spec(spec, p, st; inventory_sha=_E0_INVENTORY_SHA) && return "6.0.0"
+    end
     return "0.0.0-dev"
+end
+
+"""生成側の版の名乗り: settings NamedTuple から `presc_dataset_version` の全キーワードを引く。
+`allow_dev=true` (研究用・legacy 経路) では**判定結果にかかわらず** "0.0.0-dev" を書く (codex: 拒否の解除ではなく版の固定)"""
+function dataset_version_of(presc, settings; allow_dev::Bool=false)
+    allow_dev && return "0.0.0-dev"
+    return presc_dataset_version(presc; l_cap=settings.l_cap, n_x=settings.n_x, n_phi=settings.n_phi, n_q=settings.n_q,
+                                 n1=settings.n1, n2=settings.n2, n3=settings.n3,
+                                 sig_thresh=settings.sig_thresh, ppw=Float64(get(settings, :ppw, CONT_PPW)),
+                                 dt_log=Float64(get(settings, :dt_log, CONT_DT_LOG)),
+                                 lkin_rule=string(get(settings, :lkin_rule, LKIN_RULE)),
+                                 lkin_radius_frac=Float64(get(settings, :lkin_frac, LKIN_RADIUS_FRAC)),
+                                 lkin_margin=Int(get(settings, :lkin_margin, LKIN_MARGIN)))
 end
 
 """JSON の `prescription` ブロック。**処方から引く** — ここを固定文字列にすると、
@@ -648,10 +826,21 @@ end
 
 "1 チャネル (Z, tag) の全 E0 行を計算して JSON に書く"
 function run_channel(z::Int, tag::String, outdir::String;
-                     settings=HIGH_SETTINGS, presc=PRESC_V4)
+                     settings=HIGH_SETTINGS, presc=PRESC_V4, allow_dev::Bool=false)
     path = joinpath(outdir, "F_$(tag)_Z$(z).json")
+    dv = dataset_version_of(presc, settings; allow_dev=allow_dev)
     if isfile(path)
-        println("skip (exists): $path")
+        # 260820Cl: **黙って skip しない** — 旧版・別 spec・別文脈の完成ファイルが run dir に残っていると、
+        #   数日後の C16 で初めて混在が分かる (codex)。版・spec・生成文脈・model_id を見て、違えば止める
+        d = parse_json_file(path)
+        ctx = production_context_sha256(settings, presc)
+        want = Dict("dataset_version" => dv, "model_id" => presc_model_id(presc), "generation_context_sha256" => ctx,
+                    "spec_sha256" => (dv == "6.0.0" ? V6_SPEC.sha : "none"))
+        for (k, v) in want
+            got = get(d, k, nothing)
+            got == v || error("既存の $path の $k が今の生成と違う ($got ≠ $v)。別の run の成果物が残っている — 出力先を変えるか、そのファイルを退かす")
+        end
+        println("skip (exists, 版・spec・文脈が一致): $path")
         return :skipped
     end
     e0s, eth = e0_grid(z, tag)
@@ -675,8 +864,10 @@ function run_channel(z::Int, tag::String, outdir::String;
         # **届く範囲だけを計算する** (それ以上を頼むと l4_angular が error を投げる)
         s_cert, n_cert = s_cert_of(e0)
         s_nodes_row = n_cert == length(S_GRID) ? S_GRID : S_GRID[1:n_cert]
+        # 260820Cl: verbose=PRODUCTION_HEARTBEAT — ε ノードごとの進捗をログへ出す (値には無関係)。lane_watchdog.sh の
+        #   「ログ停滞 15 分 = wedged」規則が、v6 の長い行 (v5 の ≈ 4.5 倍、最長 30 分級) を hang と誤認しないため
         o = compute_channel(z, tag, e0; settings=settings, s_nodes=s_nodes_row,
-                            verbose=false, presc...)
+                            verbose=PRODUCTION_HEARTBEAT, presc...)
         retried = 0
         # ★260808Cl 追加: **明らかな破損はその場で作り直す。**
         #   v3 の Cd-K で、GC クラッシュ由来のメモリ破損を受けた 1 行が
@@ -696,7 +887,7 @@ function run_channel(z::Int, tag::String, outdir::String;
                     o["sigma_own_nm2"] / max(o["sigma_bote_nm2"], 1e-300))
             flush(stdout)
             o = compute_channel(z, tag, e0; settings=settings, s_nodes=s_nodes_row,
-                                verbose=false, presc...)
+                                verbose=PRODUCTION_HEARTBEAT, presc...)
             if !is_sane_row(o)
                 # 260820Cl: **fail-closed** — 2 度目も異常ならその行は書かない (failures に記録して次の E₀ へ)。
                 #   以前は記録だけして壊れた行を表に入れていた (QC C11 頼み)。欠けた行は check_tables の
@@ -789,9 +980,9 @@ function run_channel(z::Int, tag::String, outdir::String;
         "j_lower" => j_lower, "occ_init" => occ_init,
         "s_grid_A_inv" => S_GRID,
         "model_id" => presc_model_id(presc),
-        "dataset_version" => presc_dataset_version(presc; l_cap=settings.l_cap, n_x=settings.n_x,
-                                                   n_phi=settings.n_phi, n_q=settings.n_q,
-                                                   n1=settings.n1, n2=settings.n2, n3=settings.n3),
+        "dataset_version" => dv,
+        # 260820Cl: 名乗った版の根拠 (承認 spec の生バイト SHA-256)。6.0.0 以外は "none" (null は書かない)
+        "spec_sha256" => (dv == "6.0.0" ? V6_SPEC.sha : "none"),
         "schema_version" => SCHEMA_VERSION,
         "generator" => "ionization.jl (Julia)",
         "generator_commit" => _git_head(),
@@ -864,9 +1055,11 @@ F = N(K)/N(0) の変化しか見ておらず、**分子と分母が揃って動�
 function audit(; presc=PRESC_V4)
     # 高過電圧 3 ケース (従来) + 閾値直上 2 ケース + 床が効く 1 ケース (260813Cl 追加)
     # 260820Cl: 部分波規則 v6 の高リスク (3s 低 Z × 最大 E₀) と軽元素 K × 最大 E₀ (旧 l_cap 張り付き) を足す
+    # 260820Cl (夜): ε ノード n1 の最悪行 (Rn M5: n1=20 で F 6.0e-05。v6 は n1=40) を 2 本足す
     cases = [(26, "K", 200.0), (79, "L3", 300.0), (79, "M5", 200.0),
              (50, "K", 30.0), (86, "L1", 30.0), (33, "M5", 120.0),
-             (30, "M1", 400.0), (6, "K", 400.0)]
+             (30, "M1", 400.0), (6, "K", 400.0),
+             (86, "M5", 30.0), (86, "M5", 100.0)]
     bumps = [
         ("eps nodes n1/n2/n3 ×1.4", (; HIGH_SETTINGS..., n1=28, n2=80, n3=28)),
         # 260820Cl: 部分波規則 v6 (l_cap 256) に合わせて上へ振る。cap / margin / 含有半径を別々に、最後に同時に
@@ -1016,19 +1209,41 @@ function main_gen(args)
     # v4 なら M 殻込み (M 殻は v4 で出荷に入る)。`--tags` で常に上書きできる
     tags = presc.rel_continuum ? copy(TAGS_V3) : copy(TAGS_V4)
     quick = "--quick" in args
+    allow_dev = "--allow-dev" in args
+    profile_arg = nothing
+    # 260820Cl: 引数は**一度だけ**厳密に解析する — 値の欠落・重複・未知のオプションは生成前に止める (codex)。
+    #   旗 (値なし) = 処方 (--v3 --norel --kdirac --nodscf --kli --frozen) と --quick / --allow-dev
+    FLAGS = ("--v3", "--norel", "--kdirac", "--nodscf", "--kli", "--frozen", "--quick", "--allow-dev")
+    VALUED = ("--out", "--lane", "--tags", "--profile")
+    seen = Set{String}()
     i = 1
     while i <= length(args)
-        if args[i] == "--out"
-            outdir = args[i+1]; i += 1
-        elseif args[i] == "--lane"
-            m = match(r"^(\d+)/(\d+)$", args[i+1])
-            m === nothing && error("--lane は i/n 形式 (例: 0/6)")
-            lane_i, lane_n = parse(Int, m[1]), parse(Int, m[2])
-            i += 1
-        elseif args[i] == "--tags"
-            tags = split(args[i+1], ","); i += 1
+        a = args[i]
+        if a in FLAGS
+            i += 1; continue
+        elseif a in VALUED
+            i + 1 <= length(args) || error("$a に値が無い")
+            a in seen && error("$a が 2 回指定されている")
+            push!(seen, a)
+            v = args[i+1]
+            startswith(v, "--") && error("$a の値が無い ($v はオプション)")
+            if a == "--out"
+                outdir = v
+            elseif a == "--lane"
+                m = match(r"^(\d+)/(\d+)$", v)
+                m === nothing && error("--lane は i/n 形式 (例: 0/6)")
+                lane_i, lane_n = parse(Int, m[1]), parse(Int, m[2])
+                0 <= lane_i < lane_n || error("--lane $v: i は 0 ≤ i < n")
+            elseif a == "--tags"
+                tags = String.(split(v, ","))
+                all(t -> t in TAGS_V4, tags) || error("--tags に未知のチャネル: $v (K/L1/L2/L3/M1..M5)")
+            else
+                profile_arg = v
+            end
+            i += 2
+        else
+            error("未知の引数: $a")
         end
-        i += 1
     end
     settings = quick ? QUICK_SETTINGS : HIGH_SETTINGS
     ch = [(z, t) for (z, t) in all_channels(Tuple(tags))]
@@ -1037,14 +1252,62 @@ function main_gen(args)
             "(lane $lane_i/$lane_n, tags=$(join(tags,",")), " *
             (quick ? "QUICK" : "HIGH") * ", スレッド $(Threads.nthreads()))")
     println("処方: ", presc_model_id(presc),
-            "  dataset_version=", presc_dataset_version(presc; l_cap=settings.l_cap, n_x=settings.n_x,
-                                                          n_phi=settings.n_phi, n_q=settings.n_q,
-                                                          n1=settings.n1, n2=settings.n2, n3=settings.n3))
+            "  dataset_version=", dataset_version_of(presc, settings; allow_dev=allow_dev),
+            "  profile=", settings_profile(settings),
+            "  spec=", V6_SPEC === nothing ? "none" : V6_SPEC.sha[1:16] * "…")
     println("出力: $outdir\n")
+    # 260820Cl: **本番入口は fail-closed** (codex)。出荷版を名乗れない設定で 1.5 日の生成を走らせない。
+    #   QUICK は動作確認用なので対象外。研究用の処方 (--kli 等) や legacy 経路は --allow-dev を明示し、
+    #   そのときは出力の dataset_version が必ず 0.0.0-dev になる (拒否の解除ではなく版の固定)
+    if !quick
+        dv = dataset_version_of(presc, settings; allow_dev=allow_dev)
+        if LEGACY_V5_CUTOFF && !allow_dev
+            error("TEMARI_LEGACY_V5_CUTOFF=1 は検証ゲート専用 — 本番生成には使えない (研究用なら --allow-dev: 出力は 0.0.0-dev)")
+        end
+        if dv != "6.0.0" && !allow_dev
+            error("この処方・設定は出荷版を名乗れない (dataset_version=$dv, profile=$(settings_profile(settings)), " *
+                  "spec=$(V6_SPEC === nothing ? "none" : V6_SPEC.sha[1:16])). spec/RELEASES.json と HIGH の設定を確認。研究用なら --allow-dev")
+        end
+        want_profile = settings_profile(settings)
+        if profile_arg === nothing
+            allow_dev || error("本番生成は --profile $want_profile を明示する (解決された profile と一致しなければ止まる)")
+        elseif profile_arg != want_profile
+            error("--profile $profile_arg だが解決された profile は $want_profile")
+        end
+        # 本番の出力先は明示 + repo の外 (途中の一式が src/prod_* と紛れない。合格後に昇格する)
+        repo_root = normpath(joinpath(@__DIR__, ".."))
+        if !allow_dev
+            "--out" in args || error("本番生成は --out <repo 外の run ディレクトリ> を明示する (既定 $OUT_DEFAULT は使わない)")
+            startswith(normpath(abspath(outdir)), repo_root) && error("本番の出力先 $outdir は repo の中 — repo 外の run ディレクトリにする")
+        end
+        # run を spec に固定する (RUN_SPEC.json)。別の spec / 指紋 / 設定のレーンが同じ run dir に参加したら止める
+        mkpath(outdir)
+        run_spec = Dict{String,Any}(
+            "dataset_version" => dv, "profile" => want_profile,
+            "spec_sha256" => V6_SPEC === nothing ? "none" : V6_SPEC.sha,
+            "generation_context_sha256" => production_context_sha256(settings, presc),
+            "generator_source_fingerprint" => PRODUCTION_SOURCE_FINGERPRINT,
+            "model_id" => presc_model_id(presc), "settings" => settings_dict(settings),
+            "julia" => string(VERSION), "generator_commit" => _git_head())
+        rs_path = joinpath(outdir, "RUN_SPEC.json")
+        if isfile(rs_path)
+            old = parse_json_file(rs_path)
+            for k in ("dataset_version", "profile", "spec_sha256", "generation_context_sha256", "generator_source_fingerprint", "model_id")
+                get(old, k, nothing) == run_spec[k] || error("run ディレクトリ $outdir の RUN_SPEC.json の $k が今の生成と違う ($(get(old, k, nothing)) ≠ $(run_spec[k])) — 別の run に参加しようとしている")
+            end
+            String(get(old, "julia", "")) == run_spec["julia"] || error("run の Julia 版が違う ($(get(old, "julia", "?")) ≠ $(VERSION))")
+        else
+            tmp = rs_path * ".tmp$(getpid())"
+            open(tmp, "w") do io; write_json(io, run_spec); println(io); end
+            mv(tmp, rs_path; force=true)
+            V6_SPEC === nothing || write(joinpath(outdir, "SPEC_SNAPSHOT_" * V6_SPEC.sha[1:16] * ".json"), V6_SPEC.bytes)
+            isfile(joinpath(outdir, "INCOMPLETE")) || write(joinpath(outdir, "INCOMPLETE"), "generation in progress / not QC'd — do not treat as a dataset (remove only after check_tables C1-C16 pass)\n")
+        end
+    end
     warn_if_dirty()                            # 260809Cl 追加 (指示書 §1.3)
     n_done = n_skip = 0
     for (z, t) in mine
-        r = run_channel(z, t, outdir; settings=settings, presc=presc)
+        r = run_channel(z, t, outdir; settings=settings, presc=presc, allow_dev=allow_dev)
         r == :done ? (n_done += 1) : (n_skip += 1)
     end
     println("完了: $n_done 計算 / $n_skip skip (既存)")

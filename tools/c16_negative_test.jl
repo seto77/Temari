@@ -120,6 +120,135 @@ let files = corrupt_copy(_ -> nothing)
             clean ? "✅" : "❌ 偽陽性")
 end
 
+
+# ---- 9–. 260820Cl: 承認 spec による版の名乗り (6.0.0) と C16b の負のテスト ----
+#    出荷済み v5 には 6.0.0 のファイルが無いので、v5 の複製を「spec に適合する 6.0.0 の形」へ書き換えた
+#    **合成の陽性対照**を作り、それを 1 箇所ずつ壊す。E0 格子と s_cert は v5 と v6 で同じ (目録と一致済み)。
+println()
+println("承認 spec (6.0.0) の負のテスト")
+if V6_SPEC === nothing
+    println("  ⚠ spec/RELEASES.json か spec ファイルが無い/不一致 — 6.0.0 系のテストは実行できない (tools/make_v6_spec.jl --write-registry)")
+    n_fail[] += 1
+else
+    spec = V6_SPEC.spec
+    "v5 の複製を spec 適合の 6.0.0 に書き換える (合成の陽性対照)"
+    function make_v6!(d)
+        d["dataset_version"] = "6.0.0"
+        d["spec_sha256"] = V6_SPEC.sha
+        # run_channel が書く provenance 3 キー (v5 の出荷ファイルには無い)。合成なので値はダミー
+        d["generator_source_fingerprint"] = "synthetic"
+        d["generation_context_sha256"] = "synthetic"
+        d["cache_provenance"] = Dict{String,Any}("synthetic" => true)
+        d["prescription_id"] = Dict{String,Any}(String(k) => (v isa Symbol ? String(v) : v) for (k, v) in pairs(PRESC_V4))
+        d["model_id"] = String(spec["model_id"])
+        st = Dict{String,Any}()
+        for (k, v) in spec["settings"]; st[k] = v isa AbstractString ? parse(Float64, v) : Int(v); end
+        st["lkin_rule"] = String(spec["lkin"]["rule"])
+        st["lkin_radius_frac"] = parse(Float64, spec["lkin"]["radius_frac"])
+        st["lkin_margin"] = Int(spec["lkin"]["margin"])
+        st["profile"] = "v6_high"
+        d["settings"] = st
+        return d
+    end
+    function c16b_status(files; dir=SPEC_DIR)
+        io = IOBuffer()
+        r = spec_conformance(files; dir=dir, io=io)     # 出力は io に (redirect_stdout(IOBuffer) は使えない)
+        return r, String(take!(io))
+    end
+    "C16b が**落ちれば**検知成功 (目録との集合照合の NG は 3 本複製では常に出るので数えない)"
+    function expect_detect_b(mutate!, name::String; dir=SPEC_DIR)
+        files = corrupt_copy(d -> (make_v6!(d); mutate!(d)))
+        r, msg = c16b_status(files; dir=dir)
+        n_ng = count("[NG]", msg) - count("チャネル集合が目録と違う", msg)
+        detected = r.status == :fail && n_ng >= 1
+        detected ? (n_pass[] += 1) : (n_fail[] += 1)
+        @printf("  %s %s\n", detected ? "✅ 検知:" : "❌ 見逃し:", name)
+        detected || print(msg)
+    end
+    # 陽性対照: 合成した 6.0.0 の複製はファイル単位の検査を全部通る (落ちるのは目録との集合照合だけ)
+    let files = corrupt_copy(make_v6!)
+        r, msg = c16b_status(files)
+        only_census = r.status == :fail && count("[NG]", msg) == 1 && occursin("チャネル集合が目録と違う", msg)
+        only_census ? (n_pass[] += 1) : (n_fail[] += 1)
+        @printf("  %s 陽性対照: 合成 6.0.0 (3 本) はファイル単位の検査を全部通り、落ちるのは目録との集合照合だけ\n", only_census ? "✅" : "❌")
+        only_census || print(msg)
+    end
+    expect_detect_b("settings.n1 を 20 に戻す (ε ノードの旧値のまま 6.0.0 を名乗る)") do d; d["settings"]["n1"] = 20; end
+    expect_detect_b("settings.lkin_rule を v5 にする (旧部分波規則のまま 6.0.0)") do d; d["settings"]["lkin_rule"] = "v5"; end
+    expect_detect_b("settings.ppw を 25 にする (PROD の連続状態離散化のまま 6.0.0)") do d; d["settings"]["ppw"] = 25.0; end
+    expect_detect_b("spec_sha256 を落とす") do d; delete!(d, "spec_sha256"); end
+    expect_detect_b("settings.profile を custom にする") do d; d["settings"]["profile"] = "custom"; end
+    expect_detect_b("settings に未知キーを足す") do d; d["settings"]["n_extra"] = 1; end
+    expect_detect_b("トップレベルに未知キーを足す") do d; d["quantization"] = "none"; end
+    expect_detect_b("prescription_id.exchange を kli にする (処方違い)") do d; d["prescription_id"]["exchange"] = "kli"; end
+    expect_detect_b("行を 1 つ落とす (E0 格子が目録と違う)") do d; deleteat!(d["rows"], 1); end
+    expect_detect_b("settings.n1 を true にする (Bool <: Integer のすり抜け)") do d; d["settings"]["n1"] = true; end
+    expect_detect_b("settings.lkin_margin を true にする") do d; d["settings"]["lkin_margin"] = true; end
+    expect_detect_b("settings.ppw を 1 (整数) にする") do d; d["settings"]["ppw"] = 1; end
+    expect_detect_b("ファイル名と中身の対応を崩す (z を +1)") do d; d["z"] = d["z"] + 1; end
+    # 適用性: 6.0.0 が 1 本も無ければ SKIP、混在は NG
+    let files = corrupt_copy(_ -> nothing)           # v5 のまま
+        r, _ = c16b_status(files)
+        (r.status == :skip) ? (n_pass[] += 1) : (n_fail[] += 1)
+        @printf("  %s v5 の一式は SKIP (適用外。--expect-version 6.0.0 なら不合格)\n", r.status == :skip ? "✅" : "❌")
+    end
+    let files = corrupt_copy(_ -> nothing)
+        d1 = parse_json_file(files[1]); make_v6!(d1); open(files[1], "w") do io; write_json(io, d1); end
+        r, msg = c16b_status(files)
+        mixed = r.status == :fail && occursin("版が混ざっている", msg)
+        mixed ? (n_pass[] += 1) : (n_fail[] += 1)
+        @printf("  %s v5/v6 の混在は NG\n", mixed ? "✅" : "❌")
+    end
+    # registry / spec の異常系: 複製した spec ディレクトリを壊す
+    function tampered_dir(mutate!)
+        dir = mktempdir()
+        for f in ("RELEASES.json", spec_file_name(), String(parse_json_file(joinpath(SPEC_DIR, "RELEASES.json"))["6.0.0"]["e0_inventory_file"]))
+            cp(joinpath(SPEC_DIR, f), joinpath(dir, f))
+        end
+        mutate!(dir)
+        return dir
+    end
+    # (名前, 改変, 生成側も spec を読めなくなるか)。目録だけの改変は生成側に見えない — 生成側は目録ファイルを読まず、
+    # 実行時に組み直した目録の hash を registry / spec の承認値と比べる (検査側 C16b だけがファイルを読む)
+    for (name, mut, gen_should_refuse) in (("spec を 1 byte 改変 (末尾の } の前に空白)", dir -> (p = joinpath(dir, spec_file_name()); b = read(p); b[end-1] = UInt8(' '); write(p, b)), true),
+                        ("spec を CRLF にする", dir -> (p = joinpath(dir, spec_file_name()); write(p, replace(String(read(p)), "\n" => "\r\n"))), true),
+                        ("spec に BOM を付ける", dir -> (p = joinpath(dir, spec_file_name()); write(p, vcat([0xEF, 0xBB, 0xBF], read(p)))), true),
+                        ("registry の承認 SHA だけ変える", dir -> (p = joinpath(dir, "RELEASES.json"); s = String(read(p)); write(p, replace(s, V6_SPEC.sha => "0"^64))), true),
+                        ("目録を 1 byte 改変 (検査側だけが読む)", dir -> (p = joinpath(dir, String(parse_json_file(joinpath(SPEC_DIR, "RELEASES.json"))["6.0.0"]["e0_inventory_file"])); b = read(p); b[end-1] = UInt8(' '); write(p, b)), false))
+        dir = tampered_dir(mut)
+        files = corrupt_copy(make_v6!)
+        r, _ = c16b_status(files; dir=dir)
+        gen_refuses = load_approved_spec("6.0.0"; dir=dir) === nothing
+        ok = r.status == :fail && gen_refuses == gen_should_refuse
+        ok ? (n_pass[] += 1) : (n_fail[] += 1)
+        @printf("  %s %s → C16b NG%s\n", ok ? "✅" : "❌", name, gen_should_refuse ? " かつ生成側は spec を読まない" : " (生成側は目録ファイルを読まないので影響なし)")
+    end
+    # 生成側の版の名乗り (純関数)
+    let
+        okQ = presc_dataset_version(PRESC_V4; l_cap=QUICK_SETTINGS.l_cap, n_x=QUICK_SETTINGS.n_x, n_phi=QUICK_SETTINGS.n_phi,
+                                    n_q=QUICK_SETTINGS.n_q, n1=QUICK_SETTINGS.n1, n2=QUICK_SETTINGS.n2, n3=QUICK_SETTINGS.n3,
+                                    sig_thresh=QUICK_SETTINGS.sig_thresh) == "0.0.0-dev"
+        okM = presc_dataset_version(PRESC_V4; lkin_rule="v6", n1=20) == "0.0.0-dev"                       # 混成
+        okP = presc_dataset_version(PRESC_V4; ppw=25.0) == "0.0.0-dev"                                      # ppw だけ違う
+        v5 = HIGH_SETTINGS_V5
+        kw5 = (lkin_rule="v5", l_cap=v5.l_cap, n_x=v5.n_x, n_phi=v5.n_phi, n_q=v5.n_q, n1=v5.n1, n2=v5.n2, n3=v5.n3,
+               sig_thresh=v5.sig_thresh, ppw=v5.ppw, dt_log=v5.dt_log)
+        okL0 = presc_dataset_version(PRESC_V4; kw5...) == "0.0.0-dev"                                      # 生成経路 (permit_legacy=false)
+        okL1 = presc_dataset_version(PRESC_V4; kw5..., permit_legacy=true) == "5.0.0"                       # 検査側
+        okH = presc_dataset_version(PRESC_V4) == "6.0.0"                                                    # HEAD の既定
+        okD = dataset_version_of(PRESC_V4, HIGH_SETTINGS; allow_dev=true) == "0.0.0-dev"                    # --allow-dev は版を固定
+        okK = presc_dataset_version((; PRESC_V4..., exchange=:kli)) == "0.0.0-dev"                          # 研究処方
+        for (ok, name) in ((okQ, "QUICK 設定は 0.0.0-dev"), (okM, "v6 規則 + n1=20 の混成は 0.0.0-dev"), (okP, "ppw だけ違えば 0.0.0-dev"),
+                           (okL0, "v5 の組は生成経路では 0.0.0-dev (legacy ENV で正式版名を作れない)"),
+                           (okL1, "v5 の組は検査側 (permit_legacy) で 5.0.0 (出荷済み v5 の C16)"),
+                           (okH, "HEAD の既定 (v6_high) は 6.0.0 (陽性対照)"), (okD, "--allow-dev は出力を 0.0.0-dev に固定"),
+                           (okK, "研究処方 (KLI) は 0.0.0-dev"))
+            ok ? (n_pass[] += 1) : (n_fail[] += 1)
+            @printf("  %s 生成側: %s\n", ok ? "✅" : "❌", name)
+        end
+    end
+end
+
 @printf("\n合計 %d 件中 %d 件 PASS / %d 件 FAIL\n",
         n_pass[] + n_fail[], n_pass[], n_fail[])
 exit(n_fail[] == 0 ? 0 : 1)
