@@ -136,8 +136,8 @@ SDSE = SETO-DESKTOP スロット等価 (= 2 スレッド 1 本)。2026-08-21 15:
 原因候補は `bootstrap.ps1:481-482` の `-Priority 7` (BelowNormal) による Thread Director の E コア追放。selftest 85 件で D317-10 = 1,206 s に対し他機 285〜461 s ⇒ **≈ 4.3 倍**。⚠ ただし **priority → E コア追放の因果は A/B されていない (未確認)**。attempt 2 が全スロットで立っている理由も未確認 — 記録は D317-10 のローカル `C:\jobq\work\...\run.1.log` にしか無い。
 
 **手順 (1 変数ずつ)**:
-1. F v6 完走後、D317-10 の slot 0 **だけ** `-Priority 6` で再登録 → 再起動 → 同じ selftest 票を走らせ、1,206 s が 285〜461 s の帯に落ちるか、論理コア占有が P コア側へ移るかを測る。同時に `run.1.log` を読んで attempt 1 が何で死んだかを確定させる。
-2. 落ちれば `bootstrap.ps1:31` に `[int]$TaskPriority = 7` を足し `:485` を `-Priority $TaskPriority` に。`Build-HostRecord` (`:433-450`) に `task_priority` を記録して spool/hosts から監査できるようにする。**6 を選ぶ** — レベル 4 以上が NORMAL_PRIORITY_CLASS なので E コア追放は解けつつスレッド優先度は below-normal のままで、`:481` の「対話利用者が必ず勝つ」という決定を保てる。
+1. この初期案の Priority 6 単独 A/B は、下の追記にある **Priority 7/5 × EcoQoS そのまま/明示解除の 2×2** に置き換えた。
+2. `TaskPriority`、HighQoS の API readback、sidecar 来歴は 2026-08-23 に実装・結合試験済み。D317-10 は退役を維持し、実機 2×2 に合格するまで Deep へ戻さない。
 3. 落ちなければ **deep に参加させない**。`bootstrap.ps1 -Remove` で退役。⚠ `-Slots 0` は**逆効果** (`:31` の 0 は AUTO の番兵で `:339` が 5 を再計算する)。worker.conf の `SLOTS=0` も無効 (worker.sh は SLOTS を読まない)。
 
 **落ちなければならないテスト**: 手順 1 そのもの。1,206 s が動かなければ仮説は反証で、手順 3 へ。
@@ -219,12 +219,16 @@ sort!(rows; by = _cost, rev = true)
 
 **落ちなければならないテスト**: 登録後に 1 回再起動し、**誰もログオンしないうちに** `/c/jobq/logs/reaper.log` に `start ... once=0` が増えること。
 
+**2026-08-23 実装状況**: Password / Hidden / AtStartup PT30S、旧 bash 木の停止、外部 `>>` 除去、
+`JOBQ_CLAIM_TIMEOUT=1800`、台帳による最大 2 台監査を実装。DryRun と hosts 障害 20/0 は合格。
+実機 Password 登録と無人再起動試験、共有への配備は未実施。
+
 ---
 
 ### 推奨だが blocker ではないもの
 
-- **`src/l5_channel.jl:552` の atom_cache 書き込み競合**。Julia の `mv(tmp, fname; force=true)` は宛先を rm した後に **force を渡さない `rename`** を呼び、その fallback の `cp` が例外を投げる (`file.jl:426-429`)。実測 1 件 / selftest 86 票、本番 0 件。`Base.Filesystem.rename(tmp, fname)` (MoveFileExW の置換) に変え、`isfile(fname) || rethrow()` で兄弟の勝ちを許す。⚠ `src/gen_production.jl:165-168` の `PRODUCTION_SOURCE_FILES` に l5_channel.jl が入っているので **`PRODUCTION_SOURCE_FINGERPRINT` が動く** ⇒ **F v6 を昇格させてから**入れる。cert_fp は動かない (`CACHE_SOURCE_FINGERPRINT` は l0_numerics.jl と l1_atomic.jl だけ)。deep は新しい code_sha256 で走るので**全ホストが空の atom_cache から始まる** = 観測された 1 件が起きた条件そのもの。入れる価値はある。
-- **D317-1 の JOBQ_JULIA_BIN**。現状 3 スロットは `state=degraded` で票を**キューへ返している** (`worker.sh:402-419` の ATTEMPT==0 分岐 = RETURN)。**票は 1 枚も失われていない** (failed/ には C103 の selftest 1 件だけ)。⚠ **plan/verify だけ直すと壊れる**: `queuectl.jl:440-461` は argv[1] に "julia" をリテラルで置くので、plan は通って本体で exit 126 → 5 回再試行 → 本物の FAIL になる。`worker.sh:436` の `exec "${JOBQ_ARGV[@]}"` 側で argv[0] を `$JULIA` に差し替えるところまでやるか、**さもなくば D317-1 は今のまま (無害) にしておく**。中途半端な修理はしない。⚠ `bootstrap.ps1:359-372` は worker.conf を毎回書き直すので、手で足した行は巡回で消える。キーを bootstrap に教えること。
+- **atom_cache 書き込み競合**は `29a2e2d` で first-wins、破損隔離、stale-lock 回収まで修正済み。cold selftest/refcheck と v3/v4 前後ビット同一を確認した。
+- **D317-1 の JOBQ_JULIA_BIN**は bootstrap の保持・Git Bash probe と、plan / 本計算 / verify の 3 経路を同じ実体へ差し替えるところまで実装・試験済み。残るのは実機 Store パス確認と保存資格情報での再登録。
 
 ---
 
@@ -234,7 +238,7 @@ sort!(rows; by = _cost, rev = true)
 
 1. F v6 を昇格 (`RUNBOOK §4.1`) → atom_cache 修正を入れる → 第 4・5・6 位の repo 変更を 1 コミットに → `pack_code.sh` → 展開ツリーで `queuectl fingerprint` → 事前登録を書く。
 2. `deploy_setup.sh` で ROOT/setup を更新 (第 1・2 位の worker.sh/queuectl.jl)。
-3. **15 台を 1 回巡回**: `bootstrap.ps1 -Remove` → 再実行 (`-TaskPriority 6` はハイブリッド機、`-Reaper` は 1〜2 台)。これで新しい worker.sh が全 44 スロットに入る。巡回後に `queuectl hosts` で全スロットが再登録されたことを確認する。
+3. **15 台を 1 回巡回**: `bootstrap.ps1 -Remove` → 再実行 (`-Reaper` は 1〜2 台)。D317-10 は退役を維持し、2×2 のセルだけ `-TaskPriority 5` / `-DisableEcoQos` を組み合わせる。これで新しい worker.sh が全スロットに入る。巡回後に `queuectl hosts` で全スロットが再登録されたことを確認する。
 4. **gate campaign** `temari_sigma_deep_gate` を作り、canonical sentinel 11 行だけを 1 行/票で発行する。同時に (a) 費用の tag 別較正 (最安 C K@30 = 2,584 s から最重 Ca M1 = 17,921 s まで)、(b) pilot v4 に対する物理値の再現確認を行う。
 5. **ゲート**: 11 行が完了したら、① cert_fp が 1 種で事前登録の値と一致、② 全仕様内窓に規則文字列・rule config・オラクル名があり期待値と一致、③ 全窓が合格、④ pilot v4 の σ 値と一致 (機が違えば絶対 5e-16 以内)。**④ が本命** — 名前の一致より値の一致のほうが強い検査。複数 host の時間を混ぜる場合は、全 host の速度係数を明示する。
 6. 合格したら gate 結果と manifest から tag 較正 sidecar を作る。sentinel に無い L2/L3 は fallback または実測係数を明示し、由来を残す。続いて**別の正式 campaign** `temari_sigma_deep` を作り、較正済み LPT 順の canonical 1,583 行を 1 行/票で全発行する。sentinel 11 行も正式 campaign で再計算するため、正式集計はこの 1 campaign だけに閉じ、gate JSONL は混ぜない。

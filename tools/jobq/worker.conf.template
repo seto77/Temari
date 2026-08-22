@@ -21,10 +21,14 @@ THREADS=@THREADS@
 # 数値一致判定器を起動する Python >= 3.6 の絶対パス。PATH は Task Scheduler と対話シェルで
 # 異なるため使わない。既登録 PC は bootstrap を再実行してこのキーを追加する。
 PYTHON='@PYTHON@'
+# Task Scheduler の priority と、D317-10 の 2x2 実験で使う HighQoS 明示指定の来歴。
+# フリート既定は 7 / 0 のまま。D317-10 以外で変えない。
+TASK_PRIORITY=7
+DISABLE_ECOQOS=0
 # julia の実体 (任意)。既定は PATH の `julia`。Store 版のアプリ実行エイリアスを MSYS が辿れない
 # ホストでだけ、実体のランチャを絶対パスで指す。⚠ パスにパッケージ版数が入るので、
 # Store が Julia を更新したら書き直しが要る。
-#JOBQ_JULIA_BIN=C:/Program Files/WindowsApps/JuliaComputingInc.Julia_<ver>_x64__5z4q23t4ga8jg/Julia/julialauncher.exe
+#JOBQ_JULIA_BIN='C:/Program Files/WindowsApps/JuliaComputingInc.Julia_<ver>_x64__5z4q23t4ga8jg/Julia/julialauncher.exe'
 STALL_SECONDS=7200
 MAX_ATTEMPTS=5
 # 1 拍で「生存を知らせる + 仕事を探す」を行う。間隔の設定はこの 1 つだけ

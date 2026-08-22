@@ -13,7 +13,7 @@
   register.cmd               ダブルクリック = この PC を登録
   unregister.cmd             ダブルクリック = 登録解除
   README.txt                 数行の案内 (Notepad)
-  setup\                     登録・ワーカー運用のプログラム 8 本 + SETUP_SHA256
+  setup\                     登録・ワーカー運用のプログラム 9 本 + SETUP_SHA256
   code\                      内容アドレスのコード書庫 temari-<sha16>.tar.gz (+ .json)
   spool\                     機械が書くもの全部 (queue running results done failed control hosts campaigns)
 ```
@@ -26,13 +26,14 @@
 | ファイル | 役割 |
 | --- | --- |
 | `PROTOCOL.md` | 仕様 (正本) |
-| `PIN.json` | 全 PC 共通の既定 (julia 1.11.9 / `claim_timeout` 900 s / reaper 300 s / threads 2 / slot 0.75 / `code.name`) |
+| `PIN.json` | 全 PC 共通の既定 (julia 1.11.9 / `claim_timeout` 900 s / reaper 300 s / threads 2 / slot 0.75 / `code.name`)。bootstrap 登録の Deep reaper は action の 1800 s で上書き |
 | `worker.conf.template` | `LOCAL/worker.conf` の雛形 (§9 の鍵の一覧。テストが実体を確かめる) |
 | `bootstrap.ps1` | PC の登録本体 (`register.cmd` が昇格して呼ぶ)。winget で Git / Python / juliaup → Python selftest → NAS 試験 → タスク登録 → 台帳 |
 | `../agreement_check.py` | 数値一致の判定器。setup 版は登録時の Python selftest 専用、publish はコード書庫内の固定版を使う |
 | `register.cmd` / `unregister.cmd` | 共有直下に置くダブルクリック用の batch (**CRLF**) |
 | `share_README.txt` | 共有直下に `README.txt` として置く数行の案内 (**CRLF**) |
 | `nastest.ps1` | NAS 試験タスクの中身 (作成 → rename → 読取 → 削除) |
+| `disable_ecoqos.ps1` | D317-10 の 2×2 実験専用。実 `julia.exe` を HighQoS にし API readback まで確認 |
 | `worker.sh` | 1 スロット = 1 プロセス。claim → plan → コード用意 → Julia → verify → publish → done |
 | `reaper.sh` | スロットの status の `tick` を観測し、沈黙した claim を回収して epoch+1 で再投入 |
 | `queuectl.jl` | task テンプレート・票の検証・campaign の発行・verify・status / hosts / pause / fingerprint |
@@ -108,10 +109,18 @@ bash tools/jobq/pack_code.sh . --out-root //10.31.108.5/jobq      # 既定の RO
 - 解除は `unregister.cmd` (タスクをプロセス木ごと停止して削除 + 台帳に `retired_utc`)。
 - 再実行 = 更新 (冪等)。`-Slots` / `-Threads` を渡したいときは `register.cmd` に引数を付けて
   コマンドプロンプトから呼ぶ (そのまま bootstrap へ素通しされる)。手で叩くなら:
+- reaper を担当する **最大 2 台だけ** `-Reaper` を付ける。Password logon / Hidden / AtStartup で登録され、
+  Deep の claim timeout は 1800 s。通常の再登録を `-Reaper` 無しで行うと、その PC の旧 reaper は外れる。
+- Store 版 Julia の AppExecLink を Git Bash が起動できないホストでは `-JuliaBin` で実ランチャを指定する。
+  空白入り引数は `register.cmd` の UAC 再起動経路では保証しないため、下の PowerShell 直呼びを使う。
+- `-TaskPriority 5 -DisableEcoQos` は D317-10 の事前登録済み 2×2 実験専用。フリート既定は 7 / EcoQoS
+  変更なしであり、実機測定なしに他ホストへ広げない。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File \\10.31.108.5\jobq\setup\bootstrap.ps1 -DryRun
 powershell -ExecutionPolicy Bypass -File \\10.31.108.5\jobq\setup\bootstrap.ps1 -Slots 4 -Threads 2
+powershell -ExecutionPolicy Bypass -File \\10.31.108.5\jobq\setup\bootstrap.ps1 -Reaper
+powershell -ExecutionPolicy Bypass -File \\10.31.108.5\jobq\setup\bootstrap.ps1 -JuliaBin 'C:\Program Files\WindowsApps\...\Julia\julialauncher.exe'
 ```
 
 ## 3. campaign を出す
@@ -427,7 +436,7 @@ PROTOCOL §6.5.2 の表はこのうち 6 つを類 A–F として挙げてい�
 bash tools/jobq/test/t1_claim_contention.sh                                    # T1: 同じ票を 16 並列 × 50 回 claim (scratch)
 bash tools/jobq/test/t1_claim_contention.sh //10.31.108.5/jobq/t1 16 200        # 同じことを NAS 上で (専用サブディレクトリ)
 bash tools/jobq/test/t1_claim_contention.sh "" 16 50 mv                        # 原始操作を替えて比べる (mv / mv-verify / mkdir / noclobber)
-bash tools/jobq/test/e2e_noop.sh                                               # 端から端まで (下記 A–H。PASS 184 / FAIL 0、約 5 分)
+bash tools/jobq/test/e2e_noop.sh                                               # 端から端まで (下記 A–H。PASS 188 / FAIL 0、約 5 分)
 bash tools/jobq/test/publish_agreement_negative_test.sh                       # Python 起動不能を FAIL + unjudged に倒す負のテスト
 bash tools/jobq/test/publish_agreement_mutation_test.sh                       # fail-closed の 1 行を受理へ変えると負のテストが落ちる
 julia +1.11.9 tools/jobq/queuectl.jl selftest                                  # JSON 往復・識別子・plan/verify の fixture

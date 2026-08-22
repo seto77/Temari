@@ -122,6 +122,10 @@ Normal に上げても E コアから移らない」ことだけで、これは�
   A が効くなら**この台だけ 5 にする**のが筋 — フリート既定は 7 のまま
 - ⇒ 直らなければ deep からは外す (`bootstrap.ps1 -Remove`。**`-Slots 0` ではない**)
 
+**2026-08-23 実装状況**: `-TaskPriority` と `-DisableEcoQos`、実 `julia.exe` への HighQoS 適用＋
+API readback、sidecar 来歴まで実装・結合試験 13/0。D317-10 は退役のままで、上の実機 2×2 は未実施。
+測定に合格するまで Deep へ戻さない。
+
 ### ③ 順序の最適化と尾の始末
 
 - **(a) LPT (重い順の発行) + tag ごとに較正した代理値** — **確定**。効果 20〜25 %、費用 1.1 %
@@ -138,11 +142,13 @@ Normal に上げても E コアから移らない」ことだけで、これは�
 
 - **④ blocker 2**: 新しい `worker.sh` (再 exec の判定を `sync_setup` の**前**に置いた版) は
   **自分自身を配れない**。⇒ 全 15 台で 1 度だけスロットを再起動する必要がある
-- **⑤ D317-1**: `worker.conf` に **クォート付きで** 1 行足し、`register.cmd` をやり直して
-  保存資格情報を復活させる (パスに空白がある):
+- **⑤ D317-1**: `bootstrap.ps1 -JuliaBin '<実ランチャ>'` で、**クォート付き**の値を worker.conf に
+  保存し、保存資格情報を復活させる (パスに空白がある)。worker は plan / 本計算 / verify の 3 箇所を
+  同じランチャへ差し替える実装・試験 13/0 済み。空白入り引数は `register.cmd` ではなく PowerShell 直呼びにする:
 
-```
-JOBQ_JULIA_BIN='C:/Program Files/WindowsApps/JuliaComputingInc.Julia_1.22.2.0_x64__5z4q23t4ga8jg/Julia/julialauncher.exe'
+```powershell
+powershell -ExecutionPolicy Bypass -File \\10.31.108.5\jobq\setup\bootstrap.ps1 `
+  -JuliaBin 'C:\Program Files\WindowsApps\JuliaComputingInc.Julia_1.22.2.0_x64__5z4q23t4ga8jg\Julia\julialauncher.exe'
 ```
 
 ⚠ Store が Julia を更新するとパスの版数が変わる。恒久策としては弱い。
@@ -284,14 +290,14 @@ Deep の代理値 (`窓数 × ε_max^0.32 / E_th^0.25`) も pilot 11 行が tag 
 
 | # | 項目 | 状態 |
 | --- | --- | --- |
-| 1 | `tools/jobq/` を commit する (事前登録が commit を名乗るため) | ⚠ **作者判断待ち** |
+| 1 | `tools/jobq/` を commit する (事前登録が commit を名乗るため) | 🔄 実装・回帰後に commit する |
 | 2 | 票ごとの stall 28800 s / attempts 8 (`temari.certify_sigma_v2`) | ✅ 実装済・テスト済 (未配備) |
 | 3 | 新 `worker.sh` の全機配布 (再 exec の欠陥) | ✅ 実装済・テスト済 (**巡回が要る**) |
-| 4 | `summarize_v2` / `cert_v2_report.py` の重複除去を戻す | ❌ 未 |
+| 4 | `summarize_v2` / `cert_v2_report.py` の重複除去を戻す | ✅ `b9b3fad`、dedup 34/0 |
 | 5 | `cert_fp` の再アンカーと事前登録の書き直し | ❌ 未 |
-| 6 | LPT 並べ替え + tag 較正ゲート | ❌ 未 (§2③) |
-| 7 | reaper を `bootstrap.ps1` に登録 (**最大 2 台**。fail-OPEN) | ❌ 未 ★ **優先度を上げる。§5.3 参照** |
-| 8 | `claim_timeout` 900 → 1800 s (reaper タスクの環境変数で) | ❌ 未 |
+| 6 | LPT 並べ替え + tag 較正ゲート | ✅ `b9b3fad`、gate 11 行 + full 1,583 行 |
+| 7 | reaper を `bootstrap.ps1` に登録 (**最大 2 台**。fail-OPEN) | ✅ 実装・DryRun・障害負試験済、❌ 実機 Password/再起動試験と配備は未 |
+| 8 | `claim_timeout` 900 → 1800 s (reaper タスクの環境変数で) | ✅ 実装・DryRun 済、❌ 実機配備は未 |
 
 ### 5.2 ⚠ Deep 固有の危険 (F v6 には無かったもの)
 

@@ -62,6 +62,10 @@ for v in THREADS MAX_ATTEMPTS STALL_SECONDS HEARTBEAT_INTERVAL STATUS_INTERVAL P
   { [[ "${!v}" =~ ^[0-9]+$ ]] && [ "${!v}" -ge 1 ]; } || { echo "worker.conf: $v must be an integer >= 1 (got '${!v}'; $CONF or JOBQ_$v)" >&2; exit 2; }
 done
 [ "$STALL_SECONDS" -ge "$WATCH_INTERVAL" ] || { echo "worker.conf: STALL_SECONDS ($STALL_SECONDS) must be >= WATCH_INTERVAL ($WATCH_INTERVAL)" >&2; exit 2; }
+TASK_PRIORITY=${JOBQ_TASK_PRIORITY:-${TASK_PRIORITY:-7}}
+DISABLE_ECOQOS=${JOBQ_DISABLE_ECOQOS:-${DISABLE_ECOQOS:-0}}
+[[ "$TASK_PRIORITY" =~ ^[0-9]+$ ]] && [ "$TASK_PRIORITY" -le 10 ] || { echo "worker.conf: TASK_PRIORITY must be 0..10" >&2; exit 2; }
+[ "$DISABLE_ECOQOS" = 0 ] || [ "$DISABLE_ECOQOS" = 1 ] || { echo "worker.conf: DISABLE_ECOQOS must be 0 or 1" >&2; exit 2; }
 # 260822Cl: フリート総スロット数。worker.conf の SLOTS (bootstrap.ps1 が書く)。control/load の
 #   「N%」規則の分母にしか使わない。取れなければ % 規則は読み飛ばす (fail-open)。
 SLOTS_TOTAL=${JOBQ_SLOTS:-${SLOTS:-}}
@@ -83,6 +87,7 @@ JULIA=${JOBQ_JULIA_BIN:-julia}
 # Python は bootstrap が worker.conf に絶対パスで書く。既登録 PC では空のままでよい
 # (通常経路は止めず、同名 publish の byte 不一致時だけ「判定不能」として fail-closed)。
 PYTHON=${JOBQ_PYTHON_BIN:-${PYTHON:-}}
+ECOQOS_HELPER=${JOBQ_ECOQOS_HELPER:-$LOCAL/setup/disable_ecoqos.ps1}
 
 QUEUE_RE='^([a-z][a-z0-9_]{2,39})_([0-9]{6})\.e([0-9]{3})\.json$'
 RUNNING_RE='^([a-z][a-z0-9_]{2,39})_([0-9]{6})\.e([0-9]{3})\.([a-z0-9][a-z0-9-]*-s[0-9]+-b[0-9]+)\.json$'
@@ -106,7 +111,7 @@ HOST=$(hostname 2>/dev/null || echo unknown)
 # 状態 (グローバル)
 STATE=idle; REASON=""; BASE=""; ATTEMPT=0; LAST_STATUS=0
 CAMPAIGN=""; JOBSEQ=""; EPOCH=""; TASK=""; TICKET=""; TICKET_LOCAL=""; TICKET_PARSED=0; WORK=""; CODE_CWD=""
-CLAIMED=""; PLAN_MSG=""; PREP_MSG=""; PREP_PERMANENT=0; STARTED=""; FINISHED=""; JPID=""; JOBQ_ARGV=()
+CLAIMED=""; PLAN_MSG=""; PREP_MSG=""; PREP_PERMANENT=0; STARTED=""; FINISHED=""; JPID=""; POLICY_FAIL=0; JOBQ_ARGV=()
 A_NAME=(); A_SHA=(); A_REL=(); OUTNAMES=(); MANIFEST_SHAS=(); DUP_NAMES=(); UNJUDGED_NAMES=()
 AGREEMENT_RECORDS=(); ALIVE_WHY=""
 
@@ -369,6 +374,14 @@ run_plan() {  # §6.1: eval できる形で JOBQ_* を受け取る。戻り値 =
   if [ -z "${JOBQ_PROJECT:-}" ] || [ -z "${JOBQ_OUT:-}" ] || [ -z "${JOBQ_JULIA:-}" ] || [ "${#JOBQ_ARGV[@]}" -eq 0 ]; then
     PLAN_MSG="plan output incomplete (JOBQ_PROJECT/OUT/JULIA/ARGV)"; return 1
   fi
+  # queuectl の task_plan は全 task の argv[0] を契約上の目印 `julia` として返す。
+  # 実行時は plan / verify と同じ、bootstrap が確認した絶対ランチャへ必ず差し替える。
+  # これをしないと WindowsApps の AppExecLink を MSYS が起動できない D317-1 では、plan だけ通って
+  # 本計算が exit 126 を繰り返し、最終的に恒久 FAIL になる。
+  if [ "${JOBQ_ARGV[0]}" != julia ]; then
+    PLAN_MSG="plan argv[0] is not the required julia marker: ${JOBQ_ARGV[0]}"; return 1
+  fi
+  JOBQ_ARGV[0]=$JULIA
   if [ "$JOBQ_PROJECT" != jobq ] && { [ -z "${JOBQ_CODE_SHA256:-}" ] || [ -z "${JOBQ_CODE_ARCHIVE:-}" ]; }; then
     PLAN_MSG="plan output incomplete (JOBQ_CODE_SHA256/JOBQ_CODE_ARCHIVE for project $JOBQ_PROJECT)"; return 1
   fi
@@ -471,8 +484,9 @@ watch_mtime() {  # $1 path — ファイルなら mtime、ディレクトリな�
   [ -n "$m" ] || m=$(stat -c %Y "$p" 2>/dev/null)
   printf '%s' "${m:-none}"
 }
-run_attempt() {  # Julia を 1 回。戻り値 0 = 正常 / 124 = 停滞で kill / その他 = 終了コード
-  local cwd=$1 log_f="$WORK/run.$ATTEMPT.log" watch m last_m last_change stalled=0 rc v stall
+run_attempt() {  # Julia を 1 回。戻り値 0 = 正常 / 124 = 停滞 / 125 = requested HighQoS を適用不能
+  local cwd=$1 log_f="$WORK/run.$ATTEMPT.log" watch m last_m last_change stalled=0 rc v stall root_winpid="" i policy_log
+  POLICY_FAIL=0
   watch=${JOBQ_WATCH_PATH:-}; [ -n "$watch" ] || watch=$log_f
   # 260822Cl: 停滞閾値は**票ごと** (plan の JOBQ_STALL_SECONDS)。空なら worker.conf の値。
   #   certify_sigma_v2 は窓ごとにしか flush しないので、gen_production 用の 7200 s では
@@ -488,6 +502,21 @@ run_attempt() {  # Julia を 1 回。戻り値 0 = 正常 / 124 = 停滞で kill
     exec "${JOBQ_ARGV[@]}"
   ) > "$log_f" 2>&1 &
   JPID=$!
+  if [ "$DISABLE_ECOQOS" = 1 ]; then
+    policy_log="$WORK/ecoqos.$ATTEMPT.log"
+    for i in $(seq 1 100); do
+      root_winpid=$(cat "/proc/$JPID/winpid" 2>/dev/null)
+      [ -n "$root_winpid" ] && break
+      kill -0 "$JPID" 2>/dev/null || break
+      sleep 0.01
+    done
+    if ! [[ "$root_winpid" =~ ^[0-9]+$ ]] || [ ! -f "$ECOQOS_HELPER" ] ||
+       ! powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$ECOQOS_HELPER" -TreeRootProcessId "$root_winpid" > "$policy_log" 2>&1; then
+      log "HighQoS requested but could not be applied to the real julia process (root_winpid=${root_winpid:-none}; see $policy_log)"
+      kill_tree "$JPID"; wait "$JPID" 2>/dev/null; JPID=""; POLICY_FAIL=1; return 125
+    fi
+    log "HighQoS applied: $(tr -d '\r\n' < "$policy_log" 2>/dev/null)"
+  fi
   last_m=$(watch_mtime "$watch"); last_change=$(now)
   while kill -0 "$JPID" 2>/dev/null; do
     sleep "$WATCH_INTERVAL"; status_tick
@@ -515,9 +544,11 @@ run_verify() {  # §6.2 (票は手元の写し)。stdout に ARTEFACT 行。戻�
   "$JULIA" "$(qj)" --startup-file=no "$QUEUECTL" verify "$TICKET_LOCAL" --out "$JOBQ_OUT" --log "$WORK/run.$ATTEMPT.log" \
     --manifest-dir "$WORK/manifest" --root "$ROOT" --spool "$SPOOL" --local "$LOCAL" \
     --host "$HOST" --worker "$WORKER_ID" --owner "$OWNER" --attempt "$ATTEMPT" --cpu "$CPU" --threads "$THREADS" \
+    --task-priority "$TASK_PRIORITY" --ecoqos-disabled "$DISABLE_ECOQOS" \
     --started-utc "$STARTED" --finished-utc "$FINISHED" > "$WORK/verify.$ATTEMPT.out" 2> "$WORK/verify.$ATTEMPT.log" &
   # 260822Cl: verify も生存の合図を打ちながら待つ。同期実行のままだと verify の間だけ tick が止まり、
-  #   claim_timeout (900 s) を越えれば**生きている** claim に reaper が strike を積む (§7)。publish は
+  #   claim_timeout (PIN 900 s、bootstrap 登録 reaper は 1800 s) を越えれば**生きている** claim に
+  #   reaper が strike を積む (§7)。publish は
   #   成果物ごとに status_tick を打ってあるのに、verify だけがその穴を持っていた (2026-08-22 のレビュー)。
   #   JPID に載せる = worker が落ちたときの後始末 (on_exit の kill_tree) が verify の julia にも効く。
   JPID=$!
@@ -812,6 +843,11 @@ run_attempts() {  # 再試行ループ: attempt +1 → Julia → verify → publ
         *) log "verify: not complete (exit $vrc); retry after $RETRY_BACKOFF s" ;;
       esac
     else
+      # exit 125 is not globally reserved: a task may legitimately return it. Only the dedicated
+      # in-process flag proves that this attempt failed before execution policy was established.
+      if [ "$POLICY_FAIL" -eq 1 ]; then
+        finish_fail "host policy: requested HighQoS could not be applied to the real julia.exe (see ecoqos.$ATTEMPT.log)"; return
+      fi
       if permanent_exit "$rc"; then
         finish_fail "permanent error: exit $rc is in JOBQ_PERMANENT_EXIT (${JOBQ_PERMANENT_EXIT:-})"; return
       fi

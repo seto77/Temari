@@ -715,7 +715,7 @@ end
 function cmd_verify(io::IO, args)
     pos, opt = parse_opts(args)
     (length(pos) == 1 && haskey(opt, "out") && haskey(opt, "manifest-dir")) ||
-        usage("verify <ticket.json> --out <file|dir> --log <run.N.log> --manifest-dir <dir> [--host --worker --owner --attempt --cpu --threads --started-utc --finished-utc]")
+        usage("verify <ticket.json> --out <file|dir> --log <run.N.log> --manifest-dir <dir> [--host --worker --owner --attempt --cpu --threads --task-priority --ecoqos-disabled --started-utc --finished-utc]")
     env = resolve_env(opt); pin = load_pin(opt, env); t = load_ticket(pos[1], pin)
     out = nativepath(optstr(opt, "out")); log = nativepath(optstr(opt, "log", ""))
     arts, info = task_verify(t, out, log)
@@ -723,6 +723,10 @@ function cmd_verify(io::IO, args)
     owner = optstr(opt, "owner", ""); wid = optstr(opt, "worker", (m = match(RE_OWNER, owner)) === nothing ? "" : String(m[1]))
     mdir = nativepath(optstr(opt, "manifest-dir")); mkpath(mdir)
     threads = resolve_threads(opt, env, pin); attempt = something(tryparse(Int, optstr(opt, "attempt", "1")), 1)
+    task_priority = something(tryparse(Int, optstr(opt, "task-priority", "7")), -1)
+    0 <= task_priority <= 10 || throw(TicketError("--task-priority は 0..10"))
+    eco_s = optstr(opt, "ecoqos-disabled", "0")
+    eco_s in ("0", "1") || throw(TicketError("--ecoqos-disabled は 0 または 1"))
     parent = dirname(out)
     for (outname, path) in arts
         m = JObj("schema" => 1, "campaign" => t.campaign, "jobseq" => t.jobseq, "claim_epoch" => t.epoch, "task" => t.task,
@@ -730,6 +734,7 @@ function cmd_verify(io::IO, args)
                  "result_sha256" => bytes2hex(sha256(read(path))), "ticket_sha256" => bytes2hex(sha256(t.bytes)),
                  "worker_id" => wid, "owner" => owner, "hostname" => optstr(opt, "host", lowercase(gethostname())),
                  "cpu" => optstr(opt, "cpu", ""), "julia" => pin_str(pin, "julia_version", "1.11.9"), "threads" => threads,
+                 "task_priority" => task_priority, "ecoqos_disabled" => eco_s == "1",
                  "attempt" => attempt, "started_utc" => optstr(opt, "started-utc", ""),
                  "finished_utc" => optstr(opt, "finished-utc", utcnow()), "task_info" => info)
         write_replace(joinpath(mdir, outname * ".manifest.json"), json_pretty(m))   # 再試行のたびに書き直してよい (§6.2)
@@ -1168,9 +1173,20 @@ function cmd_selftest(io::IO, args)
     ok(occursin(Regex("^ARTEFACT jobq_selftest_lane000001001\\.jsonl [0-9a-f]{64} jobq_selftest_lane000001001\\.jsonl\$", "m"), out), "ARTEFACT 行 (outname sha256 relpath)")
     mj = json_load(man); print(io, json_pretty(mj))
     ok(mj.ks == ["schema", "campaign", "jobseq", "claim_epoch", "task", "code_sha256", "code_commit", "outname", "result_sha256", "ticket_sha256",
-                 "worker_id", "owner", "hostname", "cpu", "julia", "threads", "attempt", "started_utc", "finished_utc", "task_info"], "manifest の項目 (§8)")
+                 "worker_id", "owner", "hostname", "cpu", "julia", "threads", "task_priority", "ecoqos_disabled",
+                 "attempt", "started_utc", "finished_utc", "task_info"], "manifest の項目 (§8)")
     ok(mj["result_sha256"] == bytes2hex(sha256(read(nout))) && mj["ticket_sha256"] == bytes2hex(sha256(read(noop_t))) && mj["worker_id"] == "host-1" &&
-       mj["attempt"] == 2 && mj["julia"] == "1.11.9", "manifest の値 (sha256 / owner → worker_id)")
+       mj["attempt"] == 2 && mj["julia"] == "1.11.9" && mj["task_priority"] == 7 && mj["ecoqos_disabled"] === false,
+       "manifest の値 (sha256 / owner → worker_id / 既定 priority・QoS)")
+    c, _ = run_cmd(cmd_verify, noop_t, "--out", nout, "--manifest-dir", mdir,
+                   "--task-priority", "5", "--ecoqos-disabled", "1", P...)
+    mj = json_load(man)
+    ok(c == 0 && mj["task_priority"] == 5 && mj["ecoqos_disabled"] === true,
+       "verify: D317-10 の priority / HighQoS 2x2 cell を manifest に記録")
+    ok(run_cmd(cmd_verify, noop_t, "--out", nout, "--manifest-dir", mdir, "--task-priority", "11", P...)[1] == 2,
+       "verify: task priority 範囲外を拒否")
+    ok(run_cmd(cmd_verify, noop_t, "--out", nout, "--manifest-dir", mdir, "--ecoqos-disabled", "yes", P...)[1] == 2,
+       "verify: ecoqos-disabled の曖昧な値を拒否")
     println(io, "[5b] threads の解決: --threads > JOBQ_THREADS > worker.conf THREADS > PIN threads_default")
     write(joinpath(local_, "worker.conf"), "THREADS=4\nSLOTS=2\n")
     withenv("JOBQ_THREADS" => nothing) do
@@ -1426,7 +1442,7 @@ cmd_pause(io, args) = cmd_pause(io, args, true)
 # ============================================================ §G main
 const USAGE = """usage: queuectl.jl <subcommand> [--root ROOT] [--spool SPOOL] [--local LOCAL] [--pin PIN.json]
   plan <ticket.json> --threads T --work-dir D
-  verify <ticket.json> --out <file|dir> --log <run.N.log> --manifest-dir <dir> [--host --worker --owner --attempt --cpu --threads --started-utc --finished-utc]
+  verify <ticket.json> --out <file|dir> --log <run.N.log> --manifest-dir <dir> [--host --worker --owner --attempt --cpu --threads --task-priority --ecoqos-disabled --started-utc --finished-utc]
   new-campaign --name C --task T --code-sha256 SHA [--code-commit SHA] --args-json FILE
   issue C [--jobseq a-b]   reissue C <jobseq> [--epoch N]   status [C]   hosts
   pause [worker_id]   resume [worker_id]   pin <key>

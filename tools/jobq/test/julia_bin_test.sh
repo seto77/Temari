@@ -65,6 +65,8 @@ check "shim を作った (パスに空白を含む)" test -x "$SHIM"
   printf 'JOBQ_LOCAL=%s\n' "$LOCAL"
   printf 'WORKER_ID=%s\n' "$WID"
   printf "JOBQ_JULIA_BIN='%s'\n" "$SHIM"
+  # D317-10 の 2x2 実験経路も同時に通す。通常フリートの既定は 7 / 0 のまま。
+  printf 'TASK_PRIORITY=5\nDISABLE_ECOQOS=1\n'
   printf 'SLOTS=1\nTHREADS=1\nSTALL_SECONDS=60\nMAX_ATTEMPTS=2\nSTATUS_INTERVAL=2\nPOLL_INTERVAL=2\nRETRY_BACKOFF=1\nDEGRADED_SLEEP=2\n'
 } > "$LOCAL/worker.conf"
 
@@ -82,7 +84,7 @@ export JOBQ_POLL_INTERVAL=2 JOBQ_STATUS_INTERVAL=2 JOBQ_STALL_SECONDS=60
 export JOBQ_RETRY_BACKOFF=1 JOBQ_DEGRADED_SLEEP=2 JOBQ_WATCH_INTERVAL=1 JOBQ_MAX_ATTEMPTS=2
 
 queuectl() { julia "$JULIA" "$LOCAL/setup/queuectl.jl" "$@" --root "$ROOT" --spool "$SPOOL" --local "$LOCAL"; }
-args="$LOGD/args.json"; printf '[{"seconds":1}]\n' > "$args"
+args="$LOGD/args.json"; printf '[{"seconds":5}]\n' > "$args"
 queuectl new-campaign --name jobq_jb --task jobq.noop --code-sha256 "" --args-json "$args" > "$LOGD/newcamp.log" 2>&1
 queuectl issue jobq_jb > "$LOGD/issue.log" 2>&1
 check "campaign を作って issue した" test -f "$SPOOL/queue/jobq_jb_000001.e001.json"
@@ -102,13 +104,29 @@ esac
 for i in $(seq 1 90); do [ "$(nfiles "$SPOOL/done/jobq_jb" '*.json')" = 1 ] && break; sleep 1; done
 check "ジョブが完走した (${i} s)" test "$(nfiles "$SPOOL/done/jobq_jb" '*.json')" = 1
 
+# --- D317-10 の実験セル: 実 julia.exe への HighQoS と manifest 来歴 ------------------------
+check "★ HighQoS helper が実 julia.exe に適用・readback した" \
+      bash -c "grep -q 'HighQoS applied: .*julia.exe:.*control=0x1 state=0x0' '$LOGD/worker.log'"
+manifest=$(find "$SPOOL/results/jobq_jb" -maxdepth 1 -type f -name '*.manifest.json' 2>/dev/null | head -1)
+if [ -n "$manifest" ]; then
+  check "manifest に task_priority=5 を記録" grep -Eq '"task_priority"[[:space:]]*:[[:space:]]*5' "$manifest"
+  check "manifest に ecoqos_disabled=true を記録" grep -Eq '"ecoqos_disabled"[[:space:]]*:[[:space:]]*true' "$manifest"
+else
+  nfail=$((nfail+2)); printf 'FAIL  manifest に task_priority=5 を記録 (manifest 無し)\n'
+  printf 'FAIL  manifest に ecoqos_disabled=true を記録 (manifest 無し)\n'
+fi
+
 # --- 本題: shim が本当に使われたか ---------------------------------------------------------
 check "★ JOBQ_JULIA_BIN の shim が呼ばれた (旧実装ではここが落ちる)" test -s "$MARK"
 if [ -s "$MARK" ]; then
   printf '  (shim の呼び出し %s 回。最初の引数: %s)\n' "$(wc -l < "$MARK" | tr -d ' ')" "$(head -1 "$MARK" | cut -c1-70)"
-  check "★ shim が plan / verify の両方で使われた (2 回以上)" test "$(wc -l < "$MARK" | tr -d ' ')" -ge 2
+  # plan と verify だけなら旧欠陥版でも 2 回呼ばれる。本計算 (noop の `-e`) を含む 3 回目を
+  # 独立に要求し、JOBQ_ARGV[0]=julia が絶対ランチャへ差し替わったことを直接見る。
+  check "★ shim が plan / 本計算 / verify のすべてで使われた (3 回以上)" test "$(wc -l < "$MARK" | tr -d ' ')" -ge 3
+  check "★ 本計算の -e program も shim から起動された" grep -Fq -- '-e sleep(' "$MARK"
 else
-  nfail=$((nfail+1)); printf 'FAIL  ★ shim が plan / verify の両方で使われた (呼ばれていない)\n'
+  nfail=$((nfail+2)); printf 'FAIL  ★ shim が plan / 本計算 / verify のすべてで使われた (呼ばれていない)\n'
+  printf 'FAIL  ★ 本計算の -e program も shim から起動された (呼ばれていない)\n'
 fi
 
 kill_tree "$wpid"; wait "$wpid" 2>/dev/null

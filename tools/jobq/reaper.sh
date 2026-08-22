@@ -279,7 +279,7 @@ retry_orphans() {
 }
 
 pass() {
-  local now p f c j e o wid slot bseq base sf tick prev snap hosts_ok=1
+  local now p f c j e o wid slot bseq base sf tick prev snap snap_rc sf_exists hosts_ok=1
   now=$(date +%s); SEEN=(); HANDLED=()
   # 260822Cl §7: hosts/ が丸ごと読めない pass では strike を積まず REAP もしない。誤って回収すると
   #   50 時間走った計算が捨てられ、同じ票が別の PC で二重計算になる。**WARN を出す** — 恒久的に
@@ -294,7 +294,9 @@ pass() {
     wid=${BASH_REMATCH[1]}; slot=${BASH_REMATCH[2]}; bseq=${BASH_REMATCH[3]}
     SEEN[$base]=1
     # 生存の合図 (§7): status が読める & boot_seq 一致 & base 一致 なら tick を採る。それ以外は沈黙 (空)
-    sf="$SPOOL/hosts/$wid-s$slot.status.json"; tick=""; snap=$(snap_read "$sf")
+    sf="$SPOOL/hosts/$wid-s$slot.status.json"; tick=""; sf_exists=0
+    [ -e "$sf" ] && sf_exists=1
+    snap=$(snap_read "$sf"); snap_rc=$?
     if [ -n "$snap" ] && [ "$(snap_num "$snap" boot_seq)" = "$((10#$bseq))" ] && [ "$(snap_str "$snap" base)" = "$base" ]; then
       tick=$(snap_num "$snap" tick)
     fi
@@ -304,8 +306,12 @@ pass() {
       S_OWNER[$base]=$o; S_TICK[$base]=${tick:--}; S_LAST[$base]=$now; S_STRIKES[$base]=0
     elif [ -n "$tick" ] && { [ "$prev" = "-" ] || [ "$tick" -gt "$prev" ]; }; then
       S_TICK[$base]=$tick; S_LAST[$base]=$now; S_STRIKES[$base]=0     # 生きている
-    elif [ "$hosts_ok" -eq 0 ]; then
-      :                                                              # 障害と沈黙を区別できない pass: 何も積まない
+    elif [ "$hosts_ok" -eq 0 ] || { [ "$sf_exists" -eq 1 ] && { [ "$snap_rc" -ne 0 ] || [ -z "$snap" ]; }; }; then
+      # 共有全体、または「存在するこの status だけ」が読めない間は、生存と沈黙を区別できない。
+      # 最後の観測時刻・strike をここで再武装しないと、長い NAS 障害の復旧直後に古い無音時間を
+      # 引き継いで即 STRIKE、その次の pass で生きている claim を REAP できてしまう。
+      S_LAST[$base]=$now; S_STRIKES[$base]=0
+      [ "$hosts_ok" -eq 0 ] || log "WARN $sf exists but could not be read; re-arming the silence grace for $base"
     elif [ "$now" -lt "${S_LAST[$base]}" ]; then
       # 時計が戻った (NTP の補正・スリープ復帰)。戻り側そのものは安全 (差が負なので閾値に届かない) が、
       # 放置すると跳んだ幅のあいだ回収が止まる。測り直す。⚠ **前進側は塞いでいない** — §7 の既知の限界。

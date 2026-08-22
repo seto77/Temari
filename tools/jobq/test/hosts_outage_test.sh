@@ -45,14 +45,14 @@ cat > "$SPOOL/running/$TICKET_NAME" <<'JSON'
 JSON
 
 LOG=$LOCAL/logs/reaper.log
-run_once() { JOBQ_ROOT=$ROOT JOBQ_SPOOL=$SPOOL JOBQ_LOCAL=$LOCAL JOBQ_CLAIM_TIMEOUT=1 \
+run_once() { JOBQ_ROOT=$ROOT JOBQ_SPOOL=$SPOOL JOBQ_LOCAL=$LOCAL JOBQ_CLAIM_TIMEOUT=2 \
              JOBQ_REAPER_INTERVAL=1 JOBQ_SETTLE_SECONDS=0.1 bash "$REAPER" --once > /dev/null 2>&1; }
 # orphan/ には票と .reason.json の 2 つが入る (§1.2)。票だけを数える。
 orphans() { ls "$SPOOL/failed/$CAMP/orphan/" 2>/dev/null | grep -cv '[.]reason[.]json$'; }
 
 echo "--- 1. hosts/ が使えない (ディレクトリの場所に通常ファイル = 読めも書けもしない) ---"
 rm -rf "$SPOOL/hosts"; : > "$SPOOL/hosts"
-run_once; sleep 2; run_once; sleep 2; run_once     # 初見 + 沈黙 2 周期 = 本来なら REAP に届く
+run_once; sleep 3; run_once; sleep 3; run_once     # 初見 + 沈黙 2 周期 = 本来なら REAP に届く
 check "ガードの WARN が出ている"          "$(grep -c 'hosts/ not readable as a whole' "$LOG")" "3"
 check "STRIKE は 1 度も積まれていない"     "$(grep -c 'STRIKE' "$LOG")"                        "0"
 check "REAP されていない"                  "$(grep -c 'REAP' "$LOG")"                          "0"
@@ -65,7 +65,7 @@ echo "--- 2. hosts/ は書けるが、status はあって 1 つも読めない (
 # ⚠ ここが seen の分岐: プローブは**成功する** (hosts/ は書ける) ので、プローブだけで判定すると
 #   ガードが外れて一斉回収になる。「ファイルはあるのに 1 つも読めない」を先に障害と断定すること。
 rm -f "$SPOOL/hosts"; mkdir -p "$SPOOL/hosts"; : > "$SPOOL/hosts/dead-worker-s0-b1.status.json"
-run_once; sleep 2; run_once; sleep 2; run_once
+run_once; sleep 3; run_once; sleep 3; run_once
 check "ガードの WARN が増えた"             "$(grep -c 'hosts/ not readable as a whole' "$LOG")" "6"
 check "まだ STRIKE は積まれていない"       "$(grep -c 'STRIKE' "$LOG")"                        "0"
 check "まだ REAP されていない"             "$(grep -c 'REAP' "$LOG")"                          "0"
@@ -73,8 +73,11 @@ check "claim はまだ running/ にある"       "$([ -f "$SPOOL/running/$TICKET
 
 echo "--- 3. hosts/ は使えて status が 1 つも無い (掃除された・全台退役) ---"
 rm -rf "$SPOOL/hosts"; mkdir -p "$SPOOL/hosts"
-run_once; sleep 2; run_once; sleep 2; run_once
+run_once
 check "ガードの WARN は増えていない"       "$(grep -c 'hosts/ not readable as a whole' "$LOG")" "6"
+check "★ 復旧直後の pass は古い無音時間で STRIKE しない" "$(grep -c 'STRIKE' "$LOG")" "0"
+check "★ 復旧直後の pass は claim を REAP しない" "$([ -f "$SPOOL/running/$TICKET_NAME" ] && echo yes || echo no)" "yes"
+sleep 3; run_once; sleep 3; run_once
 check "今度は STRIKE が積まれた"           "$([ "$(grep -c 'STRIKE' "$LOG")" -ge 1 ] && echo yes || echo no)" "yes"
 check "今度は REAP された"                 "$([ "$(grep -c 'REAP' "$LOG")" -ge 1 ] && echo yes || echo no)"   "yes"
 check "claim は running/ から消えた"       "$([ -f "$SPOOL/running/$TICKET_NAME" ] && echo yes || echo no)"   "no"

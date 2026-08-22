@@ -2,7 +2,8 @@
 jobq bootstrap (tools/jobq/PROTOCOL.md section 10) - registers this PC as a jobq worker host.
 
   powershell -NoProfile -ExecutionPolicy Bypass -File \\10.31.108.5\jobq\setup\bootstrap.ps1
-      [-Slots N] [-Threads T] [-Remove] [-DryRun] [-Root R] [-Spool S] [-Local L] [-User DOMAIN\name]
+      [-Slots N] [-Threads T] [-TaskPriority N] [-DisableEcoQos] [-JuliaBin P] [-Reaper]
+      [-Remove] [-DryRun] [-Root R] [-Spool S] [-Local L] [-User DOMAIN\name]
 
 Normally started by double-clicking register.cmd / unregister.cmd at the share root; those elevate
 themselves and hand this script -Root and -User.
@@ -30,6 +31,11 @@ Windows PowerShell 5.1 and pwsh 7. ASCII only, LF line endings.
 param(
   [int]$Slots = 0,
   [int]$Threads = 0,
+  [ValidateRange(0, 10)]
+  [int]$TaskPriority = 7,
+  [switch]$DisableEcoQos,
+  [string]$JuliaBin = '',
+  [switch]$Reaper,
   [switch]$Remove,
   [switch]$DryRun,
   [string]$Root = '\\10.31.108.5\jobq',
@@ -48,6 +54,8 @@ if (-not $Spool) { $Spool = Join-Path $Root 'spool' }        # PROTOCOL section 
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $WorkerTaskGlob = 'jobq-worker-s*'
 $NasTestTask = 'jobq-nastest'
+$ReaperTask = 'jobq-reaper'
+$ReaperClaimTimeout = 1800
 
 # ---------------------------------------------------------------- helpers
 function Say([string]$m) { Write-Host "[bootstrap] $m" }
@@ -171,6 +179,14 @@ function Get-ExistingWorkerId {
   }
   return $null
 }
+function Get-ExistingJuliaBin {                       # bootstrap が以前書いた quoted MSYS path を保持する
+  if (-not (Test-Path -LiteralPath $confPath)) { return '' }
+  foreach ($line in [IO.File]::ReadAllLines($confPath)) {
+    if ($line -match "^JOBQ_JULIA_BIN='([^']*)'\s*$") { return $Matches[1] }
+    if ($line -match '^JOBQ_JULIA_BIN=([A-Za-z0-9_./:=-]+)\s*$') { return $Matches[1] }
+  }
+  return ''
+}
 function New-WorkerId {                                # <hostname lower, [^a-z0-9] -> '-'>-<8 hex>
   $h = ($hostName.ToLower() -replace '[^a-z0-9]', '-').Trim('-')
   if ($h.Length -gt 32) { $h = $h.Substring(0, 32) }
@@ -212,6 +228,7 @@ function Stop-WorkerTree($task) {
   $payload = $actArgs.Trim()
   if ($payload -match '^-[A-Za-z]*c\s+"(.*)"$') { $payload = $Matches[1] }                              # -lc "<cmd>" -> <cmd>
   $payload = $payload -replace '^(?:[A-Za-z_][A-Za-z0-9_]*=(?:''[^'']*''|"[^"]*"|\S*)\s+)+', ''         # VAR=... prefixes become environment on exec
+  $payload = $payload -replace '\s+[0-9]*>{1,2}.*$', ''                                                  # old manual reaper used >> log 2>&1; child argv does not
   if (-not $payload) { Say "  $($task.TaskName): no command in [$actArgs] - process tree not searched"; return }
   $re = '(^|[\s"])' + [regex]::Escape($payload) + '"?\s*$'   # slot-specific: "...worker.sh 1" cannot match "...worker.sh 10"
   $procs = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name, CommandLine, CreationDate)
@@ -256,15 +273,16 @@ function Stop-WorkerTree($task) {
   }
   if ($alive.Count -gt 0) { Say "  WARNING: $($task.TaskName): still alive after 30 s: $(($alive | ForEach-Object { "$($_.Name):$($_.ProcessId)" }) -join ' ')" }
 }
-function Remove-JobqTasks([string[]]$names) {          # stop -> kill the worker's process tree -> unregister. The slot's claim is left to the reaper.
+function Remove-JobqTasks([string[]]$names) {          # stop -> kill bash process trees -> unregister. Worker claims are left to the reaper.
   # The reaper notices within claim_timeout because the slot's status file stops ticking (PROTOCOL section 7).
   foreach ($n in $names) {
     foreach ($t in @(Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue)) {
       $isWorker = (Get-WorkerSlot $t.TaskName) -ge 0
-      $verb = if ($isWorker) { 'stop task + kill its process tree + unregister' } else { 'stop + unregister task' }
+      $hasBashTree = $isWorker -or $t.TaskName -eq $ReaperTask
+      $verb = if ($hasBashTree) { 'stop task + kill its process tree + unregister' } else { 'stop + unregister task' }
       Step "$verb $($t.TaskName)" {
         if ($t.State -eq 'Running') { Stop-ScheduledTask -TaskName $t.TaskName -ErrorAction SilentlyContinue }
-        if ($isWorker) { Stop-WorkerTree $t }
+        if ($hasBashTree) { Stop-WorkerTree $t }
         Unregister-ScheduledTask -TaskName $t.TaskName -Confirm:$false
       }
     }
@@ -321,7 +339,7 @@ Say "root=$Root spool=$Spool local=$Local user=$userName host=$hostName dry-run=
 
 # ---------------------------------------------------------------- -Remove
 if ($Remove) {
-  Remove-JobqTasks @($WorkerTaskGlob, $NasTestTask)
+  Remove-JobqTasks @($WorkerTaskGlob, $NasTestTask, $ReaperTask)
   $wid = Get-ExistingWorkerId
   if (-not $wid) { Say "no WORKER_ID in $confPath - tasks removed, no host record to retire"; exit 0 }
   $p = Join-Path $hostsDir "$wid.json"
@@ -346,6 +364,7 @@ if ($Remove) {
   }
   if ($rec.Count -eq 0) { $rec['worker_id'] = $wid; $rec['hostname'] = $hostName }
   $rec['retired_utc'] = UtcNow
+  $rec['reaper_enabled'] = $false
   Step "write retired_utc into $p (tmp + rename)" {
     try { Write-JsonAtomic $p $rec }
     catch { Say "WARNING: could not record retired_utc in $p ($($_.Exception.Message)) - this PC IS unregistered (tasks stopped and removed); only the ledger on the share is left unchanged" }
@@ -414,14 +433,55 @@ if (Test-Path -LiteralPath $python) {
   if ($pythonMinor -lt 6) { throw "Python >= 3.6 is required: $python ($pythonVersion)" }
 }
 $pythonMsys = ConvertTo-MsysPath $python
+$existingJuliaBin = Get-ExistingJuliaBin
+$juliaBinMsys = $existingJuliaBin
+if ($JuliaBin) {
+  $candidate = $JuliaBin.Trim()
+  if ($candidate -notmatch '^(?:[A-Za-z]:[\\/]|/[A-Za-z]/)') {
+    throw "-JuliaBin must be an absolute Windows or MSYS path: $candidate"
+  }
+  $juliaBinMsys = ConvertTo-MsysPath $candidate
+}
+if ($juliaBinMsys) {
+  $probeCmd = (ConvertTo-ShWord $juliaBinMsys) + ' +' + $juliaVer + ' --version'
+  $probeOut = Invoke-Native $bash @('-lc', $probeCmd)
+  if ($script:NativeExit -ne 0) {
+    if ($DryRun -and $JuliaBin) { Say "WARNING: dry-run could not start -JuliaBin $juliaBinMsys ($probeOut)" }
+    else { throw "JOBQ_JULIA_BIN failed under Git Bash: $juliaBinMsys ($probeOut; exit $script:NativeExit)" }
+  } else { Say "JOBQ_JULIA_BIN verified: $juliaBinMsys ($($probeOut.Trim()))" }
+}
+$disableEcoQosValue = if ($DisableEcoQos) { 1 } else { 0 }
 
 # ---------------------------------------------------------------- step 2: LOCAL, setup copy, worker.conf
 $workerId = Get-ExistingWorkerId
 if ($workerId) { Say "keeping WORKER_ID=$workerId from $confPath" } else { $workerId = New-WorkerId; Say "new WORKER_ID=$workerId" }
 if ($workerId -notmatch '^[a-z0-9][a-z0-9-]{0,40}$') { throw "invalid worker_id: $workerId" }
+if ($Reaper) {
+  # reaper is deliberately fail-OPEN when it cannot read status, so running too many copies increases
+  # the probability of a false reap. Keep the fleet-wide cap at two, audited through non-retired host records.
+  if (-not (Test-Path -LiteralPath $hostsDir -PathType Container)) {
+    throw "cannot audit the reaper cap because hosts/ is not a readable directory: $hostsDir"
+  }
+  $activeReapers = @()
+  foreach ($f in @(Get-ChildItem -LiteralPath $hostsDir -Filter '*.json' -File -ErrorAction Stop |
+                    Where-Object { $_.Name -notlike '*.status.json' })) {
+    try { $r = Get-Content -LiteralPath $f.FullName -Raw -Encoding UTF8 | ConvertFrom-Json }
+    catch { throw "cannot audit the reaper cap because host record is unreadable: $($f.FullName) ($($_.Exception.Message))" }
+    $rid = [string](Prop $r 'worker_id' '')
+    # [bool]'false' is $true in PowerShell. Accept only the JSON boolean true; a string or any
+    # legacy/malformed value must not silently consume one of the two audited slots.
+    if ($rid -ne $workerId -and (Prop $r 'reaper_enabled' $false) -eq $true -and -not (Prop $r 'retired_utc' $null)) {
+      $activeReapers += $rid
+    }
+  }
+  if ($activeReapers.Count -ge 2) {
+    throw "-Reaper would exceed the fleet cap of 2 (already enabled: $($activeReapers -join ', '))"
+  }
+  Say "reaper capacity ok: $($activeReapers.Count) other enabled host(s)"
+}
 # STATUS_INTERVAL was LEASE_INTERVAL before the leases/ directory was deleted (PROTOCOL section 9);
 # read the old PIN key as a fallback so an un-updated PIN.json still yields the intended value.
-$conf = @(
+$confLines = @(
   "JOBQ_ROOT=$(ConvertTo-MsysPath $Root)",
   "JOBQ_SPOOL=$spoolMsys",
   "JOBQ_LOCAL=$localMsys",
@@ -429,12 +489,16 @@ $conf = @(
   "SLOTS=$Slots",
   "THREADS=$Threads",
   "PYTHON=$(ConvertTo-ShWord $pythonMsys)",
+  "TASK_PRIORITY=$TaskPriority",
+  "DISABLE_ECOQOS=$disableEcoQosValue",
+  $(if ($juliaBinMsys) { "JOBQ_JULIA_BIN=$(ConvertTo-ShWord $juliaBinMsys)" }),
   "STALL_SECONDS=$(Prop $pin 'stall_seconds' 7200)",
   "MAX_ATTEMPTS=$(Prop $pin 'max_attempts' 5)",
   "HEARTBEAT_INTERVAL=$(Prop $pin 'heartbeat_interval' 180)",
   "RETRY_BACKOFF=$(Prop $pin 'retry_backoff' 30)",
   "DEGRADED_SLEEP=$(Prop $pin 'degraded_sleep' 600)"
-) -join "`n"
+)
+$conf = ($confLines | Where-Object { $null -ne $_ -and $_ -ne '' }) -join "`n"
 # code/ (extracted content-addressed trees, PROTOCOL section 1.3) replaced repos/ when the workers
 # stopped using git. hosts/ is created here so the very first status write has somewhere to land.
 Step "create $Local\{setup,logs,state,work,code} and $hostsDir; copy $setupSrc\* -> $setupDst" {
@@ -512,8 +576,11 @@ function Build-HostRecord {
   return [ordered]@{
     schema = 1; worker_id = $workerId; hostname = $hostName; cpu = $cpuName
     cores_physical = $coresPhys; cores_logical = $coresLog; ram_gb = $ramGb
-    slots = $Slots; threads = $Threads; julia_version = $juliaVer
+    slots = $Slots; threads = $Threads; julia_version = $juliaVer; julia_bin = $juliaBinMsys
+    task_priority = $TaskPriority; disable_ecoqos = [bool]$DisableEcoQos
     python = $python; python_version = $pythonVersion
+    reaper_enabled = [bool]$Reaper
+    reaper_claim_timeout = if ($Reaper) { $ReaperClaimTimeout } else { $null }
     registered_utc = (Prop $existing 'registered_utc' $now); updated_utc = $now
     bootstrap_user = $userName; root = $Root; spool = $Spool; local = $Local; bash = $bash
     nas_test = $nasTest
@@ -556,18 +623,51 @@ for ($k = 0; $k -lt $Slots; $k++) {
     $act = New-ScheduledTaskAction -Execute $bash -Argument $argStr
     $trg = New-ScheduledTaskTrigger -AtStartup
     $trg.Delay = $delay
-    # -Priority 7 (BelowNormal) is the scheduler default; it is stated here as a decision, not left
-    # to chance: an interactive user of the PC must always win against an 8-slot fleet of julia.
+    # Priority 7 (BelowNormal) is the fleet default and an intentional decision: an interactive user
+    # must win. D317-10 may use 5 only as one cell of the preregistered 2x2 experiment.
     $set = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
       -RunOnlyIfIdle:$false -MultipleInstances IgnoreNew -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
-      -Priority 7
+      -Priority $TaskPriority
     Register-JobqTask $name $act $trg $set "jobq worker slot $k (bootstrap.ps1)"
     Start-ScheduledTask -TaskName $name
     Say "  $name state=$((Get-ScheduledTask -TaskName $name).State)"
   }
 }
 
-$plainPw = $null                                       # the decoded password dies with the last Register-JobqTask above
+# ---------------------------------------------------------------- step 4b: optional reaper task (at most two fleet-wide)
+# Password logon is mandatory: S4U has no network credentials and cannot read the SMB spool. The
+# action intentionally has no `>> reaper.log`; reaper.sh already writes that file itself.
+if ($Reaper) {
+  Remove-JobqTasks @($ReaperTask)                      # stop the old Interactive task and its bash descendants first
+  $reaperSh = ConvertTo-MsysPath (Join-Path $Local 'setup\reaper.sh')
+  $reaperCmd = 'JOBQ_ROOT=' + (ConvertTo-ShWord (ConvertTo-MsysPath $Root)) +
+               ' JOBQ_SPOOL=' + (ConvertTo-ShWord $spoolMsys) +
+               ' JOBQ_LOCAL=' + (ConvertTo-ShWord $localMsys) +
+               " JOBQ_CLAIM_TIMEOUT=$ReaperClaimTimeout " + (ConvertTo-ShWord $reaperSh)
+  $reaperArgs = "-lc `"$reaperCmd`""
+  Step "register $ReaperTask = `"$bash`" $reaperArgs (Password; AtStartup PT30S; Hidden; claim_timeout=$ReaperClaimTimeout; restart 999 x PT1M) + Start-ScheduledTask" {
+    $act = New-ScheduledTaskAction -Execute $bash -Argument $reaperArgs
+    $trg = New-ScheduledTaskTrigger -AtStartup
+    $trg.Delay = 'PT30S'
+    $set = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+      -RunOnlyIfIdle:$false -MultipleInstances IgnoreNew -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) `
+      -Priority 7 -Hidden
+    Register-JobqTask $ReaperTask $act $trg $set 'jobq claim reaper (bootstrap.ps1; fleet maximum 2)'
+    Start-ScheduledTask -TaskName $ReaperTask
+    $registered = Get-ScheduledTask -TaskName $ReaperTask
+    if ([string]$registered.Principal.LogonType -ne 'Password' -or -not [bool]$registered.Settings.Hidden -or
+        [string]$registered.Triggers[0].CimClass.CimClassName -ne 'MSFT_TaskBootTrigger' -or
+        [string]$registered.Actions[0].Arguments -match '>>') {
+      throw "$ReaperTask registration audit failed (need Password + Hidden + BootTrigger and no external log redirect)"
+    }
+    Say "  $ReaperTask state=$($registered.State) logon=$($registered.Principal.LogonType) hidden=$($registered.Settings.Hidden)"
+  }
+} else {
+  # An explicit registration without -Reaper means this host is not one of the fleet's maximum two.
+  Remove-JobqTasks @($ReaperTask)
+}
+
+$plainPw = $null                                       # the decoded password dies with the last task registration above
 
 # ---------------------------------------------------------------- step 5: power
 Step 'powercfg /change standby-timeout-ac 0 ; powercfg /hibernate off' {

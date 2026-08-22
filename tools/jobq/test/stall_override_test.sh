@@ -69,9 +69,15 @@ if sub == "plan"
     println("JOBQ_WATCH_PATH='", out, "'")   # ★ 1 バイトも書かないので mtime は永久に動かない
     println("JOBQ_PERMANENT_RE=''")
     println("JOBQ_PERMANENT_EXIT=''")
-    println("JOBQ_STALL_SECONDS='20'")       # ★ 票ごとの値。worker.conf は 600
-    println("JOBQ_MAX_ATTEMPTS='2'")         # ★ 票ごとの値。worker.conf は 9
-    println("JOBQ_ARGV=('bash' '-c' 'sleep 300')")
+    if get(ENV, "JOBQ_TEST_EXIT125", "") == "1"
+        println("JOBQ_STALL_SECONDS='600'")
+        println("JOBQ_MAX_ATTEMPTS='2'")
+        println("JOBQ_ARGV=('julia' '+1.11.9' '--startup-file=no' '-e' 'exit(125)')")
+    else
+        println("JOBQ_STALL_SECONDS='20'")       # ★ 票ごとの値。worker.conf は 600
+        println("JOBQ_MAX_ATTEMPTS='2'")         # ★ 票ごとの値。worker.conf は 9
+        println("JOBQ_ARGV=('julia' '+1.11.9' '--startup-file=no' '-e' 'sleep(300)')")
+    end
     exit(0)
 end
 exit(1)   # verify などここでは使わない
@@ -132,6 +138,24 @@ else
   nfail=$((nfail+1)); printf 'FAIL  ★ 再試行上限が票の値 2 (receipt が無い)\n'
 fi
 
+kill_tree "$wpid"; wait "$wpid" 2>/dev/null
+
+# --- 本題 4: exit 125 は task 自身も返せる。HighQoS helper 専用コードと誤認しない ----------------
+# 旧実装は DISABLE_ECOQOS=0 でも最初の exit 125 を即「host policy」で恒久 FAIL にした。
+sed 's/"campaign": "jobq_selftest"/"campaign": "jobq_exit125"/' \
+  "$here/jobq_selftest_000001.e001.json" > "$SPOOL/queue/jobq_exit125_000001.e001.json"
+check "exit125 用の票を置いた" test -f "$SPOOL/queue/jobq_exit125_000001.e001.json"
+JOBQ_TEST_EXIT125=1 JOBQ_MAX_IDLE_LOOPS=90 bash "$LOCAL/setup/worker.sh" 0 > "$LOGD/exit125.log" 2>&1 &
+wpid=$!
+for i in $(seq 1 60); do [ "$(nfiles "$SPOOL/failed/jobq_exit125" '*.json')" = 1 ] && break; sleep 1; done
+check "task exit 125 でも attempt 2 まで再試行する" grep -q 'RUN attempt 2 ' "$LOGD/exit125.log"
+rc_file=$(find "$SPOOL/failed/jobq_exit125" -maxdepth 1 -type f -name '*.json' 2>/dev/null | head -1)
+if [ -n "$rc_file" ]; then
+  check "task exit 125 は通常の max_attempts FAIL" grep -q 'max_attempts (2) exceeded' "$rc_file"
+  check "task exit 125 を HighQoS host policy と誤分類しない" bash -c "! grep -q 'host policy' '$rc_file'"
+else
+  nfail=$((nfail+3)); printf 'FAIL  task exit 125 の receipt が無い (3 checks)\n'
+fi
 kill_tree "$wpid"; wait "$wpid" 2>/dev/null
 printf '\nstall_override_test: PASS %d / FAIL %d\n' "$npass" "$nfail"
 [ "$nfail" -eq 0 ]

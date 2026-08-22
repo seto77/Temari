@@ -5,20 +5,20 @@
 #   SPOOL = --spool > $JOBQ_SPOOL > $ROOT/spool                                  ← 機械が書くもの全部
 #
 #   共有の直下 (人が見る場所) へ 3 ファイル: register.cmd / unregister.cmd / README.txt (**CRLF**)
-#   ROOT/setup/ へ 8 ファイル (**LF**): PIN.json agreement_check.py bootstrap.ps1 nastest.ps1 queuectl.jl
-#                                       reaper.sh worker.conf.template worker.sh
+#   ROOT/setup/ へ 9 ファイル (**LF**): PIN.json agreement_check.py bootstrap.ps1 disable_ecoqos.ps1 nastest.ps1
+#                                       queuectl.jl reaper.sh worker.conf.template worker.sh
 #   ROOT/code/ は空のまま作る (中身は pack_code.sh が入れる。§1.4)
 #   SPOOL/ の骨組み: queue queue/.tmp running results done failed control hosts campaigns
 #
 #   - どれかが無い・改行が規則どおりでない → 何もせず exit 1
 #     (ワーカーは SETUP_SHA256 で同期するので、欠けた組・壊れた組を配らない)
 #   - 各ファイルは .tmp.<name>.<pid> に書いてから rename。宛先を読み直して hash を照合する
-#   - SETUP_SHA256 は**最後に**書く。覆うのは setup/ の 8 ファイルだけ (code/ と spool/ は含めない)
+#   - SETUP_SHA256 は**最後に**書く。覆うのは setup/ の 9 ファイルだけ (code/ と spool/ は含めない)
 #   - ROOT 自体は作らない (共有が見えていない状態で /c 直下に掘らないため)
 #   テスト用: JOBQ_SETUP_SRC=<dir> で配布元を差し替えられる (既定は本スクリプトのあるディレクトリ)
 set -u
 
-SETUP_FILES="PIN.json agreement_check.py bootstrap.ps1 nastest.ps1 queuectl.jl reaper.sh worker.conf.template worker.sh"  # LC_ALL=C 名前順
+SETUP_FILES="PIN.json agreement_check.py bootstrap.ps1 disable_ecoqos.ps1 nastest.ps1 queuectl.jl reaper.sh worker.conf.template worker.sh"  # LC_ALL=C 名前順
 ROOT_FILES="register.cmd:register.cmd unregister.cmd:unregister.cmd share_README.txt:README.txt"       # src:dst (CRLF)
 SPOOL_DIRS="queue queue/.tmp running results done failed control hosts campaigns"
 OBSOLETE_DIRS="leases running/.reaping"   # 前版の名残 (2026-08-21 に廃止。消さずに知らせるだけ)

@@ -142,7 +142,7 @@ for f in register.cmd unregister.cmd README.txt; do
   check "ROOT/$f がある" test -f "$ROOT/$f"
   check "ROOT/$f は CRLF (cmd.exe と Notepad が読む)" has_cr "$ROOT/$f"
 done
-for f in worker.sh reaper.sh bootstrap.ps1 queuectl.jl nastest.ps1 worker.conf.template PIN.json; do
+for f in worker.sh reaper.sh bootstrap.ps1 disable_ecoqos.ps1 agreement_check.py queuectl.jl nastest.ps1 worker.conf.template PIN.json; do
   check "setup/$f がある" test -f "$ROOT/setup/$f"
   [ -f "$ROOT/setup/$f" ] && check "setup/$f は LF (bash が読む)" eq "$(cr_bytes "$ROOT/setup/$f")" 0
 done
@@ -150,8 +150,8 @@ check "setup/SETUP_SHA256 がある" test -f "$ROOT/setup/SETUP_SHA256"
 check "SETUP_SHA256 が setup/ の中身と一致" bash -c "cd '$ROOT/setup' && sha256sum -c --quiet SETUP_SHA256"
 check "SETUP_SHA256 は setup/ だけを覆う (code/ spool/ を含まない)" \
       bash -c "! grep -qE '(^| )(code|spool)/' '$ROOT/setup/SETUP_SHA256'"
-check "SETUP_SHA256 が setup/ の 8 ファイルを過不足なく挙げている" \
-      eq "$(setup_sha_list "$ROOT/setup/SETUP_SHA256")" "PIN.json agreement_check.py bootstrap.ps1 nastest.ps1 queuectl.jl reaper.sh worker.conf.template worker.sh "
+check "SETUP_SHA256 が setup/ の 9 ファイルを過不足なく挙げている" \
+      eq "$(setup_sha_list "$ROOT/setup/SETUP_SHA256")" "PIN.json agreement_check.py bootstrap.ps1 disable_ecoqos.ps1 nastest.ps1 queuectl.jl reaper.sh worker.conf.template worker.sh "
 for d in queue queue/.tmp running results done failed control hosts campaigns; do
   check "spool/$d/ がある" test -d "$SPOOL/$d"
 done
@@ -320,7 +320,7 @@ check "成果物の sidecar manifest がある" test -f "$RC/temari_e2e_code_lan
 check "done receipt がある" eq "$(nfiles "$SPOOL/done/temari_e2e_code" 'temari_e2e_code_000001.e001.*.json')" 1
 
 # C-2. 同名 publish の byte mismatch は code tree 内 checker で判定する。2 事例を 1 assertion ずつに
-# まとめ、基準 182 件 + 2 = PASS 184 を保つ。
+# まとめ、配置検査を含む基準 186 件 + 2 = PASS 188 を保つ。
 seed_publish_collision() { # campaign
   local c=$1 r f sha
   r="$SPOOL/results/$c"

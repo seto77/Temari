@@ -34,14 +34,14 @@ ROOT/
   register.cmd               ダブルクリックでこの PC を登録 (batch, CRLF)
   unregister.cmd             ダブルクリックで登録解除 (batch, CRLF)
   README.txt                 数行の案内 (Notepad で開く。CRLF)
-  setup/                     worker.sh reaper.sh bootstrap.ps1 queuectl.jl nastest.ps1
-                             worker.conf.template PIN.json agreement_check.py
+  setup/                     worker.sh reaper.sh bootstrap.ps1 disable_ecoqos.ps1
+                             queuectl.jl nastest.ps1 worker.conf.template PIN.json agreement_check.py
                              SETUP_SHA256 (setup/ 内の全ファイルの sha256。deploy_setup.sh が最後に書く)
   code/                      内容アドレスのコード書庫 (§1.4)
   spool/                     機械が書くもの全部 (§1.2)
 ```
 
-`setup/` に置くのは**登録とワーカー運用に使う 8 ファイル**だけ。`agreement_check.py` の setup 版は
+`setup/` に置くのは**登録とワーカー運用に使う 9 ファイル**だけ。`agreement_check.py` の setup 版は
 登録時の Python 自己検査だけに使い、publish の判定には使わない (§5.4・§10.2)。`pack_code.sh` と
 `deploy_setup.sh` は発行側 PC の repo (`tools/jobq/`) から走らせる道具なので配らない。`SETUP_SHA256` は `setup/` だけを覆う
 (`code/` と `spool/` は含めない)。
@@ -137,12 +137,12 @@ tar -C <tree> --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric
 - **骨組み**を掘る: `ROOT/{setup, code, spool}` と
   `spool/{queue, queue/.tmp, running, results, done, failed, control, hosts, campaigns}`。
   `ROOT` 自体は作らない (共有が見えていないときに `/c` 直下へ掘らないため)。
-- `setup/` へ 8 ファイル (`worker.sh` `reaper.sh` `bootstrap.ps1` `queuectl.jl` `nastest.ps1`
-  `worker.conf.template` `PIN.json` `agreement_check.py`) を tmp + rename で置き、宛先を読み直して hash を照合してから、
+- `setup/` へ 9 ファイル (`worker.sh` `reaper.sh` `bootstrap.ps1` `disable_ecoqos.ps1` `queuectl.jl`
+  `nastest.ps1` `worker.conf.template` `PIN.json` `agreement_check.py`) を tmp + rename で置き、宛先を読み直して hash を照合してから、
   **最後に** `SETUP_SHA256` を書く (同期中のワーカーが半端な組を掴んでも、hash 不一致で次のループに直る)。
   `SETUP_SHA256` が覆うのは **`setup/` だけ** (`code/` と `spool/` は含めない)。
 - 共有直下の `register.cmd` / `unregister.cmd` / `README.txt` も置く。**この 3 つだけ CRLF**、
-  `setup/` の 8 ファイルは LF。配布元に CRLF が混ざった LF ファイルがあれば**何も配らずに終了**する。
+  `setup/` の 9 ファイルは LF。配布元に CRLF が混ざった LF ファイルがあれば**何も配らずに終了**する。
 - `code/` は空のまま作る (中身は `pack_code.sh` が入れる。§1.4)。
 
 ## 2. 識別子 (正規表現はそのまま実装に使う)
@@ -452,7 +452,7 @@ JOBQ_PERMANENT_EXIT=''          # 空白区切り。⚠ 2026-08-21 に全 task �
 JOBQ_ARGV=(julia +1.11.9 --project=. -t 3 --gcthreads=1 src/gen_production.jl --profile v6_high --tags M5 --lane 3/8 --out /c/jobq/work/…/run)
 ```
 
-### 6.2 `verify <ticket.json> --out <file|dir> --log <run.N.log> --manifest-dir <dir> [--host H --worker W --owner O --attempt N --cpu "…" --threads T --started-utc … --finished-utc …]`
+### 6.2 `verify <ticket.json> --out <file|dir> --log <run.N.log> --manifest-dir <dir> [--host H --worker W --owner O --attempt N --cpu "…" --threads T --task-priority N --ecoqos-disabled 0|1 --started-utc … --finished-utc …]`
 
 task ごとの検証 (§6.4) に合格したら**成果物 1 個につき 1 個の manifest** (§8) を `--manifest-dir` の下に
 `<outname>.manifest.json` として書き、標準出力に
@@ -751,7 +751,10 @@ BLAS スレッド数という**正当に PC ごとに違う値**を持つ。同�
 `hosts/<worker_id>-s<slot>.status.json` が ≤ `heartbeat_interval` (既定 180 s) ごとに書かれている以上、別の lease ファイルは要らない。
 ⇒ `leases/` とワーカー内の lease サブシェル、その GC 規則、append と rename の使い分けを**全部やめた**。
 
-- 周期 `reaper_interval` (300 s)。どの PC で動いてもよい (通常は発行側の PC。多重起動は無害だが 1 つにする)。
+- 周期 `reaper_interval` (300 s)。`bootstrap.ps1 -Reaper` で **Password logon / Hidden / AtStartup
+  (30 s 遅延)** の `jobq-reaper` として登録する。SMB 資格情報を使えない S4U や、ログオフ・窓を閉じると
+  死ぬ Interactive task は不可。共有台帳の `reaper_enabled=true` を監査し、**フリート最大 2 台**。
+  Deep では action の `JOBQ_CLAIM_TIMEOUT=1800` が PIN の旧既定 900 s を上書きする。
 - 各 `running/<base>.<owner>.json` について、`owner` から `worker_id` と `slot` を取り出し
   `hosts/<worker_id>-s<slot>.status.json` を読む。**この claim が生きている**とは:
   1. status ファイルが読める、かつ
@@ -761,14 +764,14 @@ BLAS スレッド数という**正当に PC ごとに違う値**を持つ。同�
   1〜3 のどれかが崩れていれば (ファイルが無い場合も含めて) **沈黙**として扱う。
   ⚠ **status は 1 回の pass で 1 回だけ読み、同じ本文から 2〜4 の値を取る**。鍵ごとに読み直すと
   worker の tmp+rename と重なって「`boot_seq` は旧世代・`base` は新世代」という混ざった観測ができる。
-- ⚠ **判定不能の倒し方は worker と reaper で逆向きで、それは意図的**。worker の `slot_alive` は
-  「読めない = 生きている」に倒す (誤って「死んでいる」と言えば同じ work dir で Julia が 2 本走る)。
-  reaper は「読めない = 沈黙」に倒す (こちらも「生きている」に倒すと、共有が不安定な間だけ
-  死んだスロットの claim が永久に回収されなくなる)。reaper 側の誤りは `claim_timeout` × 2 strikes
-  という長い窓で抑えてあり、回収しても epoch+1 で再投入されるだけなので、非対称のままにする。
+- ⚠ **判定不能の倒し方**: worker の `slot_alive` は「読めない = 生きている」に倒す (誤って
+  「死んでいる」と言えば同じ work dir で Julia が 2 本走る)。reaper は、status が**無い**、または読めるが
+  owner/base/tick が合わない場合だけ沈黙として数える。status が存在するのに読めない、または `hosts/` 全体が
+  読めない場合は共有障害として猶予を再武装する。障害と死亡を区別できない pass で回収してはならない。
 - 観測状態は `LOCAL/state/reaper.tsv` に `key(base)  owner  tick  last_change_local_epoch  strikes`。
   生きていれば `last_change` を**自分の `date +%s`** に更新し strikes = 0。沈黙のまま
-  `now - last_change ≥ claim_timeout` (900 s) なら strikes +1。**owner が変われば別の claim** なので測り直す。
+  `now - last_change ≥ claim_timeout` (PIN 既定 900 s、bootstrap 登録の reaper は 1800 s) なら strikes +1。
+  **owner が変われば別の claim** なので測り直す。
 - **strikes ≥ 2** (= 2 回連続の確認) かつ `done/<c>/<base>.*` も `failed/<c>/<base>.*` (直下) も無い → REAP。
 - ⚠⚠ **`hosts/` が丸ごと読めない pass では strike を積まず REAP もしない** (WARN を出す)。
   **死んだワーカーの status は読めるが古いだけ**なのに対し、**読めない**のは台帳側の障害の署名である
@@ -790,6 +793,9 @@ BLAS スレッド数という**正当に PC ごとに違う値**を持つ。同�
   一斉回収が起きるだけになる。(a) で止まったままになる状況は「`hosts/` が読めず書けもしない」に限られ、
   それは回収してはいけない状況そのものである。
   ⚠ それでも**静かに効かせず必ず WARN を出す**。
+  共有全体または「存在する個別 status」が読めなかった pass は、その claim の `last_change` を現在へ戻し
+  strikes を 0 にする。長い NAS 障害の復旧直後に、障害前の古い無音時間を引き継いで即 STRIKE → 次 pass で
+  REAP するのを防ぐ。status が存在しない場合や、読めるが owner/base が違う場合は通常どおり沈黙。
 - ⚠ **時計**: 沈黙の長さは reaper 自身の `date +%s` で測る。**戻り**を観測したら (`now < last_change`)
   測り直す (戻り自体は安全側だが、放置すると跳んだ幅のあいだ回収が止まる)。**前進は塞いでいない** —
   既知の限界として、`+Δ` 秒の跳躍は「沈黙 900 s + 1 周期」で回収する規則を最短「沈黙 600 s」まで
@@ -840,7 +846,7 @@ BLAS スレッド数という**正当に PC ごとに違う値**を持つ。同�
   "code_sha256": "…", "code_commit": "…",
   "outname": "F_M5_Z30.json", "result_sha256": "…", "ticket_sha256": "…",
   "worker_id": "…", "owner": "…", "hostname": "…", "cpu": "AMD Ryzen 9 9950X 16-Core Processor",
-  "julia": "1.11.9", "threads": 3, "attempt": 1,
+  "julia": "1.11.9", "threads": 3, "task_priority": 7, "ecoqos_disabled": false, "attempt": 1,
   "started_utc": "…", "finished_utc": "…",
   "task_info": { "source_fp": "ce058cce4fe9b31d", "channels": ["M5_Z30"], "spec_sha256": "749fadc5…" } }
 ```
@@ -904,6 +910,9 @@ WORKER_ID=seto-desktop-3f9a1c2b
 SLOTS=8
 THREADS=2
 PYTHON='/c/Program Files/Python314/python.exe'
+TASK_PRIORITY=7
+DISABLE_ECOQOS=0
+#JOBQ_JULIA_BIN='/c/Program Files/WindowsApps/JuliaComputingInc.Julia_<ver>_x64__5z4q23t4ga8jg/Julia/julialauncher.exe'
 STALL_SECONDS=7200
 MAX_ATTEMPTS=5
 STATUS_INTERVAL=60
@@ -919,6 +928,13 @@ DEGRADED_SLEEP=600
   対話シェルと異なるため `python` だけを書かない。テスト時の上書きは `JOBQ_PYTHON_BIN`。
   このキーが無い旧 worker.conf でも通常の票は止めないが、バイト不一致の publish は判定不能として FAIL する。
   bootstrap を再実行して再登録すれば直る。
+- `JOBQ_JULIA_BIN` は任意の絶対ランチャ。plan / 本計算 / verify の 3 箇所すべてで同じ実体を使う。
+  Store の AppExecLink を Git Bash が起動できないホストだけ設定し、bootstrap は `+<version> --version` を
+  Git Bash から実行してから保存する。既存の quoted 値は再登録時も保持する。
+- `TASK_PRIORITY` は Task Scheduler に登録した 0..10 の値 (フリート既定 7)。`DISABLE_ECOQOS=1` は
+  D317-10 の事前登録 2×2 実験専用で、生成直後の launcher と実 `julia.exe` に HighQoS を設定し、
+  `GetProcessInformation` で `EXECUTION_SPEED` が明示無効になったことを読み戻せなければその票を恒久 FAIL にする。
+  実際の 2 値は sidecar の `task_priority` / `ecoqos_disabled` に残す。通常ホストは 7 / 0 のまま。
 - ⚠ 旧名: `STATUS_INTERVAL` は前版の `LEASE_INTERVAL`、PIN の `claim_timeout` は前版の `lease_timeout`。
   lease ファイルを廃止したので名前を実体に合わせた。`lease_gc_days` は**消えた**。
 
@@ -957,7 +973,7 @@ cmd.exe が読むので**必ず CRLF**。中身の規則:
 
 ### 10.2 `bootstrap.ps1`
 
-`powershell -ExecutionPolicy Bypass -File \\10.31.108.5\jobq\setup\bootstrap.ps1 [-Slots N] [-Threads T] [-Remove] [-DryRun] [-Root R] [-Spool S] [-Local L] [-User DOMAIN\name]`
+`powershell -ExecutionPolicy Bypass -File \\10.31.108.5\jobq\setup\bootstrap.ps1 [-Slots N] [-Threads T] [-TaskPriority 0..10] [-DisableEcoQos] [-JuliaBin P] [-Reaper] [-Remove] [-DryRun] [-Root R] [-Spool S] [-Local L] [-User DOMAIN\name]`
 
 - `-Root` は**共有ルート**、spool は `$Root\spool` (`-Spool` で上書き)。末尾の `\` は落とす
   (タブ補完が付ける `\` が引用符を壊す)。
@@ -988,7 +1004,8 @@ cmd.exe が読むので**必ず CRLF**。中身の規則:
    `worker.conf` ごとディスクを複製したとき**で、そのとき bootstrap は既存の `WORKER_ID` を保持する。
    ⇒ **PC を複製して台数を増やすなら、複製先で `worker.conf` を消してから登録する** (新しい id が振られる)。
    台帳 `hosts/<worker_id>.json` の `hostname` が知らないうちに変わっていたら、この事故を疑うこと。
-   slots = `max(1, floor(物理コア × slot_fraction / threads))`。
+   slots = `max(1, floor(物理コア × slot_fraction / threads))`。`-JuliaBin` があれば Git Bash から指定版を
+   起動確認し、空白を保つ shell quote 付きで worker.conf へ書く。既存値は再登録で保持する。
 3. **NAS 試験タスク** `jobq-nastest` を登録して即実行 (タスク実行アカウント = 現在のユーザー、パスワード保存、
    ログオン有無に関わらず実行)。中身は配布された `LOCAL/setup/nastest.ps1`: `whoami`、`$env:USERPROFILE`、
    `Test-Path ROOT`、`SPOOL/hosts/` に小ファイルを作成 → rename → 読取 → 削除。結果を `LOCAL/logs/nastest.log` と
@@ -998,19 +1015,27 @@ cmd.exe が読むので**必ず CRLF**。中身の規則:
    動作 = `"C:\Program Files\Git\bin\bash.exe" -lc "/c/jobq/setup/worker.sh <k>"`
    (`LOCAL` が既定でなければ `JOBQ_LOCAL=…` を前置)、設定: ExecutionTimeLimit **PT0S**、
    DisallowStartIfOnBatteries **false**、StopIfGoingOnBatteries **false**、RunOnlyIfIdle **false**、
-   MultipleInstances **IgnoreNew**、StartWhenAvailable **true**、RestartOnFailure **PT1M × 999**。
+   MultipleInstances **IgnoreNew**、StartWhenAvailable **true**、RestartOnFailure **PT1M × 999**、
+   Priority = `-TaskPriority` (既定 7)。`-DisableEcoQos` は D317-10 の 2×2 実験時だけ使う。
    登録後に `Start-ScheduledTask`。
    ⚠ **再実行は「その場で定義を書き換える」** (`Register-ScheduledTask -Force`)。先に停止すると
    `worker.sh` と julia が孤児になり (スケジューラが終わらせるのは `bin\bash.exe` だけ)、
    新しいワーカーが同じ work dir へ RECOVER してしまう。`slots` を減らして余った番号のタスクだけは
    **プロセス木ごと**停止してから登録解除する。
-5. `powercfg /change standby-timeout-ac 0`、`powercfg /hibernate off`。
-6. `hosts/<worker_id>.json` に台帳: worker_id, hostname, cpu, cores_physical, cores_logical, ram_gb, slots,
-   threads, julia_version, python, python_version, registered_utc, updated_utc, bootstrap_user, root, spool, local,
-   bash, nas_test。`python` は上で起動確認した絶対 Windows パスで、同じ実体の MSYS パスを worker.conf に書く。
+5. `-Reaper` のときだけ、旧 `jobq-reaper` とその bash 木を止めてから Password logon / Hidden /
+   AtStartup PT30S / PT0S limit / restart PT1M × 999 で再登録する。action は
+   `JOBQ_CLAIM_TIMEOUT=1800` を持ち、reaper.sh 自身がログを書くため外部の `>>` は付けない。
+   非退役台帳の `reaper_enabled=true` を先に読み、他に 2 台あれば fail-closed。`-Reaper` 無しの登録は
+   このホストの旧 reaper を削除する。
+6. `powercfg /change standby-timeout-ac 0`、`powercfg /hibernate off`。
+7. `hosts/<worker_id>.json` に台帳: worker_id, hostname, cpu, cores_physical, cores_logical, ram_gb, slots,
+   threads, julia_version, julia_bin, task_priority, disable_ecoqos, python, python_version, reaper_enabled,
+   reaper_claim_timeout, registered_utc, updated_utc, bootstrap_user, root, spool, local, bash, nas_test。
+   `python` は上で起動確認した絶対 Windows パスで、同じ実体の MSYS パスを worker.conf に書く。
    ⚠ **既存の `registered_utc` は必ず引き継ぐ**。⚠ `gates` の欄は**無い** (2026-08-21 に廃止。§6.5)。
    `cpu` は**来歴**として残す — 混成来歴の集約 (§6.5.4) に使う欄であって、参加の可否には使わない。
-7. 再実行 = 更新 (冪等)。`-Remove` = 全 jobq タスクをプロセス木ごと停止して登録解除 + 台帳に `retired_utc`。
+8. 再実行 = 更新 (冪等)。`-Remove` = worker / nastest / reaper をプロセス木ごと停止して登録解除 + 台帳に
+   `retired_utc` と `reaper_enabled=false`。
    `-DryRun` = 何も変更せず、やることを表示 (パスワードも聞かない)。
 
 ## 11. Windows / MSYS の決まりと実測値

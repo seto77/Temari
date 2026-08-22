@@ -155,7 +155,7 @@ if sub == "plan"
     println("JOBQ_PERMANENT_EXIT=''")
     println("JOBQ_STALL_SECONDS='600'")     # 停滞では死なない長さ (見たいのは負荷制御の影響だけ)
     println("JOBQ_MAX_ATTEMPTS='1'")
-    println("JOBQ_ARGV=('bash' '-c' 'sleep 30')")
+    println("JOBQ_ARGV=('julia' '+1.11.9' '--startup-file=no' '-e' 'sleep(30)')")
     exit(0)
 end
 exit(1)
@@ -183,7 +183,12 @@ if [ -n "$rc_file" ]; then
 else
   nfail=$((nfail+1)); printf 'FAIL  C2 receipt が無い\n'
 fi
-check "C3 票を終えた後に立ち下がりが効く (standby を名乗る)" \
+for i in $(seq 1 10); do
+  { grep -q 'standby' "$LOGD/wc.log" 2>/dev/null ||
+    grep -l '"state": "standby"' "$SPOOL/hosts"/*.status.json >/dev/null 2>&1; } && break
+  sleep 1
+done
+check "C3 票を終えた後に立ち下がりが効く (standby を名乗る; 最大 10 s 待つ)" \
       bash -c "grep -q 'standby' '$LOGD/wc.log' || ls '$SPOOL/hosts'/*.status.json >/dev/null 2>&1 && grep -l '\"state\": \"standby\"' '$SPOOL/hosts'/*.status.json >/dev/null 2>&1"
 cleanup2; trap - EXIT
 cleanup; trap - EXIT
