@@ -1,3 +1,5 @@
+/.gitattributes text eol=lf
+
 # 260820Cl: canonical JSON (spec と E0 目録、registry) は生バイトの SHA-256 で承認される — checkout で改行を変換してはいけない
 # (autocrlf=true の Windows で worktree を切ると CRLF になり、承認 hash と一致しなくなる。2026-08-20 の起動時に実際に起きた)
 spec/*.json -text
@@ -9,3 +11,12 @@ tools/jobq/** text eol=lf
 tools/jobq_rows_sigma.jl text eol=lf
 tools/jobq/*.cmd text eol=crlf
 tools/jobq/share_README.txt text eol=crlf
+
+# 260823Cl: Deep / atom-cache のコード・試験・運用メモも Windows で LF を維持する。
+docs/notes/deep_run_plan_2026-08-22.md text eol=lf
+src/l5_channel.jl text eol=lf
+tools/cache_race_test.jl text eol=lf
+tools/cache_wiring_test.jl text eol=lf
+tools/cert_v2_dedup_test.py text eol=lf
+tools/cert_v2_report.py text eol=lf
+tools/certify_sigma_v2.jl text eol=lf

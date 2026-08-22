@@ -479,6 +479,11 @@ const _cache = Dict{Tuple,Any}()
 # 旧 v1 ファイルは読まれずに残る (無害。消したければ手で消す)
 # 260807Cl: KLI の 3 フィールド (exchange / vx / z_asym) 追加で v4 へ。
 const CACHE_SCHEMA = "v4"
+# Publication protocol epoch.  This belongs in the filename only: changing it
+# must not alter cache_provenance or generated dataset metadata.  `fw1` keeps
+# new hardlink/first-wins writers in a disjoint namespace while an older
+# mv(force=true) process may still be draining during fleet rollout.
+const CACHE_PUBLICATION_EPOCH = "fw1"
 # 260809Cl: スキーマを手で上げ忘れても、SCF・束縛解へ入るソースが変われば
 # 自動的に別ファイルへ分かれる。コメントだけの変更でも安全側に失効する。
 const CACHE_FINGERPRINT_FILES = ("l0_numerics.jl", "l1_atomic.jl")
@@ -506,9 +511,46 @@ const CACHE_SOURCE_FINGERPRINT = cache_source_fingerprint()
 const CACHE_DIR = "atom_cache"
 cache_file(key::Tuple) =
     joinpath(CACHE_DIR,
-             "atom_cache_$(CACHE_SCHEMA)_$(CACHE_SOURCE_FINGERPRINT)_" *
+             "atom_cache_$(CACHE_SCHEMA)_$(CACHE_PUBLICATION_EPOCH)_$(CACHE_SOURCE_FINGERPRINT)_" *
              "jl$(VERSION.major)$(VERSION.minor)_" *
              join(string.(key), "_") * ".jls")
+
+# A cache file is immutable once published.  Publication therefore uses a
+# same-directory hard link: creating the destination link is one atomic
+# create-if-absent operation on Windows as well as POSIX filesystems.  In
+# particular, do not replace this with `mv(...; force=true)`: Base.mv removes
+# the destination before renaming and two Julia processes can overwrite one
+# another (or expose a temporary absence to readers).
+const CACHE_REPAIR_WAIT_S = 30.0
+const CACHE_REPAIR_POLL_S = 0.05
+# Repair itself only renames/links already-built bytes and should take well
+# under a second.  Five minutes plus same-host PID liveness is deliberately
+# conservative before reclaiming a lock orphaned by process termination.
+const CACHE_REPAIR_STALE_S = 300.0
+
+"Short stable id for auxiliary names (keeps already-long cache keys below path limits)."
+cache_aux_id(fname::String) = bytes2hex(sha256(codeunits(basename(fname))))[1:16]
+cache_repair_lock(fname::String) =
+    joinpath(dirname(fname), ".atom-cache-$(cache_aux_id(fname)).repair.lock")
+cache_repair_owner(lockdir::String) = joinpath(lockdir, "owner.txt")
+cache_reap_claim(lockdir::String) = lockdir * ".reap.claim"
+cache_tmp_file(fname::String) =
+    joinpath(dirname(fname), ".atom-cache-$(cache_aux_id(fname)).tmp." *
+             "$(getpid()).$(Threads.threadid()).$(time_ns())")
+
+function cache_remove_tmp(tmp::String)
+    isempty(tmp) && return
+    for attempt in 1:10
+        !isfile(tmp) && return
+        try
+            rm(tmp; force=true)
+            return
+        catch
+            attempt < 10 && sleep(0.01)
+        end
+    end
+    @printf("WARN: キャッシュ一時ファイル %s を除去できません\n", tmp)
+end
 
 cache_provenance() = Dict{String,Any}(
     "schema" => CACHE_SCHEMA,
@@ -530,7 +572,59 @@ function cache_envelope(key::Tuple, obj)
             payload=payload)
 end
 
-"キャッシュ包を検証してから payload を復元する。"
+"Recognized cache keys get a cheap semantic check in addition to byte integrity."
+function cache_validate_object(key::Tuple, obj)
+    isempty(key) && error("empty cache key")
+    kind = key[1]
+    if kind in ("n", "nrel", "i", "irel")
+        obj isa SCFAtom || error("SCF cache object type mismatch")
+        is_ion = kind in ("i", "irel")
+        length(key) == (is_ion ? 6 : 4) || error("SCF cache key shape mismatch")
+        z = key[2]
+        z isa Int || error("SCF cache Z is not Int")
+        obj.z == z || error("SCF cache Z mismatch")
+        obj.relativistic == (kind in ("nrel", "irel")) ||
+            error("SCF cache relativistic flag mismatch")
+        xc_index = is_ion ? 5 : 3
+        cfg_index = is_ion ? 6 : 4
+        xc_tag(obj.x_alpha, obj.exchange) == key[xc_index] ||
+            error("SCF cache exchange mismatch")
+        cache_tag(obj.cfg) == key[cfg_index] || error("SCF cache numerics mismatch")
+        obj.dt == obj.cfg.dt || error("SCF cache grid spacing mismatch")
+        length(obj.r) > 1 && length(obj.rho) == length(obj.r) ||
+            error("SCF cache radial-grid shape mismatch")
+        isfinite(first(obj.r)) && first(obj.r) > 0.0 &&
+            isfinite(last(obj.r)) && last(obj.r) > first(obj.r) ||
+            error("SCF cache radial-grid bounds invalid")
+        expected_occ = if is_ion
+            shell = (key[3], key[4])
+            [(n, l, q - ((n, l) == shell ? 1.0 : 0.0)) for (n, l, q) in ORBITALS[z]]
+        else
+            ORBITALS[z]
+        end
+        obj.occ == expected_occ || error("SCF cache occupancy mismatch")
+    elseif kind == "d"
+        obj isa Tuple || error("bound-state cache object type mismatch")
+        two_component = key[end] == "2c"
+        length(obj) == (two_component ? 5 : 4) ||
+            error("bound-state cache tuple shape mismatch")
+        E, r, frac = obj[1], obj[2], obj[end]
+        E isa Real && isfinite(E) || error("bound-state cache energy invalid")
+        frac isa Real && isfinite(frac) && 0.0 <= frac < 1.0 ||
+            error("bound-state cache small-component fraction invalid")
+        r isa AbstractVector && length(r) > 1 ||
+            error("bound-state cache radial grid invalid")
+        isfinite(first(r)) && first(r) > 0.0 &&
+            isfinite(last(r)) && last(r) > first(r) ||
+            error("bound-state cache radial-grid bounds invalid")
+        waves = two_component ? (obj[3], obj[4]) : (obj[3],)
+        all(v -> v isa AbstractVector && length(v) == length(r), waves) ||
+            error("bound-state cache wavefunction shape mismatch")
+    end
+    return obj
+end
+
+"キャッシュ包を検証してから payload を復元し、key が表す意味も照合する。"
 function cache_unwrap(envelope, key::Tuple)
     envelope isa NamedTuple || error("legacy cache payload without envelope")
     envelope.cache_format == CACHE_FORMAT_VERSION || error("cache format mismatch")
@@ -540,21 +634,390 @@ function cache_unwrap(envelope, key::Tuple)
     envelope.key == key || error("cache key mismatch")
     bytes2hex(sha256(envelope.payload)) == envelope.payload_sha256 ||
         error("cache payload checksum mismatch")
-    return deserialize(IOBuffer(envelope.payload))
+    return cache_validate_object(key, deserialize(IOBuffer(envelope.payload)))
 end
 
+"Read, deserialize, checksum, provenance-check, and semantically validate one cache file."
+cache_read_valid(fname::String, key::Tuple) = cache_unwrap(deserialize(fname), key)
+
+"Atomically publish tmp if and only if dst is absent."
+function cache_link_first(tmp::String, dst::String)
+    try
+        hardlink(tmp, dst)
+        return :won
+    catch err
+        if (err isa Base.IOError && err.code == Base.UV_EEXIST) || ispath(dst)
+            return :exists
+        end
+        @printf("WARN: キャッシュ %s の first-wins 公開を確認できません (%s); ディスクは変更せずメモリ値を使います\n",
+                dst, typeof(err))
+        return :uncertain
+    end
+end
+
+cache_lock_host() = lowercase(gethostname())
+cache_lock_token() = "$(cache_lock_host()):$(getpid()):$(time_ns())"
+
+function cache_lock_record(; target::String="")
+    token = cache_lock_token()
+    text = "schema=1\nhost=$(cache_lock_host())\npid=$(getpid())\n" *
+           "created=$(repr(time()))\ntoken=$token\ntarget=$target\n"
+    return text, token
+end
+
+function cache_parse_lock_record(path::String)
+    lines = try readlines(path) catch; return nothing end
+    fields = Dict{String,String}()
+    for line in lines
+        p = findfirst(==('='), line)
+        p === nothing && return nothing
+        fields[line[1:prevind(line, p)]] = line[nextind(line, p):end]
+    end
+    get(fields, "schema", "") == "1" || return nothing
+    pid = tryparse(Int, get(fields, "pid", ""))
+    created = tryparse(Float64, get(fields, "created", ""))
+    pid === nothing || created === nothing || isempty(get(fields, "host", "")) ||
+        isempty(get(fields, "token", "")) ||
+        return (host=fields["host"], pid=pid, created=created,
+                token=fields["token"], target=get(fields, "target", ""))
+    return nothing
+end
+
+"Same-host process liveness; unknown is always treated as live/fail-closed."
+function cache_process_state(pid::Integer)
+    pid <= 0 && return :dead
+    pid == getpid() && return :alive
+    if Sys.iswindows()
+        handle = ccall((:OpenProcess, "kernel32"), stdcall, Ptr{Cvoid},
+                       (UInt32, Cint, UInt32), UInt32(0x1000), Cint(0), UInt32(pid))
+        if handle == C_NULL
+            err = Base.Libc.GetLastError()
+            return err == 87 ? :dead : :unknown # ERROR_INVALID_PARAMETER = no PID
+        end
+        code = Ref{UInt32}(0)
+        ok = ccall((:GetExitCodeProcess, "kernel32"), stdcall, Cint,
+                   (Ptr{Cvoid}, Ref{UInt32}), handle, code)
+        ccall((:CloseHandle, "kernel32"), stdcall, Cint, (Ptr{Cvoid},), handle)
+        ok == 0 && return :unknown
+        return code[] == UInt32(259) ? :alive : :dead # STILL_ACTIVE
+    end
+    rc = ccall(:kill, Cint, (Cint, Cint), Cint(pid), Cint(0))
+    rc == 0 && return :alive
+    err = Base.Libc.errno()
+    return err == Base.Libc.ESRCH ? :dead : :unknown
+end
+
+cache_path_age(path::String) = try max(0.0, time() - stat(path).mtime) catch; -1.0 end
+
+function cache_owner_is_stale(path::String; stale_s::Float64=CACHE_REPAIR_STALE_S,
+                              allow_missing::Bool=false)
+    cache_path_age(path) >= stale_s || return false
+    owner = cache_parse_lock_record(path)
+    if owner === nothing
+        return allow_missing
+    end
+    owner.host == cache_lock_host() || return false
+    time() - owner.created >= stale_s || return false
+    return cache_process_state(owner.pid) === :dead
+end
+
+"Remove a dead reaper's claim; a live/remote/young claim remains fail-closed."
+function cache_clear_stale_reap_claim(claim::String;
+                                      stale_s::Float64=CACHE_REPAIR_STALE_S)
+    isfile(claim) || return true
+    cache_owner_is_stale(claim; stale_s=stale_s) || return false
+    try
+        rm(claim)
+        return true
+    catch
+        return !ispath(claim)
+    end
+end
+
+"No-clobber rename for a lock directory; destination is unique."
+function cache_rename_noclobber(src::String, dst::String)
+    if Sys.iswindows()
+        w(p) = replace(p, '/' => '\\')
+        ok = ccall((:MoveFileExW, "kernel32"), stdcall, Cint,
+                   (Cwstring, Cwstring, UInt32), w(src), w(dst), UInt32(0))
+        return ok != 0
+    end
+    ispath(dst) && return false
+    try
+        Base.Filesystem.rename(src, dst)
+        return true
+    catch
+        return false
+    end
+end
+
+function cache_release_repair_lock(lockdir::String)
+    owner = cache_repair_owner(lockdir)
+    try isfile(owner) && rm(owner) catch end
+    try
+        isdir(lockdir) && rm(lockdir)
+    catch err
+        @printf("WARN: キャッシュ修復 lock %s を除去できません (%s)\n",
+                lockdir, typeof(err))
+    end
+end
+
+"Reclaim a sufficiently old lock only after same-host owner death is proven."
+function cache_try_reap_stale_lock(lockdir::String;
+                                   stale_s::Float64=CACHE_REPAIR_STALE_S)
+    isdir(lockdir) || return true
+    owner_path = cache_repair_owner(lockdir)
+    cache_path_age(lockdir) >= stale_s || return false
+    owner0 = cache_parse_lock_record(owner_path)
+    if owner0 === nothing
+        # mkdir succeeded but owner publication did not: acquisition never
+        # returned to a caller, so an old owner-less directory is reclaimable.
+        cache_path_age(lockdir) >= stale_s || return false
+    else
+        owner0.host == cache_lock_host() || return false
+        time() - owner0.created >= stale_s || return false
+        cache_process_state(owner0.pid) === :dead || return false
+    end
+
+    claim = cache_reap_claim(lockdir)
+    cache_clear_stale_reap_claim(claim; stale_s=stale_s) || return false
+    claim_tmp = claim * ".tmp.$(getpid()).$(time_ns())"
+    claim_text, _ = cache_lock_record(target=owner0 === nothing ? "<missing>" : owner0.token)
+    try
+        write(claim_tmp, claim_text)
+        state = cache_link_first(claim_tmp, claim)
+        state === :won || return false
+    finally
+        cache_remove_tmp(claim_tmp)
+    end
+
+    tomb = lockdir * ".stale.$(getpid()).$(time_ns())"
+    try
+        # Recheck after owning the claim.  New acquisitions honor claim and
+        # cannot replace this directory while the comparison/rename happens.
+        owner1 = cache_parse_lock_record(owner_path)
+        same = owner0 === nothing ? owner1 === nothing :
+               (owner1 !== nothing && owner1.token == owner0.token)
+        same || return false
+        cache_rename_noclobber(lockdir, tomb) || return false
+        tomb_owner = cache_repair_owner(tomb)
+        try isfile(tomb_owner) && rm(tomb_owner) catch end
+        if isdir(tomb) && isempty(readdir(tomb))
+            rm(tomb)
+        else
+            @printf("WARN: stale cache lock %s has unexpected contents; preserved as %s\n",
+                    lockdir, tomb)
+        end
+        @printf("WARN: dead cache repair lock %s was reclaimed\n", lockdir)
+        return true
+    finally
+        try isfile(claim) && rm(claim) catch end
+    end
+end
+
+"Try to acquire the per-key repair directory without a check-then-create race."
+function cache_try_repair_lock(lockdir::String)
+    claim = cache_reap_claim(lockdir)
+    if isfile(claim)
+        cache_clear_stale_reap_claim(claim) || return :busy
+    end
+    try
+        mkdir(lockdir)
+        text, _ = cache_lock_record()
+        try
+            write(cache_repair_owner(lockdir), text)
+        catch err
+            cache_release_repair_lock(lockdir)
+            @printf("WARN: キャッシュ修復 lock %s の owner を記録できません (%s)\n",
+                    lockdir, typeof(err))
+            return :uncertain
+        end
+        return :acquired
+    catch err
+        if (err isa Base.IOError && err.code == Base.UV_EEXIST) || isdir(lockdir)
+            return cache_try_reap_stale_lock(lockdir) ? :retry : :busy
+        end
+        @printf("WARN: キャッシュ修復 lock %s を作れません (%s); ディスクは変更しません\n",
+                lockdir, typeof(err))
+        return :uncertain
+    end
+end
+
+"Preserve the exact old bytes, then remove only the original name (repair lock required)."
+function cache_quarantine_locked(fname::String, reason::String)
+    isfile(fname) || return :gone
+    bytes = try
+        read(fname)
+    catch err
+        @printf("WARN: キャッシュ %s の隔離前読取に失敗 (%s); ディスクは変更しません\n",
+                fname, typeof(err))
+        return nothing
+    end
+    digest = bytes2hex(sha256(bytes))
+    qname = joinpath(dirname(fname), ".atom-cache-$(cache_aux_id(fname))." *
+                     "$(reason).$(digest[1:16]).$(getpid()).$(time_ns()).jls")
+    try
+        hardlink(fname, qname)
+    catch err
+        isfile(fname) || return :gone
+        @printf("WARN: 壊れたキャッシュ %s を保全できません (%s); ディスクは変更しません\n",
+                fname, typeof(err))
+        return nothing
+    end
+    # A hard link should make this tautological, but verify before removing the
+    # public name: an unsupported or surprising filesystem must fail closed.
+    preserved = try
+        bytes2hex(sha256(read(qname))) == digest
+    catch
+        false
+    end
+    if !preserved
+        try rm(qname) catch end
+        @printf("WARN: キャッシュ %s の保全バイトを確認できません; ディスクは変更しません\n",
+                fname)
+        return nothing
+    end
+    removed = false
+    for attempt in 1:20
+        try
+            rm(fname)
+            removed = true
+            break
+        catch
+            !ispath(fname) && (removed = true; break)
+            attempt < 20 && sleep(0.05)
+        end
+    end
+    if !removed
+        try rm(qname) catch end
+        @printf("WARN: キャッシュ %s を安全に隔離できません; ディスクは変更しません\n",
+                fname)
+        return nothing
+    end
+    @printf("WARN: キャッシュ %s の旧バイトを %s に隔離しました\n", fname, qname)
+    return qname
+end
+
+"Repair/replace under the per-key mkdir lock, returning a validated disk winner or candidate."
+function cache_repair_with_tmp(fname::String, key::Tuple, tmp::String, candidate;
+                               acceptable = (_ -> true), reason::String = "corrupt")
+    lockdir = cache_repair_lock(fname)
+    deadline = time() + CACHE_REPAIR_WAIT_S
+    while true
+        state = cache_try_repair_lock(lockdir)
+        if state === :retry
+            continue
+        elseif state === :busy
+            # A peer may already have completed repair.  Never accept its name
+            # merely because it exists: deserialize and validate it first.
+            if isfile(fname)
+                try
+                    current = cache_read_valid(fname, key)
+                    acceptable(current) && return current
+                catch
+                end
+            end
+            if time() >= deadline
+                @printf("WARN: キャッシュ修復 lock %s の待機が時間切れ; ディスクは変更せずメモリ値を使います\n",
+                        lockdir)
+                return candidate
+            end
+            sleep(CACHE_REPAIR_POLL_S)
+            continue
+        elseif state === :uncertain
+            return candidate
+        end
+
+        try
+            if isfile(fname)
+                try
+                    current = cache_read_valid(fname, key)
+                    acceptable(current) && return current
+                catch
+                    # Invalid bytes are displaced only while holding this lock.
+                end
+                cache_quarantine_locked(fname, reason) === nothing && return candidate
+            elseif ispath(fname)
+                # A directory or other unexpected object is not safe to alter.
+                @printf("WARN: キャッシュ名 %s が通常ファイルではありません; ディスクは変更しません\n",
+                        fname)
+                return candidate
+            end
+
+            state2 = cache_link_first(tmp, fname)
+            if state2 in (:won, :exists)
+                try
+                    return cache_read_valid(fname, key)
+                catch err
+                    @printf("WARN: 公開後のキャッシュ %s を検証できません (%s); メモリ値を使います\n",
+                            fname, typeof(err))
+                end
+            end
+            return candidate
+        finally
+            cache_release_repair_lock(lockdir)
+        end
+    end
+end
+
+"Serialize a candidate to a same-directory temp and validate those exact bytes."
+function cache_prepare_tmp(fname::String, key::Tuple, obj)
+    cache_validate_object(key, obj)
+    tmp = cache_tmp_file(fname)
+    complete = false
+    try
+        serialize(tmp, cache_envelope(key, obj))
+        candidate = cache_read_valid(tmp, key)
+        complete = true
+        return tmp, candidate
+    finally
+        complete || cache_remove_tmp(tmp)
+    end
+end
+
+"First-wins immutable cache publication. A loser always returns the validated winner."
 function cache_put(key::Tuple, obj)
     fname = cache_file(key)
     mkpath(dirname(fname))
-    tmp = fname * ".tmp$(getpid()).$(Threads.threadid()).$(time_ns())"
+    tmp = ""
+    candidate = obj
     try
-        serialize(tmp, cache_envelope(key, obj))
-        mv(tmp, fname; force=true)              # 原子的に置き換え
+        tmp, candidate = cache_prepare_tmp(fname, key, obj)
+        state = cache_link_first(tmp, fname)
+        winner = if state in (:won, :exists)
+            try
+                cache_read_valid(fname, key)
+            catch err
+                @printf("WARN: キャッシュ %s を読めないので lock 下で修復します (%s)\n",
+                        fname, typeof(err))
+                cache_repair_with_tmp(fname, key, tmp, candidate)
+            end
+        else
+            candidate
+        end
+        _cache[key] = winner
+        return winner
     finally
-        isfile(tmp) && rm(tmp; force=true)       # serialize 失敗時の書きかけだけを掃除
+        cache_remove_tmp(tmp)
     end
-    _cache[key] = obj
-    return obj
+end
+
+"Replace an unacceptable cache value under the repair lock (used by SCF retry)."
+function cache_replace(key::Tuple, obj; acceptable = (_ -> false),
+                       reason::String = "replaced")
+    fname = cache_file(key)
+    mkpath(dirname(fname))
+    tmp = ""
+    candidate = obj
+    try
+        tmp, candidate = cache_prepare_tmp(fname, key, obj)
+        winner = cache_repair_with_tmp(fname, key, tmp, candidate;
+                                       acceptable=acceptable, reason=reason)
+        _cache[key] = winner
+        return winner
+    finally
+        cache_remove_tmp(tmp)
+    end
 end
 
 "メモリ → ディスク → builder() の順で解決する 2 層キャッシュ"
@@ -562,10 +1025,10 @@ function disk_cached(builder, key::Tuple)
     haskey(_cache, key) && return _cache[key]
     fname = cache_file(key)
     if isfile(fname)
-        # 読めない .jls (構造体の定義変更・書きかけ) は捨てて作り直す。
-        # 黙って古い型を使うより、作り直す方が常に正しい (遅いだけ)
+        # 読めない/意味不正な .jls は builder 後に lock 下で隔離して作り直す。
+        # ここでは消さない。他プロセスが同じ key を解いている可能性がある。
         try
-            _cache[key] = cache_unwrap(deserialize(fname), key)
+            _cache[key] = cache_read_valid(fname, key)
             return _cache[key]
         catch err
             @printf("WARN: キャッシュ %s を読めないので作り直します (%s)\n",
@@ -673,11 +1136,15 @@ function ensure_converged(z::Int, shell; relativistic::Bool=false,
                     cfg=cfg)
         a.converged && continue
         println("  [scf-retry] Z=$z $kind not converged -> beta=0.08, max_iter=400")
-        isfile(cache_file(key)) && rm(cache_file(key))
-        delete!(_cache, key)
         a2 = rebuild()
         a2.converged || error("SCF failed Z=$z $kind shell=$shell")
-        cache_put(key, a2)
+        # Another process may have repaired the same key while rebuild() ran.
+        # Keep its converged value if present; otherwise quarantine the old
+        # unconverged bytes and publish ours, all under the per-key mkdir lock.
+        winner = cache_replace(key, a2;
+                               acceptable=(x -> x isa SCFAtom && x.converged),
+                               reason="unconverged")
+        winner.converged || error("SCF cache repair failed Z=$z $kind shell=$shell")
     end
 end
 
