@@ -5,20 +5,20 @@
 #   SPOOL = --spool > $JOBQ_SPOOL > $ROOT/spool                                  ← 機械が書くもの全部
 #
 #   共有の直下 (人が見る場所) へ 3 ファイル: register.cmd / unregister.cmd / README.txt (**CRLF**)
-#   ROOT/setup/ へ 7 ファイル (**LF**): PIN.json bootstrap.ps1 nastest.ps1 queuectl.jl reaper.sh
-#                                       worker.conf.template worker.sh
+#   ROOT/setup/ へ 8 ファイル (**LF**): PIN.json agreement_check.py bootstrap.ps1 nastest.ps1 queuectl.jl
+#                                       reaper.sh worker.conf.template worker.sh
 #   ROOT/code/ は空のまま作る (中身は pack_code.sh が入れる。§1.4)
 #   SPOOL/ の骨組み: queue queue/.tmp running results done failed control hosts campaigns
 #
 #   - どれかが無い・改行が規則どおりでない → 何もせず exit 1
 #     (ワーカーは SETUP_SHA256 で同期するので、欠けた組・壊れた組を配らない)
 #   - 各ファイルは .tmp.<name>.<pid> に書いてから rename。宛先を読み直して hash を照合する
-#   - SETUP_SHA256 は**最後に**書く。覆うのは setup/ の 7 ファイルだけ (code/ と spool/ は含めない)
+#   - SETUP_SHA256 は**最後に**書く。覆うのは setup/ の 8 ファイルだけ (code/ と spool/ は含めない)
 #   - ROOT 自体は作らない (共有が見えていない状態で /c 直下に掘らないため)
 #   テスト用: JOBQ_SETUP_SRC=<dir> で配布元を差し替えられる (既定は本スクリプトのあるディレクトリ)
 set -u
 
-SETUP_FILES="PIN.json bootstrap.ps1 nastest.ps1 queuectl.jl reaper.sh worker.conf.template worker.sh"  # LC_ALL=C 名前順
+SETUP_FILES="PIN.json agreement_check.py bootstrap.ps1 nastest.ps1 queuectl.jl reaper.sh worker.conf.template worker.sh"  # LC_ALL=C 名前順
 ROOT_FILES="register.cmd:register.cmd unregister.cmd:unregister.cmd share_README.txt:README.txt"       # src:dst (CRLF)
 SPOOL_DIRS="queue queue/.tmp running results done failed control hosts campaigns"
 OBSOLETE_DIRS="leases running/.reaping"   # 前版の名残 (2026-08-21 に廃止。消さずに知らせるだけ)
@@ -39,6 +39,10 @@ root=${root%/}
 [ -n "$spool" ] || spool=${JOBQ_SPOOL:-$root/spool}
 spool=${spool%/}
 src=${JOBQ_SETUP_SRC:-$(cd "$(dirname "$0")" && pwd)}
+setup_source() { # agreement_check.py は tools/ にあり、他の setup 配布物だけ tools/jobq/ にある
+  if [ "$1" = agreement_check.py ]; then printf '%s/../agreement_check.py' "$src"
+  else printf '%s/%s' "$src" "$1"; fi
+}
 
 # --- 改行の検査 (LF のものは CR を 1 つも含まない / CRLF のものは全行が CRLF) --------
 is_lf_only() { ! grep -qU "$CR" "$1"; }   # -U: Git for Windows の grep は text モードで行末の CR を剥がす (実測 3.0)
@@ -53,9 +57,10 @@ is_crlf() {
 # --- 配布元の検査 (欠け・改行) ---------------------------------------------------
 bad=0
 for f in $SETUP_FILES; do
-  if [ ! -f "$src/$f" ]; then
-    printf 'NG  setup/%s が無い (%s)\n' "$f" "$src" >&2; bad=1
-  elif ! is_lf_only "$src/$f"; then
+  sf=$(setup_source "$f")
+  if [ ! -f "$sf" ]; then
+    printf 'NG  setup/%s が無い (%s)\n' "$f" "$sf" >&2; bad=1
+  elif ! is_lf_only "$sf"; then
     printf 'NG  %s に CR が含まれる — LF に直してから配る (PROTOCOL §11.2 / .gitattributes)\n' "$f" >&2; bad=1
   fi
 done
@@ -92,13 +97,13 @@ for pair in $ROOT_FILES; do
   printf '  %-8s %-24s <- %s\n' "$st" "$d" "$s"
 done
 for f in $SETUP_FILES; do
-  a=$(sha_of "$src/$f"); b=$(sha_of "$root/setup/$f")
+  a=$(sha_of "$(setup_source "$f")"); b=$(sha_of "$root/setup/$f")
   if [ "$b" = "-" ]; then st=new; changed=$((changed+1))
   elif [ "$a" = "$b" ]; then st=same
   else st=changed; changed=$((changed+1)); fi
   printf '  %-8s setup/%-18s %s\n' "$st" "$f" "${a:0:16}"
 done
-new_sha=$(cd "$src" && sha256sum $SETUP_FILES)     # 名前順 (SETUP_FILES がそう並んでいる)、LF
+new_sha=$(for f in $SETUP_FILES; do printf '%s  %s\n' "$(sha_of "$(setup_source "$f")")" "$f"; done)  # 宛先名順、LF
 old_sha=$(cat "$root/setup/SETUP_SHA256" 2>/dev/null || printf '')
 if [ "$new_sha" = "$old_sha" ]; then printf '  %-8s setup/SETUP_SHA256\n' same; else printf '  %-8s setup/SETUP_SHA256\n' changed; fi
 for d in setup code spool; do
@@ -141,7 +146,7 @@ for pair in $ROOT_FILES; do
   s=${pair%%:*}; d=${pair##*:}
   place "$src/$s" "$root/$d"
 done
-for f in $SETUP_FILES; do place "$src/$f" "$root/setup/$f"; done
+for f in $SETUP_FILES; do place "$(setup_source "$f")" "$root/setup/$f"; done
 
 # --- 目印は最後 (同期中のワーカーが半端な組を掴んでも hash 不一致で次のループに直る) ---
 tmp="$root/setup/.tmp.SETUP_SHA256.$$"

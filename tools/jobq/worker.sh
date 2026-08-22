@@ -2,7 +2,8 @@
 # tools/jobq/worker.sh — NAS ディレクトリキューのワーカー (1 スロット = 1 プロセス)
 # 正本 = tools/jobq/PROTOCOL.md (§4 遷移 / §5 振る舞い / §8 status / §9 worker.conf / §11 MSYS / §12)。
 # ⚠ 参加の門は無い (作者決定 2026-08-21、docs/notes/distributed_queue_design_2026-08-20.md §6.10): どの CPU のホストもどの task の票も走らせる。
-#   機械差は丸め誤差 (実測 ≤ 1.2e-15) で、正常性は tools/agreement_check.py の許容差比較で**測る** (門にしない)。
+#   機械差は丸め誤差 (実測 ≤ 1.2e-15)。参加の門にはしないが、同名 publish の衝突時は
+#   コード書庫内 tools/agreement_check.py の許容差比較で受理 / FAIL を決める (§5.4)。
 # 使い方: worker.sh <slot>      LOCAL = env JOBQ_LOCAL (既定 /c/jobq)、worker.conf を source。
 # ROOT = 共有ルート (人が開く場所。setup/ と code/ だけを読む)、SPOOL = 機械が書く場所 (既定 ROOT/spool)。
 # テスト用: JOBQ_ONCE=1 / JOBQ_MAX_IDLE_LOOPS=n / JOBQ_<大文字> で間隔を上書き / JOBQ_QUEUECTL で queuectl.jl の所在。
@@ -79,6 +80,9 @@ QUEUECTL=${JOBQ_QUEUECTL:-$LOCAL/setup/queuectl.jl}
 #   (`ls -la` に `-> …/julialauncher.exe` が出る)。⇒ 実体のランチャを直接指せば回避できる
 #   (実測: bash から `…/Julia/julialauncher.exe +1.11.9 --version` は通る)。
 JULIA=${JOBQ_JULIA_BIN:-julia}
+# Python は bootstrap が worker.conf に絶対パスで書く。既登録 PC では空のままでよい
+# (通常経路は止めず、同名 publish の byte 不一致時だけ「判定不能」として fail-closed)。
+PYTHON=${JOBQ_PYTHON_BIN:-${PYTHON:-}}
 
 QUEUE_RE='^([a-z][a-z0-9_]{2,39})_([0-9]{6})\.e([0-9]{3})\.json$'
 RUNNING_RE='^([a-z][a-z0-9_]{2,39})_([0-9]{6})\.e([0-9]{3})\.([a-z0-9][a-z0-9-]*-s[0-9]+-b[0-9]+)\.json$'
@@ -103,7 +107,8 @@ HOST=$(hostname 2>/dev/null || echo unknown)
 STATE=idle; REASON=""; BASE=""; ATTEMPT=0; LAST_STATUS=0
 CAMPAIGN=""; JOBSEQ=""; EPOCH=""; TASK=""; TICKET=""; TICKET_LOCAL=""; TICKET_PARSED=0; WORK=""; CODE_CWD=""
 CLAIMED=""; PLAN_MSG=""; PREP_MSG=""; PREP_PERMANENT=0; STARTED=""; FINISHED=""; JPID=""; JOBQ_ARGV=()
-A_NAME=(); A_SHA=(); A_REL=(); OUTNAMES=(); MANIFEST_SHAS=(); DUP_NAMES=(); ALIVE_WHY=""
+A_NAME=(); A_SHA=(); A_REL=(); OUTNAMES=(); MANIFEST_SHAS=(); DUP_NAMES=(); UNJUDGED_NAMES=()
+AGREEMENT_RECORDS=(); ALIVE_WHY=""
 
 utc() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 now() { date +%s; }
@@ -538,8 +543,59 @@ parse_artefacts() {  # verify の stdout の ARTEFACT 行 (§6.2)。worker は�
   [ "${#A_NAME[@]}" -ge 1 ] || { log "verify: exit 0 but no ARTEFACT line"; return 1; }
   return 0
 }
-publish_one() {  # $1 outname $2 sha $3 relpath — §4 PUBLISH。0 = 置けた (同一内容の先客も可) / 3 = 先客と不一致 (dup) / 1 = 失敗
+json_file_string() {  # $1 JSON $2 key — sidecar の単純な文字列値 (hostname / result_sha256 等)
+  tr -d '\r\n' < "$1" 2>/dev/null | grep -oE "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 |
+    sed -E 's/^[^:]*:[[:space:]]*"//; s/"$//'
+}
+json_file_number() {  # $1 JSON $2 key — agreement_check.py の有限 JSON 数値
+  grep -m1 -E "\"$2\"[[:space:]]*:[[:space:]]*[-+0-9.eE]+" "$1" 2>/dev/null |
+    sed -E 's/.*:[[:space:]]*([-+0-9.eE]+).*/\1/'
+}
+archive_collision() { # bucket verdict name tmp report log max_rel max_abs rc pub_host own_host pub_sha own_sha
+  local bucket=$1 verdict=$2 name=$3 tmp=$4 report=$5 checklog=$6 max_rel=$7 max_abs=$8 check_rc=$9
+  shift 9
+  local pub_host=$1 own_host=$2 pub_sha=$3 own_sha=$4
+  local dir stem own_manifest pub_manifest record record_tmp report_name=null log_name own_man_name pub_man_name
+  # 同じ常駐 worker (同一 OWNER) が同じ jobseq の e001/e002 を続けて処理しても、
+  # 先の receipt が指す監査証拠を -f で上書きしない。BASE が epoch を含む。
+  dir="$SPOOL/$bucket"; stem="$name.$BASE.$OWNER"
+  own_manifest="$WORK/manifest/$name.manifest.json"; pub_manifest="$SPOOL/results/$CAMPAIGN/$name.manifest.json"
+  mkdir -p "$dir" 2>/dev/null || return 1
+  mv -f "$tmp" "$dir/$stem" 2>/dev/null || return 1
+  if [ -f "$own_manifest" ]; then
+    cp -f "$own_manifest" "$dir/$stem.manifest.json" 2>/dev/null || return 1
+    own_man_name=$(json_str "$stem.manifest.json")
+  else own_man_name=null; fi
+  if [ -f "$pub_manifest" ]; then
+    cp -f "$pub_manifest" "$dir/$stem.published.manifest.json" 2>/dev/null || return 1
+    pub_man_name=$(json_str "$stem.published.manifest.json")
+  else pub_man_name=null; fi
+  if [ -f "$report" ]; then
+    cp -f "$report" "$dir/$stem.check.json" 2>/dev/null || return 1
+    report_name=$(json_str "$stem.check.json")
+  fi
+  if [ -f "$checklog" ]; then
+    cp -f "$checklog" "$dir/$stem.check.log" 2>/dev/null || return 1
+    log_name=$(json_str "$stem.check.log")
+  else log_name=null; fi
+  [ -n "$max_rel" ] || max_rel=null; [ -n "$max_abs" ] || max_abs=null
+  record="$dir/$stem.agreement.json"; record_tmp="$dir/.$stem.agreement.json.tmp"
+  if ! printf '{ "schema": 1, "verdict": %s, "outname": %s, "candidate_owner": %s,\n  "candidate_sha256": %s, "published_sha256": %s,\n  "candidate_hostname": %s, "published_hostname": %s,\n  "max_rel": %s, "max_abs": %s, "checker_exit": %d,\n  "checker": "tools/agreement_check.py", "checker_code_sha256": %s,\n  "candidate_copy": %s, "candidate_manifest": %s, "published_manifest_snapshot": %s,\n  "checker_report": %s, "checker_log": %s, "recorded_utc": %s }\n' \
+       "$(json_str "$verdict")" "$(json_str "$name")" "$(json_str "$OWNER")" \
+       "$(json_str "$own_sha")" "$(json_str "$pub_sha")" \
+       "$(json_str "$own_host")" "$(json_str "$pub_host")" \
+       "$max_rel" "$max_abs" "$check_rc" "$(json_str "${JOBQ_CODE_SHA256:-}")" \
+       "$(json_str "$stem")" "$own_man_name" "$pub_man_name" "$report_name" "$log_name" \
+       "$(json_str "$(utc)")" > "$record_tmp" 2>/dev/null || ! mv -f "$record_tmp" "$record" 2>/dev/null; then
+    rm -f "$record_tmp"; return 1
+  fi
+  AGREEMENT_RECORDS+=("$bucket/$stem.agreement.json")
+  return 0
+}
+publish_one() {  # 0 = published / byte-identical / measured agreement; 3 = measured disagreement; 4 = unjudged; 1 = transient failure
   local name=$1 sha=$2 rel=$3 rdir="$SPOOL/results/$CAMPAIGN" src="$WORK/$3" tmp final sha_tmp sha_final
+  local checker report checklog check_rc=127 max_rel="" max_abs="" pub_manifest own_manifest pub_host="" own_host=""
+  local pub_manifest_sha="" own_manifest_sha="" reason="" i
   mkdir -p "$rdir/.tmp" 2>/dev/null
   tmp="$rdir/.tmp/$name.$OWNER"; final="$rdir/$name"
   sha_tmp=$(sha256sum "$src" 2>/dev/null | cut -d' ' -f1)
@@ -555,8 +611,61 @@ publish_one() {  # $1 outname $2 sha $3 relpath — §4 PUBLISH。0 = 置けた 
     log "PUBLISH $final sha256 $sha"; return 0
   fi
   if [ -f "$tmp" ]; then
-    mkdir -p "$SPOOL/failed/$CAMPAIGN/dup" 2>/dev/null; mv -f "$tmp" "$SPOOL/failed/$CAMPAIGN/dup/$name.$OWNER" 2>/dev/null
-    log "publish: $final exists with different content ($sha_final) -> own copy moved to failed/$CAMPAIGN/dup/"; return 3
+    # Byte identity is only the fast path. A different last bit across CPUs is normal, so measure the
+    # two JSON artefacts with the checker from the exact code tree that produced this candidate.
+    mkdir -p "$WORK/agreement" 2>/dev/null || { log "publish: cannot create $WORK/agreement"; return 1; }
+    checker="$CODE_CWD/tools/agreement_check.py"
+    report="$WORK/agreement/$name.$OWNER.check.json"; checklog="$WORK/agreement/$name.$OWNER.check.log"
+    rm -f "$report" "$checklog"
+    case "$PYTHON" in
+      /*|[A-Za-z]:/*) ;;
+      '') reason="PYTHON is absent from worker.conf (re-register this PC)" ;;
+      *) reason="PYTHON is not an absolute path: $PYTHON" ;;
+    esac
+    [ -n "$reason" ] || [ -f "$PYTHON" ] || reason="Python executable does not exist: $PYTHON"
+    [ -n "$reason" ] || [ -f "$checker" ] || reason="checker does not exist in code tree: $checker"
+    if [ -z "$reason" ]; then
+      PYTHONIOENCODING=utf-8 "$PYTHON" "$checker" "$tmp" "$final" --json "$report" --quiet > "$checklog" 2>&1
+      check_rc=$?
+      max_rel=$(json_file_number "$report" max_rel); max_abs=$(json_file_number "$report" max_abs)
+      if { [ "$check_rc" -eq 0 ] || [ "$check_rc" -eq 1 ]; } && { [ -z "$max_rel" ] || [ -z "$max_abs" ]; }; then
+        reason="checker exit $check_rc did not produce a complete JSON report"
+      elif [ "$check_rc" -ne 0 ] && [ "$check_rc" -ne 1 ]; then
+        reason="checker could not decide (exit $check_rc)"
+      fi
+    else printf '%s\n' "$reason" > "$checklog"
+    fi
+
+    # The first publisher writes the artefact immediately before its sidecar. Wait through that small
+    # race, then require both immutable sidecars and matching result hashes before recording a verdict.
+    pub_manifest="$final.manifest.json"; own_manifest="$WORK/manifest/$name.manifest.json"
+    for i in $(seq 1 30); do
+      pub_manifest_sha=$(json_file_string "$pub_manifest" result_sha256)
+      [ "$pub_manifest_sha" = "$sha_final" ] && break
+      status_tick; sleep 1
+    done
+    own_manifest_sha=$(json_file_string "$own_manifest" result_sha256)
+    pub_host=$(json_file_string "$pub_manifest" hostname); own_host=$(json_file_string "$own_manifest" hostname)
+    if [ "$pub_manifest_sha" != "$sha_final" ]; then reason="published sidecar is missing or does not describe $sha_final"; fi
+    if [ "$own_manifest_sha" != "$sha" ]; then reason="candidate sidecar is missing or does not describe $sha"; fi
+    if [ -z "$pub_host" ] || [ -z "$own_host" ]; then reason="both hostnames are not available in the sidecars"; fi
+
+    if [ -z "$reason" ] && [ "$check_rc" -eq 0 ]; then
+      archive_collision "results/$CAMPAIGN/agreement" accepted "$name" "$tmp" "$report" "$checklog" \
+                        "$max_rel" "$max_abs" "$check_rc" "$pub_host" "$own_host" "$sha_final" "$sha" || return 1
+      log "publish: $final differs by bytes but agrees numerically (max_rel=$max_rel max_abs=$max_abs; $pub_host vs $own_host) -> accepted; candidate archived in results/$CAMPAIGN/agreement/"
+      return 0
+    fi
+    if [ -z "$reason" ] && [ "$check_rc" -eq 1 ]; then
+      archive_collision "failed/$CAMPAIGN/dup" disagreement "$name" "$tmp" "$report" "$checklog" \
+                        "$max_rel" "$max_abs" "$check_rc" "$pub_host" "$own_host" "$sha_final" "$sha" || return 1
+      log "publish: $final measured outside agreement tolerance (max_rel=$max_rel max_abs=$max_abs) -> candidate moved to failed/$CAMPAIGN/dup/"
+      return 3
+    fi
+    archive_collision "failed/$CAMPAIGN/unjudged" unjudged "$name" "$tmp" "$report" "$checklog" \
+                      "$max_rel" "$max_abs" "$check_rc" "$pub_host" "$own_host" "$sha_final" "$sha" || return 1
+    log "publish: byte mismatch could not be judged ($reason) -> candidate moved to failed/$CAMPAIGN/unjudged/"
+    return 4 # AGREEMENT_UNJUDGED_FAIL_CLOSED
   fi
   log "publish: sha mismatch after our own rename ($sha_final != $sha)"; return 1
 }
@@ -573,21 +682,23 @@ publish_manifest() {  # $1 outname — sidecar results/<c>/<outname>.manifest.js
   MANIFEST_SHAS+=("$sha"); OUTNAMES+=("$name")
   return 0
 }
-publish_all() {  # 成果物ごとに PUBLISH + sidecar (§5.4)。0 = 全部置けた / 3 = dup があった / 1 = 一時的失敗
+publish_all() {  # 0 = all accepted; 3 = measured disagreement; 4 = unjudged collision; 1 = transient failure
   # ⚠ 1 個が dup でも**残りは publish する**。1 票が複数チャネルを出す temari.gen_production では、
   #   途中で抜けると verify を通った他のチャネルが results/ に届かないまま failed/ に落ちる (2 巡目レビュー #2)。
-  OUTNAMES=(); MANIFEST_SHAS=(); DUP_NAMES=()
-  local i rc dup=0 fail=0
+  OUTNAMES=(); MANIFEST_SHAS=(); DUP_NAMES=(); UNJUDGED_NAMES=(); AGREEMENT_RECORDS=()
+  local i rc dup=0 unjudged=0 fail=0
   for i in "${!A_NAME[@]}"; do
     status_tick                                    # 成果物 1 個ごとに (本番生成の lane は数十個を複写する = 数分)
     publish_one "${A_NAME[$i]}" "${A_SHA[$i]}" "${A_REL[$i]}"; rc=$?
     case $rc in
       0) publish_manifest "${A_NAME[$i]}" || fail=1 ;;
-      3) dup=1; DUP_NAMES+=("${A_NAME[$i]}") ;;   # 先客と中身が違う: この 1 個だけ諦める (自分の複製は failed/<c>/dup/)
+      3) dup=1; DUP_NAMES+=("${A_NAME[$i]}") ;;
+      4) unjudged=1; UNJUDGED_NAMES+=("${A_NAME[$i]}") ;;
       *) fail=1 ;;
     esac
   done
-  [ "$fail" -eq 1 ] && return 1     # 一時的な失敗を優先して再試行する (dup はもう一度 dup になるだけで害が無い)
+  [ "$fail" -eq 1 ] && return 1
+  [ "$unjudged" -eq 1 ] && return 4
   [ "$dup" -eq 1 ] && return 3
   return 0
 }
@@ -601,9 +712,9 @@ finish_done() {  # DONE receipt (成果物へのポインタ。§8) を tmp+rena
   [ "$st" -eq 2 ] && { log "DONE: SPOOL/running not reachable; retrying"; return 1; }   # 見えないだけ = 一時的
   mkdir -p "$ddir" 2>/dev/null
   f="$ddir/$BASE.$OWNER.json"; tmp="$ddir/.$BASE.$OWNER.json.tmp"
-  if ! { printf '{ "schema": 1, "base": %s, "owner": %s, "task": %s,\n  "outnames": %s,\n  "manifest_sha256": %s,\n  "finished_utc": %s }\n' \
+  if ! { printf '{ "schema": 1, "base": %s, "owner": %s, "task": %s,\n  "outnames": %s,\n  "manifest_sha256": %s,\n  "agreement_records": %s,\n  "finished_utc": %s }\n' \
            "$(json_str "$BASE")" "$(json_str "$OWNER")" "$(json_str "$TASK")" \
-           "$(json_arr "${OUTNAMES[@]}")" "$(json_arr "${MANIFEST_SHAS[@]}")" "$(json_str "$(utc)")" > "$tmp" 2>/dev/null \
+           "$(json_arr "${OUTNAMES[@]}")" "$(json_arr "${MANIFEST_SHAS[@]}")" "$(json_arr "${AGREEMENT_RECORDS[@]}")" "$(json_str "$(utc)")" > "$tmp" 2>/dev/null \
          && mv -f "$tmp" "$f" 2>/dev/null; }; then
     log "DONE receipt write failed ($f)"; rm -f "$tmp"; return 1
   fi
@@ -623,7 +734,11 @@ publish_and_done() {  # verify 合格後: publish → sidecar → DONE。失敗�
       0) finish_done && return 0 ;;
       3) dn="${DUP_NAMES[*]}"                     # lane が丸ごと dup でも理由文が膨らまないように頭 5 個だけ
          [ "${#DUP_NAMES[@]}" -gt 5 ] && dn="${DUP_NAMES[*]:0:5} +$(( ${#DUP_NAMES[@]} - 5 )) more"
-         finish_fail "dup: ${#DUP_NAMES[@]} artefact(s) already published with different content ($dn; own copies in failed/$CAMPAIGN/dup/); ${#OUTNAMES[@]} other artefact(s) published"
+         finish_fail "publish: measured disagreement for ${#DUP_NAMES[@]} artefact(s) ($dn; evidence in failed/$CAMPAIGN/dup/); ${#OUTNAMES[@]} other artefact(s) published"
+         return 0 ;;
+      4) dn="${UNJUDGED_NAMES[*]}"
+         [ "${#UNJUDGED_NAMES[@]}" -gt 5 ] && dn="${UNJUDGED_NAMES[*]:0:5} +$(( ${#UNJUDGED_NAMES[@]} - 5 )) more"
+         finish_fail "publish: could not judge ${#UNJUDGED_NAMES[@]} byte-mismatched artefact(s) ($dn; evidence in failed/$CAMPAIGN/unjudged/); ${#OUTNAMES[@]} other artefact(s) published"
          return 0 ;;
     esac
     n=$((n + 1))
@@ -644,10 +759,10 @@ finish_fail() {  # FAIL: receipt (票 + reason + attempt + ログ末尾 200 行)
   ticket_field="\"ticket_raw\": $(json_str "$ticket_s")"                      # 常に文字列で (receipt が必ず JSON として読めるように)
   [ "$TICKET_PARSED" -eq 1 ] && [ -n "$ticket_s" ] && ticket_field=$(printf '"ticket": %s,\n  %s' "$ticket_s" "$ticket_field")   # 素の JSON は plan が読めた票だけ
   # "published" = この票で results/ に届いた成果物 (dup で落ちた lane のどのチャネルが残っているかを人が読めるように)
-  if printf '{ "schema": 1, "base": %s, "campaign": %s, "owner": %s, "worker_id": %s, "hostname": %s, "reason": %s, "attempt": %d, "finished_utc": %s,\n  "published": %s,\n  "published_manifest_sha256": %s,\n  %s,\n  "log_tail": %s }\n' \
+  if printf '{ "schema": 1, "base": %s, "campaign": %s, "owner": %s, "worker_id": %s, "hostname": %s, "reason": %s, "attempt": %d, "finished_utc": %s,\n  "published": %s,\n  "published_manifest_sha256": %s,\n  "agreement_records": %s,\n  %s,\n  "log_tail": %s }\n' \
        "$(json_str "$BASE")" "$(json_str "$CAMPAIGN")" "$(json_str "$OWNER")" "$(json_str "$WORKER_ID")" "$(json_str "$HOST")" \
        "$(json_str "$reason")" "$ATTEMPT" "$(json_str "$(utc)")" \
-       "$(json_arr "${OUTNAMES[@]}")" "$(json_arr "${MANIFEST_SHAS[@]}")" "$ticket_field" "$(json_str "$tail_s")" > "$tmp" 2>/dev/null \
+       "$(json_arr "${OUTNAMES[@]}")" "$(json_arr "${MANIFEST_SHAS[@]}")" "$(json_arr "${AGREEMENT_RECORDS[@]}")" "$ticket_field" "$(json_str "$tail_s")" > "$tmp" 2>/dev/null \
      && mv -f "$tmp" "$f" 2>/dev/null; then
     log "FAIL $BASE: $reason (receipt $f; ${#OUTNAMES[@]} artefact(s) published)"
     rm -f "$TICKET"
@@ -713,7 +828,7 @@ handle_ticket() {  # $1 = base (CLAIM / RECOVER 済み)。plan → 票の写し 
   [[ "$BASE.json" =~ $QUEUE_RE ]] || { log "internal: bad base $BASE"; BASE=""; return; }
   CAMPAIGN=${BASH_REMATCH[1]}; JOBSEQ=${BASH_REMATCH[2]}; EPOCH=${BASH_REMATCH[3]}
   TICKET="$SPOOL/running/$BASE.$OWNER.json"; TICKET_LOCAL=""; TICKET_PARSED=0; TASK=""; WORK="$LOCAL/work/$BASE"; mkdir -p "$WORK"
-  A_NAME=(); A_SHA=(); A_REL=(); OUTNAMES=(); MANIFEST_SHAS=(); DUP_NAMES=()   # 前の票の記録を receipt に混ぜない
+  A_NAME=(); A_SHA=(); A_REL=(); OUTNAMES=(); MANIFEST_SHAS=(); DUP_NAMES=(); UNJUDGED_NAMES=(); AGREEMENT_RECORDS=()   # 前の票の記録を receipt に混ぜない
   ATTEMPT=$(read_attempt)
   write_status running "claimed"   # §12: 生存の合図 (tick) は CLAIM / RECOVER の直後から (plan や展開より前)
   local rc

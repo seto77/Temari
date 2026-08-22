@@ -6,7 +6,8 @@
 #      leases/ と running/.reaping/ は**無い**。*.cmd と README.txt は CRLF、setup/ の中は LF。SETUP_SHA256 は setup/ だけを覆う。
 #   B. 一周 §4/§5 — queue → claim → plan → julia → verify → publish (成果物 + sidecar manifest) → done receipt (**ポインタ**)。
 #      恒久失敗は attempt を使い切って failed/。
-#   C. コード書庫 §1.4/§5.2 — pack_code.sh が固めた tar.gz を、票の digest で取得 → **展開前に sha256 検証** → 展開 → そのツリーを cwd に実行。
+#   C. コード書庫 §1.4/§5.2 と publish §5.4 — pack_code.sh が固めた tar.gz を、票の digest で取得 → **展開前に sha256 検証** →
+#      展開 → そのツリーを cwd に実行。同名の先客と丸め誤差内なら DONE、許容差外なら FAIL + dup。
 #      digest が合わない書庫は FAIL、NAS に書庫が無ければ RETURN (degraded)。
 #   D. 参加の門は無い §6.5 — 2026-08-21 の作者決定でホストごとの gate を全廃した。gate / gate-check という
 #      subcommand が無い、台帳に gates が無い、hosts に gate の列が無い、gen_production の plan が
@@ -15,15 +16,14 @@
 #      **receipt は書かず・attempt を積み増さず**に退く。横取りの時点は固定 sleep ではなく attempt=1 + run.1.log で観測する。
 #   F. reaper §7 — status の tick が止まった claim を 2 ストライクで orphan へ回収し、epoch+1 で再投入する。再投入分が完走する。
 #   G. certify の verify §6.4/§12 — **済んだ行に付いた error 行では落とさない** (袋小路の回避)。未完の行の error 行では落ちる (負のテスト)。
+#   H. 最終形 — status / hosts が読め、共有直下へ機械生成物や廃止済みディレクトリが漏れていない。
 #
-# ⚠ 実行するのは `jobq.noop` と、**scratch に作った偽 src/ionization.jl (stub)** だけ。
-#    本物の selftest / refcheck / gen_production / certify_sigma_v2 は 1 度も起動しない。
+# ⚠ 実行するのは `jobq.noop` と、**scratch に作った偽 src/ionization.jl / src/gen_production.jl (stub)** だけ。
+#    repo 本物の selftest / refcheck / gen_production / certify_sigma_v2 は 1 度も起動しない。
 #    C の主張 (worker が書庫を取得・検証・展開し、そのツリーを cwd にして走る) は project = temari の task でしか通らないので、
-#    task テンプレートは `temari.selftest` を使い、**中身は 1 行で ALL PASS を印字する stub** に差し替えてある。
-#    D で発行する gen_production の票は **queuectl plan にしか掛けない** (plan は argv と環境変数を印字するだけで
-#    julia を起動しない)。票は worker に渡す前に queue から取り除くので、本番生成は 1 度も走らない。
-#    stub ツリーには src/gen_production.jl も tools/certify_sigma_v2.jl も無いので、万一取り除きが漏れても
-#    即座に「ファイルが無い」で落ちる (重い計算に至る経路が存在しない)。
+#    selftest は 1 行で ALL PASS を印字する stub、publish 衝突は最小 JSON を 1 個だけ書く gen_production stub に差し替えてある。
+#    D で別途発行する gen_production の票は **queuectl plan にしか掛けない** (plan は argv と環境変数を印字するだけで
+#    julia を起動しない)。票は worker に渡す前に queue から取り除く。stub は重い物理計算を一切含まない。
 #
 # 使い方:  bash tools/jobq/test/e2e_noop.sh
 #   JOBQ_TEST_SCRATCH で scratch の場所を変えられる。JOBQ_ROOT / JOBQ_SPOOL / JOBQ_LOCAL を渡してもよいが、
@@ -48,6 +48,10 @@ done
 command -v julia >/dev/null || { printf 'e2e: julia が無い\n' >&2; exit 1; }
 julia "$JULIA" -e 'exit(0)' >/dev/null 2>&1 || { printf 'e2e: julia %s が無い (juliaup add)\n' "$JULIA" >&2; exit 1; }
 command -v git >/dev/null || { printf 'e2e: git が無い (pack_code.sh が commit を記録する)\n' >&2; exit 1; }
+PYTHON_BIN=$(command -v python 2>/dev/null || true)
+[ -n "$PYTHON_BIN" ] && "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3,6) else 1)' >/dev/null 2>&1 \
+  || { printf 'e2e: Python >= 3.6 が無い\n' >&2; exit 1; }
+case "$PYTHON_BIN" in /*|[A-Za-z]:/*) ;; *) printf 'e2e: Python が絶対パスではない: %s\n' "$PYTHON_BIN" >&2; exit 1 ;; esac
 
 # --- 多重起動の禁止 (レビュー指摘: 2 つ走ると WORKER_ID とスロットを共有して互いを壊す) ------------
 lock="$SCRATCH_DEFAULT/e2e.lock"
@@ -146,8 +150,8 @@ check "setup/SETUP_SHA256 がある" test -f "$ROOT/setup/SETUP_SHA256"
 check "SETUP_SHA256 が setup/ の中身と一致" bash -c "cd '$ROOT/setup' && sha256sum -c --quiet SETUP_SHA256"
 check "SETUP_SHA256 は setup/ だけを覆う (code/ spool/ を含まない)" \
       bash -c "! grep -qE '(^| )(code|spool)/' '$ROOT/setup/SETUP_SHA256'"
-check "SETUP_SHA256 が setup/ の 7 ファイルを過不足なく挙げている" \
-      eq "$(setup_sha_list "$ROOT/setup/SETUP_SHA256")" "PIN.json bootstrap.ps1 nastest.ps1 queuectl.jl reaper.sh worker.conf.template worker.sh "
+check "SETUP_SHA256 が setup/ の 8 ファイルを過不足なく挙げている" \
+      eq "$(setup_sha_list "$ROOT/setup/SETUP_SHA256")" "PIN.json agreement_check.py bootstrap.ps1 nastest.ps1 queuectl.jl reaper.sh worker.conf.template worker.sh "
 for d in queue queue/.tmp running results done failed control hosts campaigns; do
   check "spool/$d/ がある" test -d "$SPOOL/$d"
 done
@@ -158,16 +162,14 @@ check "spool は ROOT/spool (機械が書くものは共有直下に出ない)" 
 
 mkdir -p "$LOCAL/setup" && cp "$ROOT/setup/"* "$LOCAL/setup/"
 check "LOCAL/setup に複製 (SETUP_SHA256 一致)" bash -c "cd '$LOCAL/setup' && sha256sum -c --quiet SETUP_SHA256"
-# worker.conf は §9 の内容をそのまま書く (雛形の placeholder 名に依存しないため)。雛形は別途 sourceable であることだけ見る。
-{ printf 'JOBQ_ROOT=%s\n' "$ROOT"
-  printf 'JOBQ_SPOOL=%s\n' "$SPOOL"
-  printf 'JOBQ_LOCAL=%s\n' "$LOCAL"
-  printf 'WORKER_ID=%s\n' "$WID"
-  printf 'SLOTS=1\nTHREADS=1\nSTALL_SECONDS=60\nMAX_ATTEMPTS=2\nSTATUS_INTERVAL=2\nPOLL_INTERVAL=2\nRETRY_BACKOFF=1\nDEGRADED_SLEEP=2\n'
-} > "$LOCAL/worker.conf"
+# bootstrap と同じ 7 placeholder を sed で置換する。PYTHON は Task Scheduler と対話 PATH の差を
+# 避けるため、この e2e でも実際に起動できた絶対パスを worker.conf に固定する。
+sed -e "s|@ROOT@|$ROOT|g" -e "s|@SPOOL@|$SPOOL|g" -e "s|@LOCAL@|$LOCAL|g" \
+    -e "s|@WORKER_ID@|$WID|g" -e 's|@SLOTS@|1|g' -e 's|@THREADS@|1|g' \
+    -e "s|@PYTHON@|$PYTHON_BIN|g" "$LOCAL/setup/worker.conf.template" > "$LOCAL/worker.conf"
 check "LOCAL/worker.conf が bash で source できる" bash -c ". '$LOCAL/worker.conf'"
 check "worker.conf.template も source できて §9 の鍵を持つ" \
-      bash -c ". '$LOCAL/setup/worker.conf.template' >/dev/null 2>&1; grep -qE '^JOBQ_SPOOL=' '$LOCAL/setup/worker.conf.template'"
+      bash -c ". '$LOCAL/setup/worker.conf.template' >/dev/null 2>&1; grep -qE '^JOBQ_SPOOL=' '$LOCAL/setup/worker.conf.template' && grep -qE '^PYTHON=' '$LOCAL/setup/worker.conf.template'"
 # ⚠ selftest は repo の queuectl.jl で走らせる (fixture が test/ にあり、配布される setup/ には入らない)。
 #    JOBQ_ROOT / JOBQ_SPOOL / JOBQ_LOCAL は外す — selftest 自身が環境変数を読むので、e2e の scratch を指したままだと
 #    自分の check_tables のパス期待と食い違う (queuectl 側の hermetic 化は別件)。
@@ -249,6 +251,17 @@ end
 println("stub engine: unknown subcommand ", ARGS)
 exit(2)
 STUB
+cat > "$tree_dir/src/gen_production.jl" <<'GEN_STUB'
+# publish collision 用の最小 stub。campaign 名を含む --out だけで丸め差 / 真の差を作り分ける。
+oi = findfirst(==("--out"), ARGS); oi === nothing && exit(2)
+out = ARGS[oi + 1]; mkpath(out)
+v = occursin("publish_bad", out) ? "0.500001" : "0.5000000000000001"
+body = "{\"dataset_version\":\"6.0.0\",\"generator_source_fingerprint\":\"0123456789abcdef\",\"spec_sha256\":\"749fadc500000000000000000000000000000000000000000000000000000000\",\"F\":[1.0," * v * "]}\n"
+write(joinpath(out, "F_M5_Z30.json"), body)
+println("gen_production: 1/1 チャネル (lane 0/1, tags=M5, HIGH, スレッド 1)")
+println("完了: 1 計算 / 0 skip (既存)")
+GEN_STUB
+cp "$jobq_dir/../agreement_check.py" "$tree_dir/tools/agreement_check.py"
 printf 'jobq e2e stub tree — not Temari.\n' > "$tree_dir/tools/README_STUB.txt"
 printf 'name = "TemariStub"\nuuid = "3f2b0c11-0000-4000-8000-000000000001"\nversion = "0.0.1"\n\n[deps]\n' > "$tree_dir/Project.toml"
 ( cd "$tree_dir" && git init -q . && git add -A && \
@@ -306,7 +319,55 @@ check "成果物の sidecar manifest がある" test -f "$RC/temari_e2e_code_lan
   check "manifest が code_sha256 を記録している" grep -q "$CODE_SHA" "$RC/temari_e2e_code_lane000001001.log.manifest.json"
 check "done receipt がある" eq "$(nfiles "$SPOOL/done/temari_e2e_code" 'temari_e2e_code_000001.e001.*.json')" 1
 
-# C-2. digest が合わない書庫 → FAIL (展開しない)
+# C-2. 同名 publish の byte mismatch は code tree 内 checker で判定する。2 事例を 1 assertion ずつに
+# まとめ、基準 182 件 + 2 = PASS 184 を保つ。
+seed_publish_collision() { # campaign
+  local c=$1 r f sha
+  r="$SPOOL/results/$c"
+  mkdir -p "$r"
+  f="$r/F_M5_Z30.json"
+  printf '%s\n' '{"dataset_version":"6.0.0","generator_source_fingerprint":"0123456789abcdef","spec_sha256":"749fadc500000000000000000000000000000000000000000000000000000000","F":[1.0,0.5]}' > "$f"
+  sha=$(sha256sum "$f" | cut -c1-64)
+  printf '{"schema":1,"result_sha256":"%s","hostname":"prior-host","cpu":"prior-cpu","worker_id":"prior","owner":"prior-s0-b1","code_sha256":"%s"}\n' \
+         "$sha" "$CODE_SHA" > "$f.manifest.json"
+}
+issue_publish_collision() { # campaign
+  local c=$1 args
+  args="$log_dir/$c.args.json"
+  printf '[{"tags":["M5"],"lane":0,"lane_count":1,"profile":"v6_high","expected_dataset_version":"6.0.0"}]\n' > "$args"
+  queuectl new-campaign --name "$c" --task temari.gen_production --code-sha256 "$CODE_SHA" --args-json "$args" >/dev/null 2>&1 &&
+    queuectl issue "$c" >/dev/null 2>&1
+}
+publish_agree_case_ok() {
+  local c=temari_publish_agree r="$SPOOL/results/temari_publish_agree" rec donef
+  rec=$(find "$r/agreement" -maxdepth 1 -type f -name '*.agreement.json' 2>/dev/null | head -1)
+  donef=$(find "$SPOOL/done/$c" -maxdepth 1 -type f -name '*.json' 2>/dev/null | head -1)
+  [ "$PUBLISH_AGREE_RC" -eq 0 ] && [ "$(nfiles "$SPOOL/done/$c" '*.json')" = 1 ] &&
+    [ "$(nfiles "$SPOOL/failed/$c" '*.json')" = 0 ] && [ -n "$rec" ] && [ -n "$donef" ] &&
+    grep -q '"verdict": "accepted"' "$rec" && grep -q '"max_rel"' "$rec" && grep -q '"max_abs"' "$rec" &&
+    grep -q '"published_hostname": "prior-host"' "$rec" && ! grep -q '"candidate_hostname": ""' "$rec" &&
+    grep -q 'agreement_records' "$donef" && [ "$(nfiles "$SPOOL/failed/$c/dup" '*')" = 0 ]
+}
+seed_publish_collision temari_publish_agree
+issue_publish_collision temari_publish_agree
+run_worker_fg 240 "$log_dir/worker_publish_agree.log" JOBQ_ONCE=1; PUBLISH_AGREE_RC=$?
+check "先客と丸め誤差の範囲内で byte が違う成果物は DONE (failed でなく、両 host + max 差の来歴を保存)" publish_agree_case_ok
+
+publish_bad_case_ok() {
+  local c=temari_publish_bad r="$SPOOL/failed/temari_publish_bad" rec receipt
+  rec=$(find "$r/dup" -maxdepth 1 -type f -name '*.agreement.json' 2>/dev/null | head -1)
+  receipt=$(find "$r" -maxdepth 1 -type f -name '*.json' 2>/dev/null | head -1)
+  [ "$PUBLISH_BAD_RC" -eq 0 ] && [ "$(nfiles "$SPOOL/done/$c" '*.json')" = 0 ] &&
+    [ "$(nfiles "$r" '*.json')" = 1 ] && [ -n "$rec" ] && [ -n "$receipt" ] &&
+    grep -q 'measured disagreement' "$receipt" && grep -q '"verdict": "disagreement"' "$rec" &&
+    grep -q '"max_rel"' "$rec" && grep -q '"max_abs"' "$rec" && [ "$(nfiles "$r/unjudged" '*')" = 0 ]
+}
+seed_publish_collision temari_publish_bad
+issue_publish_collision temari_publish_bad
+run_worker_fg 240 "$log_dir/worker_publish_bad.log" JOBQ_ONCE=1; PUBLISH_BAD_RC=$?
+check "先客と許容差を超えて違う成果物は FAIL し、測定済みの候補と来歴を dup に残す" publish_bad_case_ok
+
+# C-3. digest が合わない書庫 → FAIL (展開しない)
 BAD_SHA=$(printf 'e2e-bad-digest' | sha256sum | cut -c1-64); BAD16=${BAD_SHA:0:16}
 printf 'this is not the archive whose sha256 is %s\n' "$BAD_SHA" | gzip -n -9 > "$ROOT/code/temari-$BAD16.tar.gz"
 printf '[{}]\n' > "$log_dir/code_bad.args.json"
@@ -320,7 +381,7 @@ check "digest 不一致の票は failed/ へ (票かミラーの欠陥 = 恒久)
 check "digest 不一致の書庫は展開されない" test ! -d "$LOCAL/code/$BAD16"
 check "digest 不一致の票は queue/ に戻らない" eq "$(nfiles "$SPOOL/queue" 'temari_e2e_baddig_*.json')" 0
 
-# C-3. NAS に書庫が無い → RETURN (degraded)。FAIL にしない
+# C-4. NAS に書庫が無い → RETURN (degraded)。FAIL にしない
 MISS_SHA=$(printf 'e2e-missing-archive' | sha256sum | cut -c1-64)
 printf '[{}]\n' > "$log_dir/code_miss.args.json"
 queuectl new-campaign --name temari_e2e_nodig --task temari.selftest --code-sha256 "$MISS_SHA" \
@@ -332,7 +393,7 @@ check "書庫が無い票は queue/ へ RETURN される (同じ epoch)" test -f
 check "書庫が無い票は failed/ に落ちない" eq "$(nfiles "$SPOOL/failed/temari_e2e_nodig" '*.json')" 0
 check "RETURN のあと running/ に残らない" eq "$(nfiles "$SPOOL/running" 'temari_e2e_nodig_*.json')" 0
 check "status が degraded を記録している" grep -q '"state" *: *"degraded"' "$SPOOL/hosts/${WID}-s0.status.json"
-# C-3b. RETURN される票の**後ろ**にある票が飢えない (§5.5 の「自分が RETURN した票はしばらく飛ばす」)
+# C-4b. RETURN される票の**後ろ**にある票が飢えない (§5.5 の「自分が RETURN した票はしばらく飛ばす」)
 #   ⚠ ここではまだ nodig の票を消さない — それが詰まりの原因そのものなので、置いたまま検査する。
 #   名前順は temari_e2e_nodig_… < zz_e2e_after_… なので、記憶が無ければ worker は毎回 nodig を取り、
 #   RETURN し、degraded で眠り、また nodig を取る… を繰り返して後ろの票に永久に到達しない。

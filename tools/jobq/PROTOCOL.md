@@ -35,14 +35,15 @@ ROOT/
   unregister.cmd             ダブルクリックで登録解除 (batch, CRLF)
   README.txt                 数行の案内 (Notepad で開く。CRLF)
   setup/                     worker.sh reaper.sh bootstrap.ps1 queuectl.jl nastest.ps1
-                             worker.conf.template PIN.json
+                             worker.conf.template PIN.json agreement_check.py
                              SETUP_SHA256 (setup/ 内の全ファイルの sha256。deploy_setup.sh が最後に書く)
   code/                      内容アドレスのコード書庫 (§1.4)
   spool/                     機械が書くもの全部 (§1.2)
 ```
 
-`setup/` に置くのは**ワーカーが実行する 7 ファイル**だけ。`pack_code.sh` と `deploy_setup.sh` は発行側 PC の
-repo (`tools/jobq/`) から走らせる道具なので配らない。`SETUP_SHA256` は `setup/` だけを覆う
+`setup/` に置くのは**登録とワーカー運用に使う 8 ファイル**だけ。`agreement_check.py` の setup 版は
+登録時の Python 自己検査だけに使い、publish の判定には使わない (§5.4・§10.2)。`pack_code.sh` と
+`deploy_setup.sh` は発行側 PC の repo (`tools/jobq/`) から走らせる道具なので配らない。`SETUP_SHA256` は `setup/` だけを覆う
 (`code/` と `spool/` は含めない)。
 
 ### 1.2 SPOOL (機械が書くもの)
@@ -54,12 +55,14 @@ SPOOL/                                    既定 = ROOT/spool
   running/<base>.<owner>.json             claim 済みの票    (rename で所有)
   results/<campaign>/<outname>            完成した成果物だけ (results/<campaign>/.tmp/ に置いてから rename)
   results/<campaign>/<outname>.manifest.json   sidecar 来歴 (成果物 1 個につき 1 個)
+  results/<campaign>/agreement/           バイト不一致だが数値一致と測定済みの候補・来歴・判定記録
   results/<campaign>/.tmp/
   done/<campaign>/<base>.<owner>.json     完了 receipt (成果物へのポインタ。§8)
   failed/<campaign>/<base>.<owner>.json   失敗 receipt (票 + reason + ログ末尾)
   failed/<campaign>/orphan/<base>.<owner>.json        reaper が回収した旧 claim (票そのもの)
   failed/<campaign>/orphan/<base>.<owner>.reason.json 回収の理由 (sidecar)
-  failed/<campaign>/dup/                  publish で先客と中身が違った成果物
+  failed/<campaign>/dup/                  publish で許容差外と測定した候補・来歴・判定記録
+  failed/<campaign>/unjudged/             Python / 判定器 / 来歴が使えず判定不能だった候補と証拠
   control/PAUSE                           全ワーカーの新規 claim 停止 (実行中は完走)
   control/PAUSE.<worker_id>               そのワーカーだけ停止
   control/load                            時間帯・ホスト別の稼働スロット数 (§5.7。無ければ全開)
@@ -134,12 +137,12 @@ tar -C <tree> --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric
 - **骨組み**を掘る: `ROOT/{setup, code, spool}` と
   `spool/{queue, queue/.tmp, running, results, done, failed, control, hosts, campaigns}`。
   `ROOT` 自体は作らない (共有が見えていないときに `/c` 直下へ掘らないため)。
-- `setup/` へ 7 ファイル (`worker.sh` `reaper.sh` `bootstrap.ps1` `queuectl.jl` `nastest.ps1`
-  `worker.conf.template` `PIN.json`) を tmp + rename で置き、宛先を読み直して hash を照合してから、
+- `setup/` へ 8 ファイル (`worker.sh` `reaper.sh` `bootstrap.ps1` `queuectl.jl` `nastest.ps1`
+  `worker.conf.template` `PIN.json` `agreement_check.py`) を tmp + rename で置き、宛先を読み直して hash を照合してから、
   **最後に** `SETUP_SHA256` を書く (同期中のワーカーが半端な組を掴んでも、hash 不一致で次のループに直る)。
   `SETUP_SHA256` が覆うのは **`setup/` だけ** (`code/` と `spool/` は含めない)。
 - 共有直下の `register.cmd` / `unregister.cmd` / `README.txt` も置く。**この 3 つだけ CRLF**、
-  `setup/` の 7 ファイルは LF。配布元に CRLF が混ざった LF ファイルがあれば**何も配らずに終了**する。
+  `setup/` の 8 ファイルは LF。配布元に CRLF が混ざった LF ファイルがあれば**何も配らずに終了**する。
 - `code/` は空のまま作る (中身は `pack_code.sh` が入れる。§1.4)。
 
 ## 2. 識別子 (正規表現はそのまま実装に使う)
@@ -235,9 +238,9 @@ tar -C <tree> --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric
 | RECOVER | worker | `running/<base>.<worker_id>-s<slot>-b<old>.json` → `running/<base>.<owner(新 boot_seq)>.json` | 起動時、**自分の worker_id と slot の、より小さい boot_seq** の claim だけ。成功 = ローカル `work/<base>/` を保持して再開。失敗 = 触らない |
 | REAP | reaper | `running/<base>.<owner>.json` → `failed/<c>/orphan/<base>.<owner>.json` | 所有スロットの status が §7 の条件で沈黙、かつ `done/` `failed/` の直下に同 base の receipt が無い。**この rename が排他の判定そのもの** |
 | REISSUE | reaper / queuectl | `queue/.tmp/` に epoch+1 の票を書き → `queue/<campaign>_<jobseq6>.e<epoch+1>.json` へ排他 rename | 同じ base が queue / running / done / failed / orphan / results に無いこと。epoch+1 > max → `failed/` へ receipt |
-| PUBLISH | worker | 成果物ごとに `results/<c>/.tmp/<outname>.<owner>` → `results/<c>/<outname>` (`mv -n`) | verify 合格のときだけ。rename 後に**最終ファイルの sha256 を読み直し**、自分のと同じなら成功 (先客が同一内容でも可)、違えば自分の複製を `failed/<c>/dup/` へ移して FAIL |
+| PUBLISH | worker | 成果物ごとに `results/<c>/.tmp/<outname>.<owner>` → `results/<c>/<outname>` (`mv -n`) | verify 合格のときだけ。rename 後に**最終ファイルの sha256 を読み直し**、同じなら成功。違えばコード書庫内の固定版判定器で数値比較し、exit 0 は受理、exit 1 は `dup/` へ FAIL、判定不能は `unjudged/` へ FAIL (§5.4) |
 | DONE | worker | 成果物ごとの manifest を置き、`done/<c>/<base>.<owner>.json` を tmp+rename で書く → `running/<base>.<owner>.json` を削除 | 全成果物の PUBLISH 成功後 |
-| FAIL | worker | `failed/<c>/<base>.<owner>.json` を tmp+rename で書く → running を削除 | 不正な票 / 恒久エラー / 再試行上限 / dup |
+| FAIL | worker | `failed/<c>/<base>.<owner>.json` を tmp+rename で書く → running を削除 | 不正な票 / 恒久エラー / 再試行上限 / 測定不一致 / publish 判定不能 |
 | ABANDON | worker | 何も書かない (`work/<base>/` は残す) | claim を失った (REAP された・他インスタンスが RECOVER した) と分かったとき。**所有していない票の receipt を書いてはいけない** |
 
 - 一度 Julia を起動した票は、**完了・同一ホストでの再試行・FAIL のいずれか**でしか出ていかない (RETURN しない)。
@@ -327,21 +330,31 @@ tar -C <tree> --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric
 - `verify` の標準出力に `ARTEFACT <outname> <sha256> <relpath>` が成果物の数だけ並ぶ (§6.2)。
   **worker はこの行に挙がったものだけを publish する** (自分でファイルを探さない)。
 - 各成果物について §4 PUBLISH: `results/<c>/.tmp/<outname>.<owner>` へ複製 → `mv -n` → 最終名を読み直して
-  sha256 を比較。同一なら成功 (先客が同一内容でも成功)。違えば自分の複製を `failed/<c>/dup/<outname>.<owner>`
-  へ移して FAIL (reason = `dup`)。
-- ⚠⚠ **`dup` は「処方が食い違っている」証拠ではない** (2026-08-21 の作者決定のあと)。最終ファイルの
-  sha256 比較は**機械を跨いだバイト比較**であり、別の類のマシンの出力とは必ず最終ビットが違う (§6.5.2)。
-  §6.5.6 は「この区別を、バイト比較に触れるすべての場所に明記すること」と定めており、ここがその 1 箇所である。
-  そして**同じ成果物を 2 台が計算する経路は設計に組み込まれている** — ABANDON した worker は
-  **成果物だけを遅れて publish する** (§5.5) ので、再投入された epoch を持つ別の PC の worker と衝突しうる。
-  ⇒ **`dup` を見たら次の順で読む**:
-  1. 先客の `results/<c>/<outname>.manifest.json` と、自分の複製 `failed/<c>/dup/<outname>.<owner>` の来歴を
-     比べる。**`code_sha256` と `spec_sha256` が一致していれば処方は同じ** — 差は CPU の類の差である。
-  2. 2 つのファイルを `agreement_check.py` (§6.5.1) に掛ける。丸め誤差の範囲内なら**正常**。
-  3. `code_sha256` か `spec_sha256` が違えば**本物の食い違い**。走行を止めて原因を特定する。
-- ⚠ **この経路では帳簿と成果物が食い違う**: 先客の成果物は `results/` にあるのに、後から来た epoch の票は
-  `failed/` に落ちる (dup になった worker は DONE receipt を書けないため)。campaign を集計するときは
-  **「failed だが成果物は揃っている」を dup として別に数える**こと。数だけを見て失敗と読まない。
+  sha256 を比較する。同一なら従来どおり成功 (先客が同一内容でも成功)。この速い経路では Python を起動しない。
+- バイトが違う場合だけ、worker.conf に記録した**絶対パスの Python で**
+  `$CODE_CWD/tools/agreement_check.py` を起動し、自分の候補と `results/<c>/<outname>` の 2 ファイルを比較する。
+  これは成果物を生んだコード書庫に入り、票の `code_sha256` で固定された判定器である。共有の版や
+  `LOCAL/setup/agreement_check.py` を publish の判定に使ってはいけない。`PYTHONIOENCODING=utf-8` を付け、
+  sidecar manifest を入力に混ぜず、`--rtol` / `--atol` は渡さない (§6.5.1 の既定値そのものが基準)。
+- 判定の前提として、先客と候補の sidecar がそれぞれ成果物の sha256 を指し、両方の `hostname` が読めることも
+  確かめる。先客が成果物の直後に sidecar を置く短い race は最大 30 秒待つ。
+  - exit 0 = **測って一致**。先客の成果物と sidecar は上書きせず、候補・候補 sidecar・先客 sidecar の写し・
+    判定 JSON / log・`*.agreement.json` を `results/<c>/agreement/` に残して票を DONE にする。
+  - exit 1 = **測って不一致**。同じ証拠一式を `failed/<c>/dup/` に残して票を FAIL にする。
+  - exit 2、Python / 判定器を起動できない、報告や sidecar が不完全 = **判定不能**。得られた証拠一式を
+    `failed/<c>/unjudged/` に残して票を FAIL にする。⚠⚠ **判定不能を一致に倒してはいけない。**
+- `*.agreement.json` は verdict、両成果物の sha256、両ホスト名、`max_rel` / `max_abs`、checker exit、
+  `checker_code_sha256`、証拠ファイル名を機械可読に持つ。DONE / FAIL receipt の `agreement_records` はこの記録への
+  相対パス配列であり、集計時に「別 run の採用・測定済み」が何個あるかを数えられる。
+  証拠名は `<outname>.<base>.<owner>...` とし、同じ常駐 worker が e001/e002 を続けて処理しても、
+  先の receipt が指す記録を後の epoch が上書きしない。
+- ⚠⚠ **`dup` の意味は変わった**。バイト不一致だけでは CPU の類が違う正常な計算を区別できない (§6.5.2) ため、
+  今後 `dup/` に入るのは判定器で許容差外または非数値葉の不一致を**測ったものだけ**である。単なる
+  バイト不一致は `dup` と呼ばず、数値一致なら `agreement/`、判定できなければ `unjudged/` に分ける。
+  ABANDON した worker が成果物だけを遅れて publish し (§5.5)、再投入された epoch と衝突する経路は残る。
+- ⚠ **帳簿と成果物の対応**: 測定一致なら後着の票も DONE になり、receipt から `agreement/` の証拠を辿れるので、
+  以前の「成果物は揃っているのに無害な丸め差で failed」という食い違いは生じない。本当に不一致または判定不能なら、
+  先客は `results/` に残したまま後着の票を FAIL にし、`agreement_records` と reason で理由を明示する。
 - ⚠ **名前が衝突するのは `temari.gen_production` だけ**である。他の task の結果は lane 名
   `<c>_lane<jobseq6><epoch3><ext>` (§2) で、**epoch を名前に持つ**ので、再投入された epoch は
   **別のファイル**を書き dup にならない。`gen_production` の成果物名 `F_<tag>_Z<z>.json` にだけ lane が無い
@@ -352,7 +365,7 @@ tar -C <tree> --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric
   **重複した lane があることを承知して読む** (どちらを採るか・どう畳むかは集計側の規則であって、
   キューは決めない)。
 - 続いて sidecar `results/<c>/<outname>.manifest.json` を同じ規則で置く (先客があれば残す — そのバイトを
-  説明しているのは先客の方)。
+  説明しているのは先客の方)。測定一致した後着候補の来歴は `agreement/` の候補 sidecar と判定記録に残る。
 - 全部置けたら `done/<c>/<base>.<owner>.json` (§8 のポインタ) を書き、`running/<base>.<owner>.json` を消し、
   `run.*.log` を `LOCAL/logs/jobs-s<slot>.log` へ追記してから `work/<base>/` を消す。
 - ⚠ **verify 合格後に publish / DONE が失敗しても Julia は起動し直さない** (結果は確定している)。
@@ -386,7 +399,8 @@ tar -C <tree> --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric
   `watch_interval`, `publish_retries`) はすべて環境変数 `JOBQ_<大文字>` で上書きできる。
   値は**整数 ≥ 1 であることを起動時に検査する** (0 や非数で NAS を叩き続けないように)。
 - `JOBQ_QUEUECTL` (queuectl.jl の所在)、`JOBQ_JULIA_CHANNEL` (queuectl を走らせる julia チャネル)、
-  `JOBQ_THREADS`、`JOBQ_MAX_ATTEMPTS`、`JOBQ_ROOT` / `JOBQ_SPOOL` / `JOBQ_LOCAL` (worker.conf より優先)。
+  `JOBQ_THREADS`、`JOBQ_MAX_ATTEMPTS`、`JOBQ_PYTHON_BIN` (publish 判定用 Python の絶対パス)、
+  `JOBQ_ROOT` / `JOBQ_SPOOL` / `JOBQ_LOCAL` (worker.conf より優先)。
 
 ### 5.7 `control/load` — 負荷の動的制御 (共有の 1 ファイル。中央のデーモンは置かない)
 
@@ -709,7 +723,8 @@ BLAS スレッド数という**正当に PC ごとに違う値**を持つ。同�
 | 試験 | 実行するもの | 何を示すか | いつ |
 | --- | --- | --- | --- |
 | CLAIM の排他 | `test/t1_claim_contention.sh <root> N R <prim>` | `mv` / `mv-verify` / `mkdir` / `noclobber` のどれが排他になるか (§4 の連鎖 rename) | 実装を変えるたび |
-| e2e | `test/e2e_noop.sh` | queue → claim → run → verify → publish → manifest → done、失敗と再試行、reaper の REISSUE と orphan、**コード書庫の全経路** (小さな scratch ツリーを `pack_code.sh` で固め、その digest を持つ票を発行し、ワーカーが取得 → sha256 検証 → 展開 → そのツリーで実行することと、**digest が違う票は拒否される**ことを示す) | 実装を変えるたび |
+| e2e | `test/e2e_noop.sh` | queue → claim → run → verify → publish → manifest → done、失敗と再試行、reaper の REISSUE と orphan、**コード書庫の全経路**、publish のバイト不一致を許容差内なら DONE / 許容差外なら FAIL + `dup` にする 2 事例 | 実装を変えるたび |
+| publish fail-closed | `test/publish_agreement_negative_test.sh` / `test/publish_agreement_mutation_test.sh` | Python を起動できない判定不能が FAIL + `unjudged` になること、および fail-closed の 1 行を受理へ変異させると負のテストが落ちること | publish 判定を変えるたび |
 | **合意測定 (agreement)** | `PYTHONIOENCODING=utf-8 python tools/agreement_check.py <A> <B> --json …` | **最初の実 campaign の完走後**、標本 N チャネル (**K / L / M を各 1 本以上**、既定 N = 3〜5) を**別の PC** (できれば世代の離れたもの。類は事前に分からない — §6.5.3) で計算し直し、**最大相対差・最大絶対差**を記録する (⚠ 差が厳密に 0 なら空振り。下の手順 4) | campaign の完走ごと。⚠ **門ではない** — 走行を止めず、MANIFEST に公表する数値を得るための**測定** |
 
 **合意測定の回し方** (通常の campaign と同じ道具しか使わない):
@@ -801,9 +816,10 @@ BLAS スレッド数という**正当に PC ごとに違う値**を持つ。同�
   `failed/<c>/<base>.*` (直下) があれば **outcome = `already_finished` で再投入しない**。
   REAP の直前にも見ているが、それでは足りない — REISSUE が確認できずに orphan を残した場合、
   次の走査の retry が**その票を数百秒後に拾い直す**ので、その間に本人が完走して receipt を書きうる。
-  ⚠ 見落とした場合の害は「無駄な再計算」では**終わらない**: 別の CPU で計算するとバイト列が変わる
-  (§6.5) ので publish が dup として弾き、`failed/<c>/dup/` に**偽の「不一致」の証拠**が残る —
-  本物の処方の食い違いを探すときに見る信号そのものを汚す。
+  ⚠ 見落とした場合は無駄な再計算に加え、別 CPU の候補との publish 衝突が起きる。数値一致なら
+  `results/<c>/agreement/` に測定済みの重複として残り、許容差外なら `failed/<c>/dup/`、判定不能なら
+  `failed/<c>/unjudged/` に分かれる (§5.4)。無害な丸め差を偽の `dup` として記録することはないが、
+  余計な候補と判定記録を作るので receipt の再確認は依然必要である。
 - **REISSUE に失敗しても票は失われない** — orphan ファイルが残るので、後の走査が同じ規則で拾い直す:
   「`failed/<c>/orphan/` にあり、epoch+1 の base が queue / running / done / failed / orphan の**どこにも無い**」
   orphan は REISSUE の再試行対象。⇒ 「回収したのに再投入できなかった」を 1 日待たずに次の周期で直せる。
@@ -835,15 +851,23 @@ BLAS スレッド数という**正当に PC ごとに違う値**を持つ。同�
 { "schema": 1, "base": "…", "owner": "…", "task": "…",
   "outnames": ["F_M5_Z30.json", "F_M5_Z48.json"],
   "manifest_sha256": ["…", "…"],
+  "agreement_records": ["results/<c>/agreement/F_M5_Z30.json.<base>.<owner>.agreement.json"],
   "finished_utc": "…" }
 ```
 
 ⚠ `outnames` と `manifest_sha256` は**同じ長さ・同じ順序の配列**。成果物が 1 個の task でも配列にする
-(実装が分岐しないように)。
+(実装が分岐しないように)。`agreement_records` はこの票でバイト不一致を数値判定した記録への
+SPOOL 相対パスで、該当が無ければ空配列。
 
 **失敗 receipt** `failed/<c>/<base>.<owner>.json`: `{schema, base, campaign, owner, worker_id, hostname, reason,
-attempt, finished_utc, ticket|ticket_raw, log_tail}`。`ticket` は票が JSON として読めたときだけ入れ、
-`ticket_raw` (文字列) は常に入れる。
+attempt, finished_utc, published, published_manifest_sha256, agreement_records, ticket|ticket_raw, log_tail}`。
+`ticket` は票が JSON として読めたときだけ入れ、`ticket_raw` (文字列) は常に入れる。
+
+publish 衝突の**判定記録** `*.agreement.json` は `{schema, verdict, outname, candidate_owner,
+candidate_sha256, published_sha256, candidate_hostname, published_hostname, max_rel, max_abs, checker_exit,
+checker, checker_code_sha256, candidate_copy, candidate_manifest, published_manifest_snapshot, checker_report,
+checker_log, recorded_utc}`。`verdict` は `accepted|disagreement|unjudged`。判定不能では取得できなかった
+数値やファイル名を `null` にするが、候補と起動 log は残す。
 
 **status** `hosts/<worker_id>-s<slot>.status.json`:
 
@@ -879,6 +903,7 @@ JOBQ_LOCAL=/c/jobq
 WORKER_ID=seto-desktop-3f9a1c2b
 SLOTS=8
 THREADS=2
+PYTHON='/c/Program Files/Python314/python.exe'
 STALL_SECONDS=7200
 MAX_ATTEMPTS=5
 STATUS_INTERVAL=60
@@ -890,6 +915,10 @@ DEGRADED_SLEEP=600
 - 優先順は **環境変数 > worker.conf > 組み込み既定**。`JOBQ_ROOT` / `JOBQ_SPOOL` / `JOBQ_LOCAL` は
   worker.conf を読んだ後に環境変数で上書きし直す (テストが scratch を指せるように)。
 - `JOBQ_SPOOL` の解決: 環境変数 > worker.conf > `$JOBQ_ROOT/spool`。
+- `PYTHON` は bootstrap が起動確認した Python >= 3.6 の**絶対 MSYS パス**。Task Scheduler の PATH は
+  対話シェルと異なるため `python` だけを書かない。テスト時の上書きは `JOBQ_PYTHON_BIN`。
+  このキーが無い旧 worker.conf でも通常の票は止めないが、バイト不一致の publish は判定不能として FAIL する。
+  bootstrap を再実行して再登録すれば直る。
 - ⚠ 旧名: `STATUS_INTERVAL` は前版の `LEASE_INTERVAL`、PIN の `claim_timeout` は前版の `lease_timeout`。
   lease ファイルを廃止したので名前を実体に合わせた。`lease_gc_days` は**消えた**。
 
@@ -941,8 +970,15 @@ cmd.exe が読むので**必ず CRLF**。中身の規則:
 
 手順:
 
-1. winget で Git.Git / Julialang.Juliaup が無ければ導入、`juliaup add <julia_version>` (`juliaup status` で有無を見る)。
-2. `LOCAL` を作り、`ROOT/setup/` を `LOCAL/setup/` に複製、`worker.conf` を生成 (既存があれば WORKER_ID は保持)。
+1. winget で Git.Git / Python.Python.3.14 / Julialang.Juliaup が無ければ導入し、
+   `juliaup add <julia_version>` (`juliaup status` で有無を見る)。Python の package id は実施時の winget で
+   現存を確認した現行 Python 3 の id であり、package の**版番号は固定しない**。既に Python >= 3.6 があればそれを使う。
+   Git と同じく `Find-Python` が既定パス → レジストリ → PATH の候補を調べ、起動できる実体の**絶対パス**を返す
+   (WindowsApps の実行エイリアスは除外)。導入後に `--version` が 3.6 以上と確かめる。
+2. `LOCAL` を作り、`ROOT/setup/` を `LOCAL/setup/` に複製する。見つけた Python で、配布したままの
+   `LOCAL/setup/agreement_check.py --selftest` が exit 0 になることまで確かめてから `worker.conf` を生成する
+   (既存があれば WORKER_ID は保持)。この setup 版 checker は**登録環境の自己検査専用**であり、publish の
+   判定は必ず票の `$CODE_CWD/tools/agreement_check.py` を使う (§5.4)。
    ⚠⚠ **`WORKER_ID` は共有の中で一意でなければならない**。claim の所有者名 `OWNER` が
    `<worker_id>-s<slot>-b<boot_seq>` であり、生存の合図の置き場が `hosts/<worker_id>-s<slot>.status.json`
    だからである。2 台が同じ `worker_id` を名乗ると、**同じ status ファイルを奪い合って `base` が交互に
@@ -970,7 +1006,8 @@ cmd.exe が読むので**必ず CRLF**。中身の規則:
    **プロセス木ごと**停止してから登録解除する。
 5. `powercfg /change standby-timeout-ac 0`、`powercfg /hibernate off`。
 6. `hosts/<worker_id>.json` に台帳: worker_id, hostname, cpu, cores_physical, cores_logical, ram_gb, slots,
-   threads, julia_version, registered_utc, updated_utc, bootstrap_user, root, spool, local, bash, nas_test。
+   threads, julia_version, python, python_version, registered_utc, updated_utc, bootstrap_user, root, spool, local,
+   bash, nas_test。`python` は上で起動確認した絶対 Windows パスで、同じ実体の MSYS パスを worker.conf に書く。
    ⚠ **既存の `registered_utc` は必ず引き継ぐ**。⚠ `gates` の欄は**無い** (2026-08-21 に廃止。§6.5)。
    `cpu` は**来歴**として残す — 混成来歴の集約 (§6.5.4) に使う欄であって、参加の可否には使わない。
 7. 再実行 = 更新 (冪等)。`-Remove` = 全 jobq タスクをプロセス木ごと停止して登録解除 + 台帳に `retired_utc`。
@@ -1019,8 +1056,9 @@ cmd.exe が読むので**必ず CRLF**。中身の規則:
 - **RECOVER した票がホスト側の事情で詰まったら**: §4 が RETURN を禁じているので、attempt を 1 つ消費し、
   claim を保ったまま `degraded_sleep` 寝て再試行する。`max_attempts` で FAIL。
 - **PUBLISH の判定**: `mv -n` の終了コードは見ない。**宛先を読み直した sha256 が自分のものと一致すれば成功**
-  (先客が同一内容でも成功 = 前の起動が publish 直後に死んだ場合を救う)。不一致なら自分の複製を
-  `failed/<c>/dup/` へ移して FAIL。manifest も同じ規則で、先客があればそれを残す。
+  (先客が同一内容でも成功 = 前の起動が publish 直後に死んだ場合を救う)。バイト不一致だけを異常とはせず、
+  コード書庫内の固定版 `agreement_check.py` を既定許容差で走らせる。exit 0 は `agreement/` に証拠を残して
+  DONE、exit 1 は `dup/` へ FAIL、判定不能は `unjudged/` へ FAIL。先客の成果物と manifest は上書きしない。
 - **tmp 名はドットファイル**: receipt・status・manifest の tmp は同じディレクトリの `.<name>.tmp`。
   `<base>.*` や `*.status.json` の glob に見えてはいけない。
 - **setup の同期と `exec` し直し**: 目印 `SETUP_SHA256` の一致だけでなく `sha256sum -c` で中身も照合する。

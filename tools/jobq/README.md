@@ -4,7 +4,7 @@
 **設計の経緯と根拠 = [`docs/notes/distributed_queue_design_2026-08-20.md`](../../docs/notes/distributed_queue_design_2026-08-20.md)**。
 本書は「操作する人が何を打つか」だけを書く。仕様と食い違ったら PROTOCOL.md が勝つ。
 
-以下のコマンドは **Temari repo の直下**で、Git Bash と `julia +1.11.9` で打つ。
+以下のコマンドは **Temari repo の直下**で、Git Bash、`julia +1.11.9`、Python >= 3.6 で打つ。
 
 ## 0. 共有を開いた人が見るもの (2026-08-21 の配置)
 
@@ -13,7 +13,7 @@
   register.cmd               ダブルクリック = この PC を登録
   unregister.cmd             ダブルクリック = 登録解除
   README.txt                 数行の案内 (Notepad)
-  setup\                     ワーカーが実行するプログラム 7 本 + SETUP_SHA256
+  setup\                     登録・ワーカー運用のプログラム 8 本 + SETUP_SHA256
   code\                      内容アドレスのコード書庫 temari-<sha16>.tar.gz (+ .json)
   spool\                     機械が書くもの全部 (queue running results done failed control hosts campaigns)
 ```
@@ -28,7 +28,8 @@
 | `PROTOCOL.md` | 仕様 (正本) |
 | `PIN.json` | 全 PC 共通の既定 (julia 1.11.9 / `claim_timeout` 900 s / reaper 300 s / threads 2 / slot 0.75 / `code.name`) |
 | `worker.conf.template` | `LOCAL/worker.conf` の雛形 (§9 の鍵の一覧。テストが実体を確かめる) |
-| `bootstrap.ps1` | PC の登録本体 (`register.cmd` が昇格して呼ぶ)。winget → juliaup → NAS 試験 → タスク登録 → 台帳 |
+| `bootstrap.ps1` | PC の登録本体 (`register.cmd` が昇格して呼ぶ)。winget で Git / Python / juliaup → Python selftest → NAS 試験 → タスク登録 → 台帳 |
+| `../agreement_check.py` | 数値一致の判定器。setup 版は登録時の Python selftest 専用、publish はコード書庫内の固定版を使う |
 | `register.cmd` / `unregister.cmd` | 共有直下に置くダブルクリック用の batch (**CRLF**) |
 | `share_README.txt` | 共有直下に `README.txt` として置く数行の案内 (**CRLF**) |
 | `nastest.ps1` | NAS 試験タスクの中身 (作成 → rename → 読取 → 削除) |
@@ -88,6 +89,15 @@ bash tools/jobq/pack_code.sh . --out-root //10.31.108.5/jobq      # 既定の RO
 3. UAC が出るので許可する (batch が自分を昇格し直し、元のユーザー名を引数で渡す)。
 4. 黒い窓に PASS / FAIL が出て `pause` で止まるので**読んでから閉じる**。
 
+- bootstrap は Git / juliaup と同じ段で Python >= 3.6 も確かめ、無ければ winget の現行 Python 3 を導入する。
+  既定パス → レジストリ → PATH の順で実体を探し、Task Scheduler でも同じものを使えるよう**絶対パス**を
+  `C:\jobq\worker.conf` と `spool\hosts\<worker_id>.json` に記録する。
+- 登録は `python --version` だけでなく、setup に配った変更なしの `agreement_check.py --selftest` が exit 0 に
+  なるところまで確認する。この setup 版は Python 環境の自己検査専用。publish の合否は必ず、成果物を生んだ
+  コード書庫内の `$CODE_CWD/tools/agreement_check.py` で判定する。
+- ⚠ **この更新より前に登録した PC は `register.cmd` をもう一度実行する。** 古い worker.conf に Python の
+  絶対パスが無くても通常の票は動き続けるが、同名成果物のバイト不一致だけは判定不能として FAIL +
+  `failed/<C>/unjudged/` になる。再登録は冪等で、このキーと台帳を補う。
 - 昇格したアカウントとログオン中のアカウントが違うと、bootstrap は**そこで止まる**
   (「register.cmd は X として昇格されましたが、ワーカーのアカウントは Y です」)。Y でログオンし直すか、
   Y をローカル管理者にしてからやり直す。
@@ -173,23 +183,47 @@ julia +1.11.9 tools/jobq/queuectl.jl issue temari_fv6_join
 ### 3.4 σ(β,Δ) の deep 認証
 
 ```bash
-# (a) 行集合 → 票の args。1 票 = 1 チャネル (Z, tag) の全行 (deep は E₀ 3 点 + sentinel。≤ 12 行/票)
-julia +1.11.9 --project=. tools/jobq_rows_sigma.jl --profile deep --rule v4 > ../qcamp/rows_deep_v4.json
-#     残件・遅いチャネルを 1 行ずつにしたいとき: --group row。pilot だけなら --profile pilot (9 票 / 11 行)
-
-# (b) その書庫のコード自身に CERT_FP_V2 を計算させる (--limit 0 = 1 行も計算しない。~17 s)
+# (a) その書庫のコード自身に CERT_FP_V2 を計算させる (--limit 0 = 1 行も計算しない。~17 s)
 #     ⚠ **報告であって門ではない** — 記録に残すために見るだけで、campaign には渡さない
 CERT_FP=$(julia +1.11.9 tools/jobq/queuectl.jl fingerprint --code-dir "$TREE" --code-sha256 "$CODE" --rule v4 | head -1)
 echo "cert_fp(code=$CODE) = $CERT_FP"    # campaign の記録として控える
 
-# (c) campaign
+# (b) gate = canonical sentinel 11 行だけ。args と費用・来歴 sidecar は別ファイル
+julia +1.11.9 --project=. tools/jobq_rows_sigma.jl --profile deep --wave sentinel --rule v4 \
+      --code-sha256 "$CODE" --cert-fp "$CERT_FP" \
+      --out ../qcamp/rows_deep_v4_gate.json --est-out ../qcamp/rows_deep_v4_gate.est.json
+julia +1.11.9 tools/jobq/queuectl.jl new-campaign --name temari_sigma_deep_gate \
+      --task temari.certify_sigma_v2 --code-sha256 "$CODE" --code-commit "$(git -C "$TREE" rev-parse HEAD)" \
+      --args-json ../qcamp/rows_deep_v4_gate.json
+julia +1.11.9 tools/jobq/queuectl.jl issue temari_sigma_deep_gate
+
+# (c) gate 11 票の完走・物理照合後に tag 別係数を作る。
+#     sentinel に無い L2/L3 の fallback は黙って推定せず、この指定を記録に残す。
+julia +1.11.9 --project=. tools/jobq_rows_sigma.jl --make-calibration \
+      --sentinel-est ../qcamp/rows_deep_v4_gate.est.json \
+      --results-dir //10.31.108.5/jobq/spool/results/temari_sigma_deep_gate \
+      --fallback L2=L1 --fallback L3=L1 --out ../qcamp/rows_deep_v4.calibration.json
+
+# (d) 正式 campaign = canonical 1,583 行を較正済み LPT 順で 1 行/票。
+#     sentinel 11 行もここで再計算するので、正式集計はこの campaign だけで閉じる。
+julia +1.11.9 --project=. tools/jobq_rows_sigma.jl --profile deep --wave full --rule v4 \
+      --code-sha256 "$CODE" --cert-fp "$CERT_FP" --calibration ../qcamp/rows_deep_v4.calibration.json \
+      --out ../qcamp/rows_deep_v4.json --est-out ../qcamp/rows_deep_v4.est.json
 julia +1.11.9 tools/jobq/queuectl.jl new-campaign --name temari_sigma_deep \
       --task temari.certify_sigma_v2 --code-sha256 "$CODE" --code-commit "$(git -C "$TREE" rev-parse HEAD)" \
       --args-json ../qcamp/rows_deep_v4.json
 julia +1.11.9 tools/jobq/queuectl.jl issue temari_sigma_deep
-julia +1.11.9 tools/jobq/queuectl.jl issue temari_sigma_deep --jobseq 1-20     # 最初は少しだけ出して様子を見る
 ```
 
+- gate と full は**別 campaign**。campaign manifest を作成後に並べ替えず、gate の実測で係数を決めてから
+  full の jobseq を初めて確定する。正式結果は full の `temari_sigma_deep` 1 campaign だけを集計し、
+  `temari_sigma_deep_gate` の JSONL を混ぜない。
+- gate から calibration を作る前に、11 票の `code_sha256` / `cert_fp` / rule / oracle / 全仕様内窓の pass と、
+  pilot v4 に対する σ 値の再現を確認する。複数ホストに分かれた場合は、全 hostname に
+  `--host-slowdown <host>=<wall/reference>` を明示しない限り calibration は失敗する。
+- `rows_deep_v4*.json` の args は `rule` と `rows` だけ。`est_min`、費用根拠、code/cert 来歴は
+  `*.est.json` / calibration に置く。full は calibration の 11 観測・result/manifest SHA・host 正規化・
+  measured/fallback 係数を再計算してから 1,583 票を出す。
 - `fingerprint` は指紋を**再実装しない** — 本物の `tools/certify_sigma_v2.jl` を `--limit 0` で起動して、
   印字された 16 hex を読むだけ (再実装した hash は本物がずれたときに一緒にずれる)。1 行目が指紋、
   2 行目以降は `#` で始まる内訳 (`fp.rule` / `fp.src` …) なので `head -1` で取る。
@@ -246,55 +280,53 @@ julia +1.11.9 tools/jobq/queuectl.jl resume [worker_id]
 
 | 場所 | 意味 | 対処 |
 | --- | --- | --- |
-| `spool/failed/<C>/<base>.<owner>.json` | 不正な票 / 恒久エラー / 再試行上限 / dup (`reason` と `log_tail` を見る) | 票の誤り → campaign を作り直す。ホストの事情 → 直してから `reissue` |
-| `spool/failed/<C>/orphan/` | reaper が回収した旧 claim (`.reason.json` が回収の理由)。同じ base の epoch+1 が `queue/` にある | 見るだけ。遅れて完走した旧 attempt の結果は **lane 名なら**別名で受理される (`temari.gen_production` はチャネル名なので dup になりうる — §6.1) |
-| `spool/failed/<C>/dup/` | publish で先客と**バイトが違った**結果の複製 (先客はそのまま残る) | **まず両方の来歴 (`hostname` / `cpu`) を見る** — 違うホストどうしなら丸め誤差で**正常**。同じホストなら本物の異常 (§6.1) |
+| `spool/failed/<C>/<base>.<owner>.json` | 不正な票 / 恒久エラー / 再試行上限 / publish の測定不一致・判定不能 (`reason` と `log_tail` を見る) | 票の誤り → campaign を作り直す。ホストの事情 → 直してから `reissue`。`agreement_records` があれば判定記録も読む |
+| `spool/failed/<C>/orphan/` | reaper が回収した旧 claim (`.reason.json` が回収の理由)。同じ base の epoch+1 が `queue/` にある | 見るだけ。遅れて完走した旧 attempt の結果は **lane 名なら**別名で受理される (`temari.gen_production` の同名チャネルは自動判定 — §6.1) |
+| `spool/failed/<C>/dup/` | 先客と候補を判定器に掛け、**許容差外と測った**結果・両 sidecar・JSON 報告・判定記録 | 本物の数値 / 非数値葉の不一致。先客は上書きされていない。両来歴と `*.agreement.json` を保全して原因を追う |
+| `spool/failed/<C>/unjudged/` | Python / 判定器 / sidecar 来歴が使えず、バイト不一致を**判定できなかった**候補と証拠 | 一致とは扱わない。receipt の reason と checker log を直し、必要なら `reissue` |
+| `spool/results/<C>/agreement/` | バイトは違うが**既定許容差内と測定済み**の後着候補・両 sidecar・JSON 報告・判定記録 | 正常。票は DONE。`agreement_records` から最大差と両ホストを集計する |
 
 - ホスト側の事情 (コード書庫が無い・julia が無い・NAS が見えない) は **failed にならず票が queue へ戻る**
   (degraded)。`queuectl hosts` の state が `degraded` なら理由がそこに出る。
 - ⚠ **指紋が違うことを理由に degraded / failed になる経路はもう無い** (2026-08-21)。CPU が違えば最終ビットが
   違うのは正常なので、それで票を止めない。止めるのは `code_sha256` (書庫が違う)・`dataset_version`
   (承認済み spec の名乗りが違う)・1 つの run dir に処方が 2 種混ざった場合 (PROTOCOL §6.5.5)。
-  ⚠ **publish の `dup` だけはバイト比較が残っている** (§6.1)。あれは「1 つの成果物名に 1 通りのバイト列」を
-  守るための衝突検出であって、参加の可否や処方の判定ではない。
+  publish もバイト一致は速い成功経路にだけ使い、バイト不一致の合否は数値判定器で決める (§6.1)。
 - `max_claim_epoch` (PIN、既定 5) を超えた base は reaper が `failed/` へ落とす (`outcome = exhausted`)。
   それ以上は人が `reissue --epoch` で判断する。
 
-### 6.1 `dup` の読み方 — 違うホストどうしなら**正常**
+### 6.1 publish 衝突の読み方 — バイト差は worker が自動測定する
 
-publish は rename の後に最終ファイルの sha256 を読み直し、自分のと違えば自分の複製を `failed/<C>/dup/` へ退避して
-票を FAIL にする (PROTOCOL §5.4)。**この振る舞い自体は正しい** — 1 つの成果物名には 1 通りのバイト列しか置かず
-(そのバイトを説明しているのは先客の sidecar)、後から上書きしないため。
-しかし **バイトが違うこと自体は、違うマシンどうしなら正常**である (§8.1)。**`dup` を「処方が違う」と読まないこと。**
+publish は rename 後の最終ファイルを読み直し、sha256 が同じならそのまま成功する。違う場合だけ、
+worker.conf の絶対 Python パスと、成果物を生んだコード書庫内の固定版 `tools/agreement_check.py` を使って
+候補と先客の JSON を比較する (PROTOCOL §5.4)。**先客の成果物と sidecar はどの結論でも上書きしない。**
 
-**違うホストどうしの `dup` は `temari.gen_production` で実際に起こりうる。** 成果物名がチャネル名
-(`F_<tag>_Z<z>.json`) で lane 名ではないので (PROTOCOL §2)、reaper が claim を回収して epoch+1 で別の PC へ
-出し直した後に**元の PC が遅れて publish** すると (worker の `claim lost but the result is complete -> publishing late`)、
-同じ名前に 1 ulp 違うバイトが届く。lane 名の task (`.jsonl` / `.log` / `.txt`) は epoch が名前に入るので衝突しない。
+| 判定 | 票 | 証拠の場所 | 意味 |
+| --- | --- | --- | --- |
+| exit 0、既定許容差内 | DONE | `results/<C>/agreement/` | バイトは違うが数値・一致必須の非数値葉は同じ。後着候補も正常 |
+| exit 1、許容差外 / 非数値葉不一致 | FAIL | `failed/<C>/dup/` | 測って不一致。本物の処方・データ・計算の食い違いとして追う |
+| exit 2 / 起動失敗 / 来歴不完全 | FAIL | `failed/<C>/unjudged/` | 判定不能。⚠ **一致には倒さない** |
 
-見分け方 (**まず値で切り、来歴で機構を名指す**):
+各場所には候補と `*.agreement.json`、および取得できた候補 / 先客 sidecar・checker JSON / log が一組で残る。
+判定不能で作れなかった証拠のファイル名や最大差は record 内で `null` になる。
+判定記録には `verdict`、両 sha256、両ホスト名、`max_rel` / `max_abs`、checker exit、`code_sha256` がある。
+DONE / FAIL receipt の `agreement_records` はその SPOOL 相対パスなので、次のように辿れる:
 
 ```bash
-S=//10.31.108.5/jobq/spool; C=temari_fv6_join; N=F_M5_Z33.json
-grep -o '"hostname": *"[^"]*"' "$S/results/$C/$N.manifest.json"    # 先客の来歴 (`cpu` も見る)
-ls "$S/failed/$C/dup/"                                             # 自分の複製 = <outname>.<owner> (owner に worker_id が入っている)
-PYTHONIOENCODING=utf-8 python tools/agreement_check.py \
-      "$S/results/$C/$N" "$S/failed/$C/dup/$N.<owner>"              # 先客 vs 退避した複製
+S=//10.31.108.5/jobq/spool; C=temari_fv6_join
+grep -R '"agreement_records"' "$S/done/$C" "$S/failed/$C"       # 票から判定記録を数える
+find "$S/results/$C/agreement" "$S/failed/$C/dup" \
+     "$S/failed/$C/unjudged" -name '*.agreement.json' -print     # 個々の最大差・両ホストを見る
 ```
 
-| 見えたもの | 意味 | すること |
-| --- | --- | --- |
-| exit 0 + **ホスト名が違う** | **正常** — CPU の丸め差 (実測の最大絶対差は 1 ulp 級 = §8.1。零点近傍では相対差が跳ねるので絶対差で見る) | 先客をそのまま使い、`reissue` しない。むしろ**合意測定の標本が 1 つ手に入った**ので §8 の手順 5 の数値に足す |
-| exit 0 + **ホスト名が同じ** | 丸め誤差の範囲内だが CPU 差では説明できない。既知の候補 = **SCF がプロセス間で散発的に別反復で止まる** (CLAUDE.md / `src/prod_factors_v1/MANIFEST.md`)。**処方の違いではない** | 先客をそのまま使う。ただし**記録に残す** (`code_sha256` が両側で同じことは確かめる) |
-| **exit 1** (ホスト名によらない) | 丸め誤差では説明がつかない (rtol/atol 超え、または「一致すべき」メタデータが違う) | ここで初めて本物の異常として追う — 処方・run dir の混流・`code_sha256`。両方の sidecar と receipt の `log_tail` を残す |
-
-- 掛けるのは**成果物の JSON どうし**。退避した複製は `.<owner>` が付いた名前だが、ファイル 2 つを直接渡す使い方では
-  名前は問わない (既定の `--rtol 1e-13 --atol 1e-15` のまま)。sidecar (`*.manifest.json`) を混ぜない — hostname と cpu が違って当然なので
-  「メタデータ不一致」で落ちる (§8)。
-- 1 票が複数チャネルを出す `temari.gen_production` では、**dup になったのはその 1 個だけ**で残りは publish 済み。
-  receipt の `published` に届いた分が並ぶので、欠けているチャネルはそこで数える。
-- ⚠ この判定は自動化していない — worker は相変わらず sha256 で判定して FAIL にする。
-  **人が上の 3 行を見るのが適合の手順**。
+- checker に渡すのは**成果物 2 ファイルだけ**。sidecar は入力に混ぜない。worker は
+  `PYTHONIOENCODING=utf-8` を付け、`--rtol` / `--atol` を渡さないので、正本の既定
+  `rtol = 1e-13` / `atol = 1e-15` が判定基準になる。
+- 同名衝突が起きるのは `temari.gen_production` のチャネル名 (`F_<tag>_Z<z>.json`) だけ。reaper が
+  epoch+1 を別 PC へ出した後に元の PC が遅れて publish すると起きうる。lane 名の task は epoch が
+  ファイル名に入るので衝突せず、同じ行を持つ 2 本が `results/` に並ぶ。
+- 1 票が複数チャネルを出す `temari.gen_production` では、衝突した 1 個の判定後も残りを publish する。
+  FAIL receipt の `published` には届いた分、`agreement_records` には衝突した分が並ぶ。
 
 ## 7. 結果の集計
 
@@ -308,6 +340,7 @@ julia +1.11.9 --project=. tools/certify_sigma_v2.jl \
 ```
 
 集計の前に `queuectl.jl status temari_sigma_deep` で queue / running が 0 であることを見る。
+`temari_sigma_deep_gate` は較正と物理ゲートの証拠であり、上の正式集計 glob へ混ぜない。
 
 ### 7.2 本番生成 (F v6)
 
@@ -319,7 +352,8 @@ julia +1.11.9 --project=. tools/certify_sigma_v2.jl \
 どの PC・CPU・julia 版・digest・attempt が計算したかは、成果物の隣の **sidecar**
 `results/<C>/<outname>.manifest.json` にある (`hostname` / `cpu` / `julia` / `threads` / `worker_id` /
 `code_sha256` / `code_commit`)。結果ディレクトリを別の場所へ複写しても一緒に付いて回る。
-`done/<C>/<base>.<owner>.json` は**ポインタ** (`outnames` と `manifest_sha256` だけ) なので、来歴を読むときは sidecar を見る。
+`done/<C>/<base>.<owner>.json` は**ポインタ** (`outnames` / `manifest_sha256` / `agreement_records`) なので、
+通常の来歴は sidecar、バイト不一致を測定して受理した後着候補の来歴は `agreement_records` の記録を見る。
 
 - 参加の門が無い (§2) ⇒ **1 つのデータセットが複数の CPU で作られるのが正常**。
   **どのチャネルをどのホストが計算したかを sidecar から集めて、出荷の `MANIFEST.md` に載せる**
@@ -393,26 +427,29 @@ PROTOCOL §6.5.2 の表はこのうち 6 つを類 A–F として挙げてい�
 bash tools/jobq/test/t1_claim_contention.sh                                    # T1: 同じ票を 16 並列 × 50 回 claim (scratch)
 bash tools/jobq/test/t1_claim_contention.sh //10.31.108.5/jobq/t1 16 200        # 同じことを NAS 上で (専用サブディレクトリ)
 bash tools/jobq/test/t1_claim_contention.sh "" 16 50 mv                        # 原始操作を替えて比べる (mv / mv-verify / mkdir / noclobber)
-bash tools/jobq/test/e2e_noop.sh                                               # 端から端まで (下記 A–H。175 検査 / 約 5 分)
+bash tools/jobq/test/e2e_noop.sh                                               # 端から端まで (下記 A–H。PASS 184 / FAIL 0、約 5 分)
+bash tools/jobq/test/publish_agreement_negative_test.sh                       # Python 起動不能を FAIL + unjudged に倒す負のテスト
+bash tools/jobq/test/publish_agreement_mutation_test.sh                       # fail-closed の 1 行を受理へ変えると負のテストが落ちる
 julia +1.11.9 tools/jobq/queuectl.jl selftest                                  # JSON 往復・識別子・plan/verify の fixture
+PYTHONIOENCODING=utf-8 python tools/agreement_check.py --selftest              # 配布する判定器自身の selftest
 PYTHONIOENCODING=utf-8 python tools/agreement_check.py <A> <B> --rtol 1e-13     # 合意測定 (§8。門ではなく測定)
 ```
 
 `e2e_noop.sh` が検査するもの: **A** 配置 (共有直下は 3 ファイル + `setup/ code/ spool/` だけ、`leases/` と
 `running/.reaping/` が無い、CRLF/LF) / **B** 一周 (publish・sidecar・ポインタ receipt・恒久失敗) /
 **C** コード書庫 (`pack_code.sh` → 取得 → **展開前の sha256 検証** → 展開 → そのツリーを cwd に実行。
-digest 不一致は FAIL、書庫が無ければ RETURN) / **D** **参加の門が無いこと** (`gate` / `gate-check` という
+同名 publish は許容差内なら DONE + `agreement/`、許容差外なら FAIL + `dup/`。digest 不一致は FAIL、
+書庫が無ければ RETURN) / **D** **参加の門が無いこと** (`gate` / `gate-check` という
 subcommand が無い・台帳に `gates` が無い・`hosts` に gate の列が無い・`gen_production` の plan が
 `JOBQ_REQUIRE_GATE` を出さない・gate を 1 つも持たないホストで票が完走する) /
 **E** 実行中に claim を横取りされた worker が**receipt を書かず attempt も使わずに退く** /
 **F** reaper (`tick` の沈黙 → orphan → epoch+1 で再投入 → 完走) / **G** certify の verify が
-**済んだ行の error 行では落ちない** (未完の行の error 行では落ちる)。
+**済んだ行の error 行では落ちない** (未完の行の error 行では落ちる) / **H** 最終形に共有直下への漏れが無い。
 
-- ⚠ e2e が実行するのは `jobq.noop` と、scratch に作った**偽の `src/ionization.jl`** だけ。
-  本物の selftest / refcheck / gen_production / certify は 1 度も起動しない
-  (C の主張は project = temari の task でしか通らないので、テンプレートは `temari.selftest` を使い、
-  中身を stub ツリーに差し替えてある)。**D が出す `gen_production` の票は `queuectl plan` にしか掛けず**
-  (plan は argv と環境変数を印字するだけ)、worker に渡す前に queue から取り除く。
+- ⚠ e2e が実行するのは `jobq.noop` と、scratch に作った**偽の `src/ionization.jl` / `src/gen_production.jl` だけ**。
+  repo 本物の selftest / refcheck / gen_production / certify は 1 度も起動しない。C の publish 2 事例は
+  最小 JSON を 1 個書く gen_production stub、selftest は 1 行で成功を印字する stub である。
+  **D が別途出す `gen_production` の票は `queuectl plan` にしか掛けず**、worker に渡す前に queue から取り除く。
 - ⚠ **e2e を同時に 2 つ走らせない** (WORKER_ID とスロットを共有して互いを壊す)。スクリプトが lock で防ぐ。
 - ⚠ `queuectl selftest` は **repo の `tools/jobq/queuectl.jl`** で走らせる。fixture が `tools/jobq/test/` にあり、
   配布される `setup/` には入らないため。走らせるときは `JOBQ_ROOT` / `JOBQ_SPOOL` / `JOBQ_LOCAL` を外し

@@ -100,6 +100,51 @@ function Find-GitBash {                                # default path -> registr
   foreach ($c in $cands) { if (Test-Path -LiteralPath $c) { return $c } }
   return $null
 }
+function Test-Python36([string]$exe) {
+  if (-not $exe -or -not (Test-Path -LiteralPath $exe)) { return $false }
+  $null = Invoke-Native $exe @('-c', 'import sys; raise SystemExit(0 if sys.version_info >= (3, 6) else 1)')
+  return ($script:NativeExit -eq 0)
+}
+function Find-Python {                                 # default paths -> registry -> python.exe on PATH
+  $cands = @()
+  foreach ($pat in @(
+      (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python*\python.exe'),
+      'C:\Program Files\Python*\python.exe',
+      'C:\Python*\python.exe')) {
+    $cands += @(Get-ChildItem -Path $pat -File -ErrorAction SilentlyContinue |
+                 Sort-Object FullName -Descending | ForEach-Object { $_.FullName })
+  }
+  foreach ($root in @('HKLM:\SOFTWARE\Python\PythonCore',
+                       'HKLM:\SOFTWARE\WOW6432Node\Python\PythonCore',
+                       'HKCU:\SOFTWARE\Python\PythonCore')) {
+    foreach ($ver in @(Get-ChildItem -Path $root -ErrorAction SilentlyContinue |
+                        Sort-Object PSChildName -Descending)) {
+      $ik = Join-Path $ver.PSPath 'InstallPath'
+      try {
+        $key = Get-Item -LiteralPath $ik -ErrorAction Stop
+        $ep = [string]$key.GetValue('ExecutablePath', '')
+        if ($ep) { $cands += $ep }
+        $ip = [string]$key.GetValue('', '')
+        if ($ip) { $cands += (Join-Path $ip 'python.exe') }
+      } catch { }
+    }
+  }
+  $cmds = @(Get-Command python.exe -All -ErrorAction SilentlyContinue)
+  foreach ($cmd in $cmds) { if ($cmd.Source) { $cands += $cmd.Source } }
+  $seen = @{}
+  foreach ($c in $cands) {
+    if (-not $c) { continue }
+    try { $full = [IO.Path]::GetFullPath($c) } catch { continue }
+    # Windows' App Execution Alias is a Store launcher, not an interpreter that a
+    # non-interactive scheduled task can rely on.  Ignore it even if it happens to start here.
+    if ($full -match '\\Microsoft\\WindowsApps\\') { continue }
+    $key = $full.ToLowerInvariant()
+    if ($seen.ContainsKey($key)) { continue }
+    $seen[$key] = $true
+    if (Test-Python36 $full) { return $full }
+  }
+  return $null
+}
 function Install-IfMissing([string]$id, [scriptblock]$present) {
   if (& $present) { Say "$id already installed"; return }
   Step "winget install --id $id -e --accept-source-agreements --accept-package-agreements" {
@@ -339,8 +384,11 @@ $ramGb = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemor
 if ($Slots -le 0) { $Slots = [int][math]::Max(1, [math]::Floor($coresPhys * $slotFraction / $Threads)) }
 Say "cpu='$cpuName' cores=$coresPhys/$coresLog ram=${ramGb}GB -> slots=$Slots threads=$Threads (slot_fraction=$slotFraction) julia=$juliaVer"
 
-# ---------------------------------------------------------------- step 1: Git, juliaup, julia channel
+# ---------------------------------------------------------------- step 1: Git, Python, juliaup, julia channel
 Install-IfMissing 'Git.Git' { [bool](Find-GitBash) }
+# `winget search --id Python.Python.3.14 -e --source winget` on 2026-08-23 lists this current Python 3
+# package. The package version is deliberately not pinned; any installed Python >= 3.6 is accepted.
+Install-IfMissing 'Python.Python.3.14' { [bool](Find-Python) }
 Install-IfMissing 'Julialang.Juliaup' { [bool](Get-Command juliaup.exe -ErrorAction SilentlyContinue) }
 Install-JuliaChannel $juliaVer
 $bash = Find-GitBash
@@ -348,6 +396,24 @@ if (-not $bash) {
   if ($DryRun) { $bash = 'C:\Program Files\Git\bin\bash.exe'; Say "bash.exe not found; dry-run assumes $bash" }
   else { throw 'bash.exe not found after Git install (expected C:\Program Files\Git\bin\bash.exe)' }
 }
+$python = Find-Python
+if (-not $python) {
+  if ($DryRun) { $python = 'C:\Program Files\Python314\python.exe'; Say "python.exe not found; dry-run assumes $python" }
+  else { throw 'Python >= 3.6 not found after Python install' }
+}
+$pythonVersion = 'Python 3.x (dry-run assumption)'
+if (Test-Path -LiteralPath $python) {
+  $pythonVersion = (Invoke-Native $python @('--version')).Trim()
+  if ($script:NativeExit -ne 0) {
+    throw "Python >= 3.6 did not start correctly: $python ($pythonVersion; exit $script:NativeExit)"
+  }
+  if ($pythonVersion -notmatch '^Python 3\.(\d+)(?:\.|$)') {
+    throw "Python did not report a supported version: $python ($pythonVersion)"
+  }
+  $pythonMinor = [int]$Matches[1]
+  if ($pythonMinor -lt 6) { throw "Python >= 3.6 is required: $python ($pythonVersion)" }
+}
+$pythonMsys = ConvertTo-MsysPath $python
 
 # ---------------------------------------------------------------- step 2: LOCAL, setup copy, worker.conf
 $workerId = Get-ExistingWorkerId
@@ -362,6 +428,7 @@ $conf = @(
   "WORKER_ID=$workerId",
   "SLOTS=$Slots",
   "THREADS=$Threads",
+  "PYTHON=$(ConvertTo-ShWord $pythonMsys)",
   "STALL_SECONDS=$(Prop $pin 'stall_seconds' 7200)",
   "MAX_ATTEMPTS=$(Prop $pin 'max_attempts' 5)",
   "HEARTBEAT_INTERVAL=$(Prop $pin 'heartbeat_interval' 180)",
@@ -375,6 +442,16 @@ Step "create $Local\{setup,logs,state,work,code} and $hostsDir; copy $setupSrc\*
   New-Item -ItemType Directory -Path $hostsDir -Force | Out-Null
   Copy-Item -Path (Join-Path $setupSrc '*') -Destination $setupDst -Recurse -Force
   if (-not (Test-Path -LiteralPath (Join-Path $setupDst 'nastest.ps1'))) { throw "copy did not produce $setupDst\nastest.ps1" }
+}
+# This setup copy is used only to prove at registration that the discovered interpreter can run the
+# unchanged checker and its standard-library selftest. Publish always uses the checker in CODE_CWD,
+# whose bytes are fixed by the ticket's code_sha256; it never uses this setup copy for a verdict.
+$checkerSelftest = if ($DryRun) { Join-Path $setupSrc 'agreement_check.py' } else { Join-Path $setupDst 'agreement_check.py' }
+if (-not (Test-Path -LiteralPath $checkerSelftest)) { throw "agreement_check.py not found for Python selftest: $checkerSelftest" }
+Step "run $python $checkerSelftest --selftest" {
+  if (-not (Test-Path -LiteralPath $python)) { throw "Python executable disappeared before selftest: $python" }
+  Invoke-NativeStreaming $python @($checkerSelftest, '--selftest')
+  if ($script:NativeExit -ne 0) { throw "agreement_check.py --selftest failed (exit $script:NativeExit)" }
 }
 $confChanged = (Test-Path -LiteralPath $confPath) -and (([IO.File]::ReadAllText($confPath) -replace "`r`n", "`n") -ne ($conf + "`n"))
 Step "write $confPath (LF)" { Write-LfFile $confPath ($conf + "`n") }
@@ -436,6 +513,7 @@ function Build-HostRecord {
     schema = 1; worker_id = $workerId; hostname = $hostName; cpu = $cpuName
     cores_physical = $coresPhys; cores_logical = $coresLog; ram_gb = $ramGb
     slots = $Slots; threads = $Threads; julia_version = $juliaVer
+    python = $python; python_version = $pythonVersion
     registered_utc = (Prop $existing 'registered_utc' $now); updated_utc = $now
     bootstrap_user = $userName; root = $Root; spool = $Spool; local = $Local; bash = $bash
     nas_test = $nasTest
@@ -501,6 +579,6 @@ Step 'powercfg /change standby-timeout-ac 0 ; powercfg /hibernate off' {
 Step "write host record $hostRecPath (tmp + rename)" { Write-JsonAtomic $hostRecPath (Build-HostRecord) }
 if ($DryRun) { Write-Host (((Build-HostRecord) | ConvertTo-Json -Depth 8) -replace '(?m)^', '    ') }
 
-Say "done: worker_id=$workerId slots=$Slots threads=$Threads julia=$juliaVer bash=$bash"
+Say "done: worker_id=$workerId slots=$Slots threads=$Threads julia=$juliaVer python=$pythonVersion ($python) bash=$bash"
 if ($DryRun) { Say 'dry-run: nothing was changed' }
 exit 0

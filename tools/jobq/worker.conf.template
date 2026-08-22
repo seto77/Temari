@@ -6,7 +6,7 @@
 #   - test/ の適合テストは本ファイルの @…@ を sed で置換して worker.conf を作る。
 #   ⇒ キーを足す・名前を変えるときは bootstrap.ps1 と本ファイルの両方を直すこと。
 #
-# 置換する目印は 6 つ: @ROOT@ @SPOOL@ @LOCAL@ @WORKER_ID@ @SLOTS@ @THREADS@
+# 置換する目印は 7 つ: @ROOT@ @SPOOL@ @LOCAL@ @WORKER_ID@ @SLOTS@ @THREADS@ @PYTHON@
 #
 # bash が source する。値は単純な代入のみ (コマンド置換・展開を書かない)。
 # 優先順は 環境変数 JOBQ_<大文字> > 本ファイル > PIN.json > 組み込み既定 (§9)。
@@ -18,6 +18,9 @@ JOBQ_LOCAL=@LOCAL@
 WORKER_ID=@WORKER_ID@
 SLOTS=@SLOTS@
 THREADS=@THREADS@
+# 数値一致判定器を起動する Python >= 3.6 の絶対パス。PATH は Task Scheduler と対話シェルで
+# 異なるため使わない。既登録 PC は bootstrap を再実行してこのキーを追加する。
+PYTHON='@PYTHON@'
 # julia の実体 (任意)。既定は PATH の `julia`。Store 版のアプリ実行エイリアスを MSYS が辿れない
 # ホストでだけ、実体のランチャを絶対パスで指す。⚠ パスにパッケージ版数が入るので、
 # Store が Julia を更新したら書き直しが要る。
