@@ -342,7 +342,8 @@ attempts_left() { [ $(( $(read_attempt) + 1 )) -le "$(max_attempts)" ]; }   # �
 run_plan() {  # §6.1: eval できる形で JOBQ_* を受け取る。戻り値 = queuectl の終了コード。TICKET_PARSED = 票が JSON として読めた証拠 (exit 0)
   local out rc
   unset JOBQ_PROJECT JOBQ_CODE_SHA256 JOBQ_CODE_ARCHIVE JOBQ_CODE_DIR JOBQ_COMMIT JOBQ_JULIA JOBQ_WORKDIR \
-        JOBQ_OUT JOBQ_OUT_FROM_LOG JOBQ_WATCH_PATH JOBQ_PERMANENT_RE JOBQ_PERMANENT_EXIT JOBQ_OUTNAME \n        JOBQ_STALL_SECONDS JOBQ_MAX_ATTEMPTS
+        JOBQ_OUT JOBQ_OUT_FROM_LOG JOBQ_WATCH_PATH JOBQ_PERMANENT_RE JOBQ_PERMANENT_EXIT JOBQ_OUTNAME \
+        JOBQ_STALL_SECONDS JOBQ_MAX_ATTEMPTS
   JOBQ_ARGV=()
   out=$("$JULIA" "$(qj)" --startup-file=no "$QUEUECTL" plan "$TICKET" --threads "$THREADS" --work-dir "$WORK" \
         --root "$ROOT" --spool "$SPOOL" --local "$LOCAL" 2> "$WORK/plan.err"); rc=$?
@@ -495,7 +496,14 @@ run_verify() {  # §6.2 (票は手元の写し)。stdout に ARTEFACT 行。戻�
   "$JULIA" "$(qj)" --startup-file=no "$QUEUECTL" verify "$TICKET_LOCAL" --out "$JOBQ_OUT" --log "$WORK/run.$ATTEMPT.log" \
     --manifest-dir "$WORK/manifest" --root "$ROOT" --spool "$SPOOL" --local "$LOCAL" \
     --host "$HOST" --worker "$WORKER_ID" --owner "$OWNER" --attempt "$ATTEMPT" --cpu "$CPU" --threads "$THREADS" \
-    --started-utc "$STARTED" --finished-utc "$FINISHED" > "$WORK/verify.$ATTEMPT.out" 2> "$WORK/verify.$ATTEMPT.log"; rc=$?
+    --started-utc "$STARTED" --finished-utc "$FINISHED" > "$WORK/verify.$ATTEMPT.out" 2> "$WORK/verify.$ATTEMPT.log" &
+  # 260822Cl: verify も生存の合図を打ちながら待つ。同期実行のままだと verify の間だけ tick が止まり、
+  #   claim_timeout (900 s) を越えれば**生きている** claim に reaper が strike を積む (§7)。publish は
+  #   成果物ごとに status_tick を打ってあるのに、verify だけがその穴を持っていた (2026-08-22 のレビュー)。
+  #   JPID に載せる = worker が落ちたときの後始末 (on_exit の kill_tree) が verify の julia にも効く。
+  JPID=$!
+  while kill -0 "$JPID" 2>/dev/null; do sleep 1; status_tick; done   # status_tick 自身が status_interval で律速する
+  wait "$JPID" 2>/dev/null; rc=$?; JPID=""
   log "verify exit $rc: $(err_msg "$WORK/verify.$ATTEMPT.log")$(last_lines "$WORK/verify.$ATTEMPT.out" 1)"
   return "$rc"
 }

@@ -62,8 +62,9 @@ SPOOL/                                    既定 = ROOT/spool
   failed/<campaign>/dup/                  publish で先客と中身が違った成果物
   control/PAUSE                           全ワーカーの新規 claim 停止 (実行中は完走)
   control/PAUSE.<worker_id>               そのワーカーだけ停止
+  control/load                            時間帯・ホスト別の稼働スロット数 (§5.7。無ければ全開)
   hosts/<worker_id>.json                  登録台帳 (bootstrap が書く。§10。⚠ gate の欄は廃止した)
-  hosts/<worker_id>-s<slot>.status.json   スロットの状態 + tick (worker が ≤ 60 s ごとに tmp+rename で上書き)
+  hosts/<worker_id>-s<slot>.status.json   スロットの状態 + tick (worker が ≤ `heartbeat_interval` [既定 180 s] ごとに tmp+rename で上書き)
   campaigns/<campaign>/manifest.json      jobseq ↔ args の対応表 (正本。再発行でも変えない)
   campaigns/<campaign>/.tmp/
 ```
@@ -268,7 +269,7 @@ tar -C <tree> --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric
 
 1. status (§8) を書く。`control/PAUSE*` があれば `poll_interval` 寝て先頭へ。
 2. `queue/*.json` (`.tmp/` を除く) を名前順に並べ、先頭から CLAIM を試す。全部失敗なら `poll_interval` 寝て先頭へ。
-3. **claim 直後から status の `tick` を進め始める** (§7 の生存判定。以降 DONE / FAIL / RETURN まで ≤ 60 s ごと)。
+3. **claim 直後から status の `tick` を進め始める** (§7 の生存判定。以降 DONE / FAIL / RETURN まで ≤ `heartbeat_interval` (既定 180 s) ごと)。
 4. claim した票を `queuectl plan` に掛ける (§6.1)。exit 2 (恒久) → FAIL。exit 1 → RETURN + degraded。
 5. plan が通ったら**票を `work/<base>/<base>.json` へ写す** (その時点で所有していた証拠)。以後の verify と
    receipt は NAS 上の claim ではなくこの写しを読む。写しと**ファイル名の照合** (§3) に落ちたら FAIL。
@@ -356,6 +357,29 @@ tar -C <tree> --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric
   値は**整数 ≥ 1 であることを起動時に検査する** (0 や非数で NAS を叩き続けないように)。
 - `JOBQ_QUEUECTL` (queuectl.jl の所在)、`JOBQ_JULIA_CHANNEL` (queuectl を走らせる julia チャネル)、
   `JOBQ_THREADS`、`JOBQ_MAX_ATTEMPTS`、`JOBQ_ROOT` / `JOBQ_SPOOL` / `JOBQ_LOCAL` (worker.conf より優先)。
+
+### 5.7 `control/load` — 負荷の動的制御 (共有の 1 ファイル。中央のデーモンは置かない)
+
+`SPOOL/control/load` を **idle ループの先頭で** (PAUSE と同じ位置で) 各スロットが自分で読み、
+「このホストのこの時刻に何スロット働かせるか」を決める。当たったスロット番号より上のスロットは
+`standby` を書いて票を取らない (**tick は打ち続ける** — §8)。
+
+書式は空白区切り、`#` 以降はコメント、**最後に当たった行が勝つ**:
+
+```
+<host-glob>  <days>  <HH:MM-HH:MM>  <active_slots|N%>  [threads]
+
+*         *        *               100%
+*         mon-fri  08:30-18:30      50%   2
+d317-10   *        *                0
+```
+
+- `days` = `*` | `mon,tue` | `mon-fri` (週跨ぎ可: `fri-mon`)。時刻も日跨ぎ可 (`22:00-06:00`)。
+- 規律 3 つ:
+  1. **fail-open** — 無い / 読めない / 1 行も当たらない → 全開。壊れた行は黙って読み飛ばす
+     (1 行でも当たれば従う)。共有の一瞬の不調でフリートが止まってはいけない。
+  2. **走行中の票を殺さない** — 評価するのは idle ループの先頭だけ。
+  3. **中央のデーモンを置かない** — 各スロットが自分の時計で評価する。単一障害点を作らない。
 
 ## 6. queuectl.jl — task テンプレートと検証 (唯一の知識の置き場)
 
@@ -674,7 +698,7 @@ BLAS スレッド数という**正当に PC ごとに違う値**を持つ。同�
 ## 7. reaper.sh — claim の生存監視と回収 (lease ファイルは無い)
 
 **簡単化 (2026-08-21)**: 1 スロットは同時に 1 票しか走らせないので、**スロットの生存 = 票の生存**。
-`hosts/<worker_id>-s<slot>.status.json` が ≤ 60 s ごとに書かれている以上、別の lease ファイルは要らない。
+`hosts/<worker_id>-s<slot>.status.json` が ≤ `heartbeat_interval` (既定 180 s) ごとに書かれている以上、別の lease ファイルは要らない。
 ⇒ `leases/` とワーカー内の lease サブシェル、その GC 規則、append と rename の使い分けを**全部やめた**。
 
 - 周期 `reaper_interval` (300 s)。どの PC で動いてもよい (通常は発行側の PC。多重起動は無害だが 1 つにする)。
@@ -685,6 +709,13 @@ BLAS スレッド数という**正当に PC ごとに違う値**を持つ。同�
   3. `base` がこの claim の base と一致、かつ
   4. `tick` が前回の観測から**増えている**。
   1〜3 のどれかが崩れていれば (ファイルが無い場合も含めて) **沈黙**として扱う。
+  ⚠ **status は 1 回の pass で 1 回だけ読み、同じ本文から 2〜4 の値を取る**。鍵ごとに読み直すと
+  worker の tmp+rename と重なって「`boot_seq` は旧世代・`base` は新世代」という混ざった観測ができる。
+- ⚠ **判定不能の倒し方は worker と reaper で逆向きで、それは意図的**。worker の `slot_alive` は
+  「読めない = 生きている」に倒す (誤って「死んでいる」と言えば同じ work dir で Julia が 2 本走る)。
+  reaper は「読めない = 沈黙」に倒す (こちらも「生きている」に倒すと、共有が不安定な間だけ
+  死んだスロットの claim が永久に回収されなくなる)。reaper 側の誤りは `claim_timeout` × 2 strikes
+  という長い窓で抑えてあり、回収しても epoch+1 で再投入されるだけなので、非対称のままにする。
 - 観測状態は `LOCAL/state/reaper.tsv` に `key(base)  owner  tick  last_change_local_epoch  strikes`。
   生きていれば `last_change` を**自分の `date +%s`** に更新し strikes = 0。沈黙のまま
   `now - last_change ≥ claim_timeout` (900 s) なら strikes +1。**owner が変われば別の claim** なので測り直す。
@@ -742,14 +773,22 @@ attempt, finished_utc, ticket|ticket_raw, log_tail}`。`ticket` は票が JSON �
 **status** `hosts/<worker_id>-s<slot>.status.json`:
 
 ```json
-{ "worker_id": "…", "slot": 0, "boot_seq": 7, "tick": 1234, "hostname": "…",
-  "state": "idle|running|degraded|paused", "base": "…|null", "attempt": 1, "reason": "…",
+{ "worker_id": "…", "slot": 0, "boot_seq": 7, "tick": 1234, "hostname": "…", "worker_sha": "…",
+  "state": "idle|running|degraded|paused|standby", "base": "…|null", "attempt": 1, "reason": "…",
   "updated_utc": "…" }
 ```
 
+- `worker_sha` は走っている `worker.sh` 自身の SHA-256 の先頭 16 桁。**どのホストがどの版で
+  回っていたかを receipt を読まずに一覧するためだけ**にある (版の同一性の照合には使わない — それは `code_sha256`)。
+- `standby` は `control/load` (§5.7) が稼働スロット数を絞っている状態。**票は取らないが tick は打つ**
+  ので、reaper から見れば idle と同じく生きている。
 - `tick` は**単調増加する整数**。書くたびに +1 し、`LOCAL/state/tick.s<slot>` に持って再起動を跨いで増え続ける
   (reaper が「増えたか」だけを見るので、値の意味は問わない)。
-- worker は idle でも running でも degraded でも **≤ 60 s ごと** (`status_interval`) に書く。
+- worker は idle でも running でも degraded でも standby でも **≤ `heartbeat_interval` ごと** に書く
+  (既定 **180 s**。`status_interval` は同じ値の内部の別名)。
+  ⚠ 2026-08-22 まで本書は 4 箇所で「≤ 60 s」と書いていたが、実装の既定は一貫して 180 s だった
+  (`PIN.json` の `heartbeat_interval`、`worker.conf.template`、`worker.sh` の最終 fallback)。
+  **実装を正本として本書を直した** (作者判断 2026-08-22)。回収までの余裕は 180 s ≪ 900 s × 2 strikes = 1200 s。
   Julia を走らせている間は停滞監視のループから書く。
 - tmp + rename で上書きする。tmp 名は同じディレクトリの**ドットファイル** (`.<name>.tmp`) にして、
   `*.status.json` や `<base>.*` の glob に見えないようにする。

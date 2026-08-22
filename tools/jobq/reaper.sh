@@ -110,6 +110,11 @@ jnum() { # $1 file $2 key — 平坦な JSON から整数を 1 個 (無ければ
 jstr() { # $1 file $2 key — 平坦な JSON から文字列を 1 個 (null / 無ければ空)
   tr -d '\n\r' < "$1" 2>/dev/null | grep -oE "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 | sed -E 's/.*:[[:space:]]*"//; s/"$//'
 }
+# 260822Cl: status は 1 pass に 1 回だけ読む (§7)。鍵ごとに読み直すと worker の tmp+rename と重なって
+#   「boot_seq は旧世代・base は新世代」という混ざった観測ができる。worker 側の status_snapshot と同じ規律。
+snap_read() { tr -d '\n\r' < "$1" 2>/dev/null; }                 # 読めなければ空 (= 沈黙。§7 の非対称は意図的)
+snap_num()  { printf '%s' "$1" | grep -oE "\"$2\"[[:space:]]*:[[:space:]]*[0-9]+" | head -1 | sed -E 's/.*:[[:space:]]*//'; }
+snap_str()  { printf '%s' "$1" | grep -oE "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 | sed -E 's/.*:[[:space:]]*"//; s/"$//'; }
 
 # ---- 成果物・受理の有無 (§4/§7) -------------------------------------------------------------------
 has_receipt() { # $1 campaign $2 base — done/ failed/ の直下だけ (orphan/ dup/ は見ない)
@@ -238,7 +243,7 @@ retry_orphans() {
 }
 
 pass() {
-  local now p f c j e o wid slot bseq base sf tick prev
+  local now p f c j e o wid slot bseq base sf tick prev snap
   now=$(date +%s); SEEN=(); HANDLED=()
   for p in "$SPOOL"/running/*.json; do
     f=${p##*/}
@@ -249,9 +254,9 @@ pass() {
     wid=${BASH_REMATCH[1]}; slot=${BASH_REMATCH[2]}; bseq=${BASH_REMATCH[3]}
     SEEN[$base]=1
     # 生存の合図 (§7): status が読める & boot_seq 一致 & base 一致 なら tick を採る。それ以外は沈黙 (空)
-    sf="$SPOOL/hosts/$wid-s$slot.status.json"; tick=""
-    if [ -f "$sf" ] && [ "$(jnum "$sf" boot_seq)" = "$((10#$bseq))" ] && [ "$(jstr "$sf" base)" = "$base" ]; then
-      tick=$(jnum "$sf" tick)
+    sf="$SPOOL/hosts/$wid-s$slot.status.json"; tick=""; snap=$(snap_read "$sf")
+    if [ -n "$snap" ] && [ "$(snap_num "$snap" boot_seq)" = "$((10#$bseq))" ] && [ "$(snap_str "$snap" base)" = "$base" ]; then
+      tick=$(snap_num "$snap" tick)
     fi
     prev=${S_TICK[$base]:--}
     if [ -z "${S_LAST[$base]:-}" ] || [ "${S_OWNER[$base]:-}" != "$o" ]; then
