@@ -267,6 +267,8 @@ printf 'name = "TemariStub"\nuuid = "3f2b0c11-0000-4000-8000-000000000001"\nvers
 ( cd "$tree_dir" && git init -q . && git add -A && \
   git -c user.name=e2e -c user.email=e2e@example.invalid commit -qm "jobq e2e stub tree" ) >"$log_dir/stubtree_git.log" 2>&1
 check "stub ツリーを git repo にした (pack_code.sh が commit を記録する)" test -d "$tree_dir/.git"
+# 実ツリーには無視された prod*/cache があり得る。clean commit を名乗る書庫へ untracked byte を混ぜない。
+printf 'must not enter the code archive\n' > "$tree_dir/src/prod_untracked_fixture.json"
 
 bash "$jobq_dir/pack_code.sh" "$tree_dir" --out-root "$ROOT" --name temari >"$log_dir/pack.out" 2>"$log_dir/pack.log"
 check "pack_code.sh が成功" eq "$?" 0
@@ -281,6 +283,8 @@ if [ -f "$ROOT/code/temari-$CODE16.tar.gz" ]; then
         eq "$(sha256sum "$ROOT/code/temari-$CODE16.tar.gz" | cut -c1-64)" "$CODE_SHA"
   check "書庫は小さい (< 1 MB。ツリー全体を固めていない)" \
         bash -c "[ \$(stat -c %s '$ROOT/code/temari-$CODE16.tar.gz') -lt 1048576 ]"
+  check "untracked な prod fixture は書庫に入らない (commit と archive の再現性)" \
+        bash -c "! tar -tzf '$ROOT/code/temari-$CODE16.tar.gz' | grep -q 'prod_untracked_fixture.json'"
 fi
 if [ -f "$ROOT/code/temari-$CODE16.json" ]; then
   check "code json に sha256 / commit / paths / bytes がある" \

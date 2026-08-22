@@ -17,9 +17,9 @@
 #   読む側 (_git_probe) を直すと gen_production.jl が変わり、PRODUCTION_SOURCE_FINGERPRINT が
 #   ce058cce4fe9b31d から動いて走行中のフリートに合流できなくなる (実測: コメント 1 行で f8d9a89cc3c33a4e)。
 #
-# 識別子の定義 (この 1 行。オプションを足したり削ったりしてはいけない):
-#   tar -C <tree> --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric-owner \
-#       -cf - src tools Project.toml | gzip -n -9
+# 識別子の定義: Git tree なら `git ls-files -- src tools Project.toml` の追跡ファイルだけを、
+# 非 Git tree なら従来どおり明示した 3 path を固める。⚠ src/ や tools/ をそのまま tar してはいけない:
+# 無視された本番表・ベンチ結果・キャッシュが混ざると、clean な commit を記録しても書庫は再現不能になる。
 #
 # 出力: 標準出力に 64 桁の sha256 だけ (campaign にそのまま貼れる / SHA=$(pack_code.sh …) で受けられる)。
 #       人向けの報告は標準エラーへ出す。
@@ -105,11 +105,26 @@ cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
 local_tar="$tmpdir/pack.tar.gz"
 
+# Git tree では内容アドレスの対象を追跡ファイルに限定する。`status --porcelain -uno` は untracked を
+# 表示しないので、ここで明示しなければ ignored な prod*/cache が clean archive に混ざってしまう。
+# NUL 区切りを tar に渡し、空白を含む path でも byte 列を変形しない。
+file_list=""
+if git -C "$tree_abs" rev-parse --git-dir >/dev/null 2>&1; then
+  file_list="$tmpdir/git-files.nul"
+  git -C "$tree_abs" ls-files -z -- $PATHS > "$file_list" || { err "git ls-files が失敗した"; exit 3; }
+  [ -s "$file_list" ] || { err "追跡対象が 0 個 ($PATHS)"; exit 3; }
+fi
+
 # ⚠ tar のパスは /c/… 形式 (MSYS の GNU tar は "C:" をリモートホスト扱いする。PROTOCOL §11.2)。
 #   -f - なので書き出しはシェルのリダイレクトで、tar 側にホスト解釈の余地は無い。
 set -o pipefail
-tar -C "$tree_abs" --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric-owner \
-    -cf - $PATHS 2>"$tmpdir/tar.err" | gzip -n -9 > "$local_tar"
+if [ -n "$file_list" ]; then
+  tar -C "$tree_abs" --null --files-from="$file_list" --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric-owner \
+      -cf - 2>"$tmpdir/tar.err" | gzip -n -9 > "$local_tar"
+else
+  tar -C "$tree_abs" --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric-owner \
+      -cf - $PATHS 2>"$tmpdir/tar.err" | gzip -n -9 > "$local_tar"
+fi
 rc=$?
 set +o pipefail
 if [ $rc -ne 0 ]; then
