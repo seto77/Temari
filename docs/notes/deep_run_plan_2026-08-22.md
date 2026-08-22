@@ -235,9 +235,9 @@ sort!(rows; by = _cost, rev = true)
 1. F v6 を昇格 (`RUNBOOK §4.1`) → atom_cache 修正を入れる → 第 4・5・6 位の repo 変更を 1 コミットに → `pack_code.sh` → 展開ツリーで `queuectl fingerprint` → 事前登録を書く。
 2. `deploy_setup.sh` で ROOT/setup を更新 (第 1・2 位の worker.sh/queuectl.jl)。
 3. **15 台を 1 回巡回**: `bootstrap.ps1 -Remove` → 再実行 (`-TaskPriority 6` はハイブリッド機、`-Reaper` は 1〜2 台)。これで新しい worker.sh が全 44 スロットに入る。巡回後に `queuectl hosts` で全スロットが再登録されたことを確認する。
-4. **第 1 波 = sentinel 11 行を jobseq 1–11** に置いて `issue --jobseq 1-11`。これは同時に (a) 費用の較正 (最安 C K@30 = 2,584 s から最重 Ca M1 = 17,921 s まで)、(b) pilot v4 に対する物理値の再現確認、(c) LPT の頭。
-5. **ゲート**: Ca M1 を除く 10 行が完了したら (最速機で ≈ 2 h、M616-2 でも ≈ 6.7 h)、① cert_fp が 1 種で事前登録の値と一致、② 規則文字列とオラクル名が一致、③ 180/180 の窓が合格、④ `tools/agreement_check.py` で pilot v4 の σ 値と一致 (機が違えば絶対 5e-16 以内)。**④ が本命** — 名前の一致より値の一致のほうが強い検査。
-6. 合格したら `issue --jobseq 12-1583`。Ca M1 は並行して走らせておく。
+4. **gate campaign** `temari_sigma_deep_gate` を作り、canonical sentinel 11 行だけを 1 行/票で発行する。同時に (a) 費用の tag 別較正 (最安 C K@30 = 2,584 s から最重 Ca M1 = 17,921 s まで)、(b) pilot v4 に対する物理値の再現確認を行う。
+5. **ゲート**: 11 行が完了したら、① cert_fp が 1 種で事前登録の値と一致、② 全仕様内窓に規則文字列・rule config・オラクル名があり期待値と一致、③ 全窓が合格、④ pilot v4 の σ 値と一致 (機が違えば絶対 5e-16 以内)。**④ が本命** — 名前の一致より値の一致のほうが強い検査。複数 host の時間を混ぜる場合は、全 host の速度係数を明示する。
+6. 合格したら gate 結果と manifest から tag 較正 sidecar を作る。sentinel に無い L2/L3 は fallback または実測係数を明示し、由来を残す。続いて**別の正式 campaign** `temari_sigma_deep` を作り、較正済み LPT 順の canonical 1,583 行を 1 行/票で全発行する。sentinel 11 行も正式 campaign で再計算するため、正式集計はこの 1 campaign だけに閉じ、gate JSONL は混ぜない。
 7. 走行 1 時間後と 100 行後に、published の `row_elapsed_s` から費用モデルを引き直して ETA を更新する。⚠ 「平均速度 × 残り件数」で外挿しない (memory `eta-from-remaining-work-not-average-rate`。F v6 で 16 時間楽観的だった)。
 
 ### 再起動への耐性
@@ -340,7 +340,7 @@ grep -E 'STRIKE|REAP' /c/jobq/logs/reaper.log | tail -20
 10. **`cert_v4_pilot_summary_final.txt` の「行あたり 中央値 2434 s」を使うこと**。累積タイマの中央値なので行費用を約 2 倍過小評価する。
 11. **v1 由来の費用順で並べること**。`v1_fullgrid` では deep と sentinel の費用がほぼ同じ (0.98) だが、それは v1 が全窓を 1,000 eV で切って ε_max 依存を消していたから。**費用の順位は規則依存**。
 12. **走行中に ROOT/setup を deploy すること**。queuectl.jl は票ごとに新しく読まれるので、plan (`worker.sh:321`) と verify (`:463`) の間で版が入れ替わり得る。しかも **cert_fp は動かないので指紋検査では見えない**。どうしても必要なら PAUSE で全スロットを idle にしてから。UTC と前後の SETUP_SHA256 を launch note に残す。
-13. **走行中に certify_sigma_v2.jl / sigma_beta_delta.jl / angular_split_v2.jl / angular_sweep.jl / beta_spike.jl を触ること**。走行中の票は固定した書庫を使うので実害は無い (`worker.sh:363-365`) が、**追加発行や再発行で新しい書庫を作ると cert_fp が割れ**、`summarize_v2:444-446` が集計を拒否する。deep は **1 つの campaign 名**で通し、2 つの campaign の JSONL を一緒に集計しない。
+13. **走行中に certify_sigma_v2.jl / sigma_beta_delta.jl / angular_split_v2.jl / angular_sweep.jl / beta_spike.jl を触ること**。走行中の票は固定した書庫を使うので実害は無い (`worker.sh:363-365`) が、**追加発行や再発行で新しい書庫を作ると cert_fp が割れ**、`summarize_v2` が集計を拒否する。gate と full は同じ固定書庫を使い、正式集計は full の **1 campaign 名**だけで通す。gate と full の JSONL を一緒に集計しない。
 14. **`--allow-mixed` を使うこと**。
 15. **atom_cache を消すこと**。節約の最大項で、正しさには中立。
 

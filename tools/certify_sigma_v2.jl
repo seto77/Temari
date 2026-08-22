@@ -422,9 +422,119 @@ end
 # ---------------------------------------------------------------------
 # 集計
 # ---------------------------------------------------------------------
+const V2_DUP_VALUE_FIELDS = (
+    "eth_keV", "u", "eps_max_eV", "l_init", "out_of_domain",
+    "d1_eV", "d2_eV", "width_eV", "starts_at_zero", "ends_at_epsmax",
+    "crosses_eps_c", "dist_to_eps_c_eV", "betas_mrad",
+    "P", "O", "diff", "rel", "indicator", "indicator_weighted",
+    "n_degenerate_panels", "n_panels", "n_nodes", "angular_panels_max",
+    "panel_edges_sha", "ang_eps_eV", "ang_long_rel", "ang_trans_rel",
+    "l_max_min", "l_max_max", "sigma_ref", "sigma_ref_available", "scaled", "pass")
+
+duplicate_payload_v2(d) = Dict(k => d[k] for k in V2_DUP_VALUE_FIELDS if haskey(d, k))
+
+"認証値の payload を、Float64 のビットまで再帰的に比較する。"
+function duplicate_bits_equal_v2(a, b)
+    if a isa AbstractFloat && b isa AbstractFloat
+        return reinterpret(UInt64, Float64(a)) == reinterpret(UInt64, Float64(b))
+    elseif a isa AbstractVector && b isa AbstractVector
+        length(a) == length(b) || return false
+        return all(duplicate_bits_equal_v2(a[i], b[i]) for i in eachindex(a))
+    elseif a isa AbstractDict && b isa AbstractDict
+        ka = Set(String(k) for k in keys(a))
+        kb = Set(String(k) for k in keys(b))
+        ka == kb || return false
+        return all(duplicate_bits_equal_v2(a[k], b[k]) for k in ka)
+    end
+    return isequal(a, b)
+end
+
+"重複した記録の数値葉における最大相対差。非数値の相違は Inf とする。"
+function duplicate_max_rel_v2(a, b)
+    if a isa Real && !(a isa Bool) && b isa Real && !(b isa Bool)
+        af, bf = Float64(a), Float64(b)
+        duplicate_bits_equal_v2(af, bf) && return 0.0
+        isfinite(af) && isfinite(bf) || return Inf
+        return abs(af - bf) / max(abs(af), abs(bf), 1e-300)
+    elseif a isa AbstractVector && b isa AbstractVector
+        length(a) == length(b) || return Inf
+        m = 0.0
+        for i in eachindex(a); m = max(m, duplicate_max_rel_v2(a[i], b[i])); end
+        return m
+    elseif a isa AbstractDict && b isa AbstractDict
+        ka = Set(String(k) for k in keys(a))
+        kb = Set(String(k) for k in keys(b))
+        ka == kb || return Inf
+        m = 0.0
+        for k in ka; m = max(m, duplicate_max_rel_v2(a[k], b[k])); end
+        return m
+    end
+    return isequal(a, b) ? 0.0 : Inf
+end
+
+duplicate_state_v2(d) = haskey(d, "state_sha") ? String(d["state_sha"]) : "(無し)"
+
+"(cert_fp, 行, window_id) ごとに最後の記録を残し、置換した対を診断用に返す。"
+function deduplicate_records_v2(recs::Vector{Dict{String,Any}})
+    K = Tuple{String,String,String}
+    bykey = Dict{K,Dict{String,Any}}()
+    lastpos = Dict{K,Int}()
+    dups = NamedTuple{(:key, :exact, :rel, :s1, :s2),
+                      Tuple{String,Bool,Float64,String,String}}[]
+    for (i, d) in enumerate(recs)
+        fp = String(get(d, "cert_fp", ""))
+        row = rowkey_v2(Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"]))
+        wid = String(d["window_id"])
+        k = (fp, row, wid)
+        if haskey(bykey, k)
+            p = bykey[k]
+            pp, dp = duplicate_payload_v2(p), duplicate_payload_v2(d)
+            push!(dups, (key=join(k, " | "), exact=duplicate_bits_equal_v2(pp, dp),
+                         rel=duplicate_max_rel_v2(pp, dp),
+                         s1=duplicate_state_v2(p), s2=duplicate_state_v2(d)))
+        end
+        # 再試行で後から追記された記録を正式値にする。順序も最後の出現順へ揃える。
+        bykey[k] = d
+        lastpos[k] = i
+    end
+    ks = sort(collect(keys(bykey)); by=k -> lastpos[k])
+    return Dict{String,Any}[bykey[k] for k in ks], dups
+end
+
+function report_duplicates_v2(dups)
+    isempty(dups) && return
+    n = length(dups)
+    exact = count(d -> d.exact, dups)
+    @printf("\n重複した窓の突き合わせ: %d 対 (統計は各鍵の最後の 1 件)\n", n)
+    @printf("  **ビット一致 %d / %d (%.1f %%)**\n", exact, n, 100.0 * exact / n)
+    exact == n && @printf("  ⇒ 不一致 0。汚染率の片側 95 %% 上限は約 %.2f %% (3/N)\n", 300.0 / n)
+    exact == n && return
+
+    mismatches = [d for d in dups if !d.exact]
+    rels = sort([d.rel for d in mismatches])
+    @printf("  一致しない対の最大相対差: 中央値 %.3e / 最悪 %.3e\n",
+            rels[max(1, cld(length(rels), 2))], rels[end])
+    known = [d for d in mismatches if d.s1 != "(無し)" && d.s2 != "(無し)"]
+    same_state = count(d -> d.s1 == d.s2, known)
+    diff_state = length(known) - same_state
+    unknown = length(mismatches) - length(known)
+    @printf("  内訳: 始状態が違う %d 対 / **始状態は同じなのに答えが違う %d 対**",
+            diff_state, same_state)
+    unknown > 0 ? @printf(" / 始状態が記録されていない %d 対\n", unknown) : print("\n")
+    same_state > 0 && println("  ⚠⚠ **後者は SCF の停止点差では説明できない** — 求積より下流の非決定性かホストのビット化け")
+    println("  差の大きい対:")
+    for d in first(sort(mismatches; by=x -> x.rel, rev=true), min(6, length(mismatches)))
+        state = d.s1 == "(無し)" || d.s2 == "(無し)" ? "不明" : d.s1 == d.s2 ? "同一" : "相違"
+        @printf("    %s  最大相対差 %.3e  始状態 %s\n", d.key, d.rel, state)
+    end
+end
+
 function summarize_v2(paths::Vector{String}; allow_mixed::Bool=false, only_fp::String="")
     recs = Dict{String,Any}[]
-    for p in paths, line in eachline(p)
+    # 「最後の 1 件」を呼び出し側の argv 順に依存させない。epoch を含む
+    # ファイル名の辞書順を正本とし、同じ実体の二重指定も除く。
+    canonical_paths = sort(unique(abspath.(paths)); by=lowercase)
+    for p in canonical_paths, line in eachline(p)
         isempty(strip(line)) && continue
         d = try _json_value(Vector{UInt8}(line), 1)[1] catch; continue end
         haskey(d, "z") && !haskey(d, "error") && push!(recs, d)
@@ -434,10 +544,15 @@ function summarize_v2(paths::Vector{String}; allow_mixed::Bool=false, only_fp::S
         recs = [d for d in recs if String(get(d, "cert_fp", "")) == only_fp]
         isempty(recs) && (println("指紋 $only_fp の記録なし"); return 1)
     end
+    n_raw = length(recs)
+    recs, dups = deduplicate_records_v2(recs)
+    report_duplicates_v2(dups)
     rows = Set(rowkey_v2(Int(d["z"]), String(d["tag"]), Float64(d["e0_keV"])) for d in recs)
     fps = Set(String(d["cert_fp"]) for d in recs)
     rvs = Set(String(get(d, "rule", "?")) for d in recs)
-    @printf("記録 %d 窓 / %d 行 / 指紋 %d 種 %s\n", length(recs), length(rows), length(fps), join(fps, ","))
+    @printf("記録 %d 窓", length(recs))
+    n_raw == length(recs) || @printf(" (生 %d / 重複 %d 対を除外)", n_raw, length(dups))
+    @printf(" / %d 行 / 指紋 %d 種 %s\n", length(rows), length(fps), join(fps, ","))
     @printf("規則: %s\n", join(rvs, " | "))
     # ⚠ 指紋が混ざった集計は正式な値にならない (規則・版が違う窓を一緒に数えてしまう)。
     #   既定では拒否し、--fp <指紋> で 1 種に絞るか、--allow-mixed で明示的に許す (codex 2026-08-19 深夜)

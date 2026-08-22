@@ -16,6 +16,9 @@ Julia 側の `--summary` は走行中の確認用。こちらは**事前登録 (
 import glob
 import json
 import math
+import os
+import re
+import struct
 import sys
 from collections import defaultdict
 
@@ -32,6 +35,157 @@ def fmt(x):
     return "—" if x is None or (isinstance(x, float) and math.isnan(x)) else f"{x:.2e}"
 
 
+DUP_VALUE_FIELDS = (
+    "eth_keV", "u", "eps_max_eV", "l_init", "out_of_domain",
+    "d1_eV", "d2_eV", "width_eV", "starts_at_zero", "ends_at_epsmax",
+    "crosses_eps_c", "dist_to_eps_c_eV", "betas_mrad",
+    "P", "O", "diff", "rel", "indicator", "indicator_weighted",
+    "n_degenerate_panels", "n_panels", "n_nodes", "angular_panels_max",
+    "panel_edges_sha", "ang_eps_eV", "ang_long_rel", "ang_trans_rel",
+    "l_max_min", "l_max_max", "sigma_ref", "sigma_ref_available", "scaled", "pass",
+)
+
+FULL_WINDOW_IDS = {
+    "start=0,width=10", "start=0,width=1000", "start=0,width=100000", "start=0,to_epsmax",
+    "start=0.01,width=10", "start=0.01,width=1000", "start=0.01,width=100000", "start=0.01,to_epsmax",
+    "start=10,width=10", "start=10,width=1000", "start=10,width=100000", "start=10,to_epsmax",
+    "start=1000,width=10", "start=1000,width=1000", "start=1000,width=100000", "start=1000,to_epsmax",
+    "cross_epsc,h=100", "cross_epsc,h=0.01",
+}
+SENTINEL_WINDOW_IDS = {"start=0,width=1000", "start=0,to_epsmax"}
+ALL_WINDOW_IDS = FULL_WINDOW_IDS | SENTINEL_WINDOW_IDS
+GOOD_REQUIRED_FIELDS = set(DUP_VALUE_FIELDS) | {
+    "window_index", "n_windows_in_row", "elapsed_s", "row_elapsed_s",
+    "rule", "rule_version", "rule_config", "oracle", "l_max_policy",
+}
+
+
+def valid_record(r):
+    """正式集計に入れてよい JSON 型・identity・窓 ID の最小契約。"""
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    if not isinstance(r, dict):
+        return False
+    if not isinstance(r.get("z"), int) or isinstance(r.get("z"), bool) or not 1 <= r["z"] <= 118:
+        return False
+    if not isinstance(r.get("tag"), str) or r["tag"] not in {"K", "L1", "L2", "L3", "M1", "M2", "M3", "M4", "M5"}:
+        return False
+    if not number(r.get("e0_keV")) or not math.isfinite(float(r["e0_keV"])) or float(r["e0_keV"]) <= 0:
+        return False
+    if not isinstance(r.get("cert_fp"), str) or re.fullmatch(r"[0-9a-f]{16}", r["cert_fp"]) is None:
+        return False
+    if not isinstance(r.get("window_id"), str) or r["window_id"] not in ALL_WINDOW_IDS:
+        return False
+    need = r.get("n_windows_in_row")
+    index = r.get("window_index")
+    if (not isinstance(need, int) or isinstance(need, bool) or need not in (2, 18) or
+            not isinstance(index, int) or isinstance(index, bool) or not 1 <= index <= need):
+        return False
+    if not isinstance(r.get("out_of_domain"), bool):
+        return False
+    if not r["out_of_domain"] and not GOOD_REQUIRED_FIELDS.issubset(r):
+        return False
+    return True
+
+
+def duplicate_payload(record):
+    return {key: record[key] for key in DUP_VALUE_FIELDS if key in record}
+
+
+def duplicate_bits_equal(a, b):
+    """認証値の payload を、Float64 のビットまで再帰的に比較する。"""
+    if isinstance(a, float) and isinstance(b, float):
+        return struct.pack(">d", a) == struct.pack(">d", b)
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, list):
+        return len(a) == len(b) and all(duplicate_bits_equal(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict):
+        ka = set(a)
+        kb = set(b)
+        return ka == kb and all(duplicate_bits_equal(a[k], b[k]) for k in ka)
+    return a == b
+
+
+def duplicate_max_rel(a, b):
+    """重複した記録の数値葉における最大相対差。非数値の相違は inf。"""
+    number = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)
+    if number(a) and number(b):
+        if duplicate_bits_equal(a, b):
+            return 0.0
+        af, bf = float(a), float(b)
+        if not math.isfinite(af) or not math.isfinite(bf):
+            return float("inf")
+        return abs(af - bf) / max(abs(af), abs(bf), 1e-300)
+    if isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            return float("inf")
+        return max((duplicate_max_rel(x, y) for x, y in zip(a, b)), default=0.0)
+    if isinstance(a, dict) and isinstance(b, dict):
+        ka = set(a)
+        kb = set(b)
+        if ka != kb:
+            return float("inf")
+        return max((duplicate_max_rel(a[k], b[k]) for k in ka), default=0.0)
+    return 0.0 if a == b else float("inf")
+
+
+def rowkey(r):
+    return f"{r['z']}|{r['tag']}|{r['e0_keV']:.6f}"
+
+
+def deduplicate(recs):
+    """(cert_fp, rowkey, window_id) ごとに最後の 1 件を残す。"""
+    by_key, last_pos, dups = {}, {}, []
+    for i, r in enumerate(recs):
+        key = (str(r.get("cert_fp", "")), rowkey(r), str(r["window_id"]))
+        if key in by_key:
+            prev = by_key[key]
+            prev_payload, payload = duplicate_payload(prev), duplicate_payload(r)
+            dups.append({
+                "key": " | ".join(key),
+                "row": (r["z"], r["tag"], r["e0_keV"]),
+                "exact": duplicate_bits_equal(prev_payload, payload),
+                "rel": duplicate_max_rel(prev_payload, payload),
+                "state1": prev.get("state_sha"),
+                "state2": r.get("state_sha"),
+            })
+        by_key[key] = r
+        last_pos[key] = i
+    keys = sorted(by_key, key=last_pos.get)
+    return [by_key[k] for k in keys], dups
+
+
+def duplicate_report(dups):
+    if not dups:
+        return []
+    n = len(dups)
+    exact = sum(d["exact"] for d in dups)
+    lines = [
+        f"- 重複した窓の突き合わせ: {n} 対 (統計は各鍵の最後の 1 件)",
+        f"  - **ビット一致 {exact} / {n} ({100.0 * exact / n:.1f} %)**",
+    ]
+    if exact == n:
+        lines.append(f"  - 不一致 0。汚染率の片側 95 % 上限は約 {300.0 / n:.2f} % (3/N)")
+        return lines
+
+    mismatches = [d for d in dups if not d["exact"]]
+    rels = [d["rel"] for d in mismatches]
+    known = [d for d in mismatches if d["state1"] is not None and d["state2"] is not None]
+    same_state = sum(d["state1"] == d["state2"] for d in known)
+    diff_state = len(known) - same_state
+    unknown = len(mismatches) - len(known)
+    lines.append(f"  - 一致しない対の最大相対差: 中央値 {pct(rels, 0.5):.3e} / 最悪 {max(rels):.3e}")
+    tail = f" / 始状態が記録されていない {unknown} 対" if unknown else ""
+    lines.append(f"  - 内訳: 始状態が違う {diff_state} 対 / **始状態は同じなのに答えが違う {same_state} 対**{tail}")
+    if same_state:
+        lines.append("  - ⚠⚠ **後者は SCF の停止点差では説明できない** — 求積より下流の非決定性かホストのビット化け")
+    lines.append("  - 差の大きい対:")
+    for d in sorted(mismatches, key=lambda x: -x["rel"])[:6]:
+        state = "不明" if d["state1"] is None or d["state2"] is None else "同一" if d["state1"] == d["state2"] else "相違"
+        lines.append(f"    - `{d['key']}` 最大相対差 {d['rel']:.3e} / 始状態 {state}")
+    return lines
+
+
 def load(paths):
     recs, errs, bad = [], [], 0
     for p in paths:
@@ -45,8 +199,15 @@ def load(paths):
                 except Exception:
                     bad += 1
                     continue
-                (errs if "error" in d else recs).append(d)
-    return recs, errs, bad
+                if isinstance(d, dict) and "error" in d:
+                    errs.append(d)
+                elif valid_record(d):
+                    recs.append(d)
+                else:
+                    bad += 1
+    raw_count = len(recs)
+    recs, dups = deduplicate(recs)
+    return recs, errs, bad, dups, raw_count
 
 
 def stat_row(label, vals):
@@ -66,12 +227,17 @@ def main(argv):
             md_out = argv[i + 1]
             i += 2
             continue
-        paths.extend(glob.glob(argv[i]) or [argv[i]])
+        # epoch を含むファイル名順を固定し、「最後の 1 件」の意味を実行ごとに変えない。
+        paths.extend(sorted(glob.glob(argv[i])) or [argv[i]])
         i += 1
+    # 「最後の 1 件」は呼び出し側が引数を並べた順ではなく、epoch を含む
+    # ファイル名順で一意に決める。同じファイルを glob と明示指定の両方で
+    # 渡しても、重複した入力として二重計上しない。
+    paths = sorted(set(os.path.abspath(p) for p in paths), key=os.path.normcase)
     if not paths:
         print(__doc__)
         return 2
-    recs, errs, bad = load(paths)
+    recs, errs, bad, dups, raw_count = load(paths)
     out = []
     w = out.append
     fps = sorted({r.get("cert_fp", "") for r in recs})
@@ -81,20 +247,34 @@ def main(argv):
     for r in recs:
         rows[(r["z"], r["tag"], r["e0_keV"])].append(r)
     w(f"# 認証 v2 の層別 ({len(paths)} ファイル)\n")
-    w(f"- 窓の記録 {len(recs)} (うち契約外 {len(ood)}) / 行 {len(rows)} / error 行 {len(errs)} / 読めない行 {bad}")
+    raw_note = f" / 生 {raw_count}・重複 {len(dups)} 対を除外" if dups else ""
+    w(f"- 窓の記録 {len(recs)} (うち契約外 {len(ood)}{raw_note}) / 行 {len(rows)} / error 行 {len(errs)} / 読めない行 {bad}")
     w(f"- 指紋: {len(fps)} 種 {fps}" + ("  ⚠⚠ **版が混在**" if len(fps) > 1 else ""))
     # 行ごとの完全性
     incomplete = []
-    dup = []
+    dup_by_row = defaultdict(int)
+    for d in dups:
+        dup_by_row[d["row"]] += 1
     for k, rs in rows.items():
         ids = [r["window_id"] for r in rs]
         need = max(r.get("n_windows_in_row", 0) for r in rs)
-        if len(set(ids)) < need:
-            incomplete.append((k, len(set(ids)), need))
-        if len(ids) != len(set(ids)):
-            dup.append((k, len(ids) - len(set(ids))))
+        expected = SENTINEL_WINDOW_IDS if need == 2 else FULL_WINDOW_IDS
+        indices = {r["window_index"] for r in rs}
+        if set(ids) != expected or indices != set(range(1, need + 1)) or len(rs) != need:
+            incomplete.append((k, len(set(ids)), need,
+                               sorted(expected - set(ids)), sorted(set(ids) - expected)))
     w(f"- 窓の集合が揃っていない行: {len(incomplete)} {incomplete[:5]}")
-    w(f"- 重複した窓を持つ行: {len(dup)} {dup[:5]}")
+    dup_rows = sorted(dup_by_row.items(), key=lambda x: str(x[0]))
+    w(f"- 重複した窓を持つ行: {len(dup_rows)} {dup_rows[:5]}")
+    out.extend(duplicate_report(dups))
+    if len(fps) > 1:
+        w("- ⚠⚠ 指紋が複数あるため集計を中止。指紋ごとに入力を分けること")
+        print("\n".join(out))
+        return 2
+    if bad or incomplete:
+        w("- ⚠⚠ 読めない/契約外の行または不完全な窓集合があるため正式集計を中止")
+        print("\n".join(out))
+        return 2
     if not good:
         print("\n".join(out))
         return 0
