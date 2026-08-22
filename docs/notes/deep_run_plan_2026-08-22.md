@@ -164,6 +164,13 @@ SDSE = SETO-DESKTOP スロット等価 (= 2 スレッド 1 本)。2026-08-21 15:
 
 ### 第 5 位 — cert_fp の再アンカーと事前登録
 
+**2026-08-23 実施済（gate は未発行）**: clean commit `af942468` を Git追跡ファイルだけで固めた
+code archive `14b32cdf13445460…` を共有 `code/` に置き、展開ツリーで `cert_fp=fae32eda6de23977` を
+再計算した。gate 11行の args / estimate sidecar も `../qcamp/deep_v4_2026-08-23/` に固定済み。
+全 fp.*、archive hash、args hash は `certification_v4_preregistration_2026-08-20.md` §7.3 を正本とする。
+未追跡の `prod*`/cache が archive に混ざる欠陥は `af94246` で修正し、E2Eの負試験を通した。
+残るのは共有 setup の配備・15台巡回・実機検証であり、これらの前に campaign を作成・発行してはならない。
+
 pilot v4 の cert_fp `0b10f74e9c4e398c` は **HEAD では再現しない**。`8e5ad5b` 以降、指紋の入力 5 ファイルのうち 3 つ (sigma_beta_delta.jl / angular_sweep.jl / certify_sigma_v2.jl) と fp.src が動いている。そのコミットのメッセージは "Behaviour-invariant pass" — **無害な変更でも指紋は動く**。`certification_v4_preregistration_2026-08-20.md:50,59` はその指紋を登録しているので、**そのままでは走らせる版に合格の証拠が無い書類**になる。
 
 ⚠ **fp.src は改行に依存する**。5 ツールは `certify_sigma_v2.jl:63-66` で CRLF→LF 正規化されるが、`CACHE_SOURCE_FINGERPRINT` は `src/l5_channel.jl:489-499` で**生バイトを読む**。同じ commit でも checkout の改行方針で値が変わる。

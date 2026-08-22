@@ -24,7 +24,7 @@
 
 | 項目 | 値 |
 |---|---|
-| git commit | (走行直前に §7 に記入。`git status --porcelain -uno` が空) |
+| git commit | Deep gate の再アンカーは §7.3 に記入（書庫を作った commit を使う。作業ツリーの後続 documentation commit は混ぜない） |
 | 規則の文字列 | `win:sin2theta-geo24xGL16-dth0.0001-epsc/ang:knotsplit-GL12-exactx/nq1216/ppw30.0/dt0.001/lcap256/sig1.0e-13/lmax:src-v6-r0.999+12` |
 | `model_id` 接尾辞 | `-sigma-candidate-v4` |
 | オラクル | `sqrt-eps-geo32xGL16-epsc` |
@@ -42,6 +42,45 @@ v2 の事前登録 §2–§5 と同一。追加の観測項目: (i) v2 の不合
 pilot: v3 と同程度か 1.3 倍 (cap 256 で高 ε が重い)。deep: 作者判断 (14〜18 日 × 1.3。deep-lite −50 %)。
 
 ## 7. 実施記録 (走らせたあとに追記)
+
+### 7.3 Deep gate 用の再アンカー (2026-08-23。**未発行・未走行**)
+
+pilot v4 の `cert_fp=0b10f74e9c4e398c` は現在のコードを表さないため、Deep を発行する前に、
+**clean な archive の展開ツリーそのもの**で再計算した。これは gate/full が同じ byte 列を参照するための
+来歴であり、`--expected-cert-fp` のような票の門ではない。
+
+| 項目 | 値 |
+|---|---|
+| archive を作った commit | `af942468156354a17ec56797c0a7b5114333618b` (clean) |
+| code archive | `\\10.31.108.5\jobq\code\temari-14b32cdf13445460.tar.gz` |
+| `code_sha256` | `14b32cdf1344546092807ee55b88c9910140591fdb4455f6734646254dd2b2df` |
+| archive sidecar | `temari-14b32cdf13445460.json` (978,800 bytes, tracked files 191) |
+| `cert_fp` | **`fae32eda6de23977`** |
+| gate args | `../qcamp/deep_v4_2026-08-23/rows_deep_v4_gate.json`, SHA-256 `fb46ff9ab8b669c14cc92257556b8b845012c469388f185549bf5ce16d911f04` |
+| gate estimate sidecar | `rows_deep_v4_gate.est.json`, SHA-256 `7a7bd703ef6f1d50000c7b80d92c6b80601a17b619120351c6430f7fc3cb7f61` |
+
+展開先 `C:/Users/seto/AppData/Local/Temp/temari-deep-fp.nt09l5/tree` で
+`queuectl fingerprint --rule v4 --refresh` を実行し、次を得た:
+
+```
+fp.angular_split_v2.jl = bcf31c41cd6f4e35
+fp.angular_sweep.jl    = b95808ad5e4e87a7
+fp.beta_spike.jl       = 9c4b28f729889bb6
+fp.certify_sigma_v2.jl = 62337ce384ec6bfc
+fp.domain              = b28a3fd6846d9e83
+fp.oracle              = sqrt-eps-geo32xGL16-epsc
+fp.prod                = (n1 = 16, n2 = 40, n3 = 16, l_cap = 96, n_x = 64, n_phi = 32, n_q = 240, sig_thresh = 1.0e-12)
+fp.rule                = win:sin2theta-geo24xGL16-dth0.0001-epsc/ang:knotsplit-GL12-exactx/nq1216/ppw30.0/dt0.001/lcap256/sig1.0e-13/lmax:src-v6-r0.999+12
+fp.sigma_beta_delta.jl = bfcdc849b62c12dc
+fp.src                 = 0d483dc360079b8d
+```
+
+同じ `code_sha256` を与えた作業ツリーでの再計算も `cert_fp` と全 `fp.*` が一致した。今回は
+`.gitattributes` により両ツリーの対象ファイルが LF だったためであり、「常に一致する」とは一般化しない。
+未追跡の `src/prod*` / cache を含まないことは `pack_code.sh` の E2E 負試験で確認した。
+
+gate の11行は LPT 生代理値順（先頭 Ca M1@400、末尾 C K@30）で確定した。**campaign はまだ作らず、
+共有 setup の配備・15台再登録・D317-1/D317-10 の実機検証後に** `temari_sigma_deep_gate` として作成・発行する。
 
 ### 7.1 pilot (v4) — 起動記録 (2026-08-20 朝)
 
