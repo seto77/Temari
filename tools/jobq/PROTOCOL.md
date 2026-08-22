@@ -943,6 +943,15 @@ cmd.exe が読むので**必ず CRLF**。中身の規則:
 
 1. winget で Git.Git / Julialang.Juliaup が無ければ導入、`juliaup add <julia_version>` (`juliaup status` で有無を見る)。
 2. `LOCAL` を作り、`ROOT/setup/` を `LOCAL/setup/` に複製、`worker.conf` を生成 (既存があれば WORKER_ID は保持)。
+   ⚠⚠ **`WORKER_ID` は共有の中で一意でなければならない**。claim の所有者名 `OWNER` が
+   `<worker_id>-s<slot>-b<boot_seq>` であり、生存の合図の置き場が `hosts/<worker_id>-s<slot>.status.json`
+   だからである。2 台が同じ `worker_id` を名乗ると、**同じ status ファイルを奪い合って `base` が交互に
+   入れ替わり**、reaper の §7 の一致検査 (2 boot_seq / 3 base) が落ちて**生きている claim が沈黙に見える**。
+   `RECOVER` の照合 (`^<worker_id>-s<slot>-b<n>$`) も一致してしまう。
+   新規生成は `<hostname>-<GUID 8 桁>` なので偶然の衝突は起きない。**起きるとすれば
+   `worker.conf` ごとディスクを複製したとき**で、そのとき bootstrap は既存の `WORKER_ID` を保持する。
+   ⇒ **PC を複製して台数を増やすなら、複製先で `worker.conf` を消してから登録する** (新しい id が振られる)。
+   台帳 `hosts/<worker_id>.json` の `hostname` が知らないうちに変わっていたら、この事故を疑うこと。
    slots = `max(1, floor(物理コア × slot_fraction / threads))`。
 3. **NAS 試験タスク** `jobq-nastest` を登録して即実行 (タスク実行アカウント = 現在のユーザー、パスワード保存、
    ログオン有無に関わらず実行)。中身は配布された `LOCAL/setup/nastest.ps1`: `whoami`、`$env:USERPROFILE`、
