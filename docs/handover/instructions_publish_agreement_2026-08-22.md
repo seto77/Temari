@@ -1,14 +1,19 @@
-# 指示書 — `agreement_check` を Julia に一本化し、`publish` の判定をバイト一致から数値一致へ
+# 指示書 — `publish` の判定をバイト一致から数値一致へ (判定器は既存の Python 版をそのまま使う)
 
 作成 2026-08-22 (Claude)。**実施は codex のチャット**。作者決定は §2 に確定済み。
+
+> **⚠ 改訂履歴**: 本書は当初「`agreement_check.py` を Julia へ移植し Python 版を廃止する」で書かれていたが、
+> **2026-08-22 の作者決定でその方針は全面的に取り消された**。**`tools/agreement_check.py` は存続。
+> Julia 版は作らない。** 代わりに**ワーカー PC に登録時 (registry) の段で Python も導入する**。
+> 旧版の Julia 移植・golden 移行・参照の掃き替え・Python 削除の各節は**すべて破棄**されている。
 
 ---
 
 ## 0. 一行で
 
-`tools/agreement_check.py` を **Julia へ移植して一本化**し (Python 版は**廃止**)、jobq の `publish` が
-「同じ名前・違うバイト列」に出会ったときの判定を、**バイト比較から「丸め誤差の範囲内で一致するか」へ
-差し替える**。
+jobq の `publish` が「同じ名前・違うバイト列」に出会ったときの判定を、**バイト比較から
+「丸め誤差の範囲内で一致するか」へ差し替える**。判定は**既存の `tools/agreement_check.py`** が行い、
+そのためにワーカー PC へ**登録時に Python を導入する**。
 
 ---
 
@@ -54,10 +59,11 @@
 ## 2. 作者決定 (2026-08-22。ここは議論の対象ではない)
 
 1. **判定はバイト一致ではなく「数値として許容誤差の範囲内か」で行う。**
-2. **判定器は Julia で書き直す。** ワーカーに Python 3 を前提にしない。
-3. **一致と判定されたら、その票は `done/` に入れてよい** (成果物は先客のバイト列だが、この票の計算は
+2. **判定器は既存の `tools/agreement_check.py` をそのまま使う。Julia 版は作らない。**
+3. **`tools/agreement_check.py` は存続する** (廃止しない)。
+4. **一致と判定されたら、その票は `done/` に入れてよい** (成果物は先客のバイト列だが、この票の計算は
    「丸め誤差の範囲内で同じ」と**測って**確認された、という位置づけ)。
-4. **Python 版は廃止し、Julia に一本化する。** 2 実装を並存させない。
+5. **ワーカー PC には、登録 (registry) の段で julia だけでなく Python も導入する。**
 
 ---
 
@@ -65,145 +71,100 @@
 
 | # | もの | 場所 |
 | --- | --- | --- |
-| A | Julia 版判定器 | `tools/agreement_check.jl` |
-| B | **移行検証**: Python 版の判定を凍結した golden と、それを Julia で再現する検査 | `tools/jobq/test/` 配下 |
-| C | `publish_one` の判定差し替え | `tools/jobq/worker.sh` |
-| D | 参照の掃き替え (12 ファイル・41 箇所。§7) | 下表のとおり |
-| E | 負のテスト 1 本 + `e2e_noop.sh` に 2 事例 | `tools/jobq/test/` |
-| F | **`tools/agreement_check.py` の削除** | 最後の段で、単独のコミットとして |
+| A | 登録時の Python 導入と、その所在の記録 | `tools/jobq/bootstrap.ps1`、`tools/jobq/worker.conf.template` |
+| B | `publish_one` の判定差し替え | `tools/jobq/worker.sh` |
+| C | 仕様の更新 | `tools/jobq/PROTOCOL.md` (§5.4 / §9 / §10.2)、`tools/jobq/README.md` |
+| D | 負のテスト 1 本 + `e2e_noop.sh` に 2 事例 | `tools/jobq/test/` |
+
+⚠ **`tools/agreement_check.py` 自体は 1 行も変えない。** 判定規則は今のままで正しい。
 
 ---
 
-## 4. Part A — `tools/agreement_check.jl` の移植仕様
+## 4. すでに揃っているもの (実測で確認済み。作り直さないこと)
 
-### 4.1 正本は Python 版の docstring
-
-**移植の仕様書は `tools/agreement_check.py` の冒頭 docstring そのもの**である。この指示書の要約を
-信用せず、**必ず原文を読んでから**書くこと。以下は「落としてはいけない点」の一覧であって、仕様の
-全体ではない。⚠ **消す前に読むこと** — 削除は最後の段 (§10 の段 6)。
-
-### 4.2 CLI と終了コード (Python 版と完全に同じにする)
-
-```text
-julia tools/agreement_check.jl <dirA> <dirB> [--rtol 1e-13] [--atol 1e-15] [--json out.json]
-julia tools/agreement_check.jl <fileA.json> <fileB.json>
-julia tools/agreement_check.jl --selftest
-```
-
-- **終了コード: 0 = 一致 / 1 = 不一致 / 2 = 判定不能** (引数不正・読めない・パースできない)。
-  Python 版の `main()` は `return 2` を 3 箇所、`return 0 if ... else 1` を 2 箇所持つ。同じ規約にする。
-- `--json` の出力**構造**も一致させること。キー名・入れ子・数値の意味を変えない
-  (§5 の golden がこれを縛る)。
-- ⚠ Python 版は `PYTHONIOENCODING=utf-8` を付けて呼ぶ運用だった。Julia 版では**その前置きが不要**に
-  なるので、手順書 (§7) から前置きを消すこと。
-
-### 4.3 判定規則 — 落としてはいけない点
-
-1. **JSON 木の全体を並行に辿る** (`rows` だけではない)。`s_grid_A_inv`・`settings` (l_cap / n_x / n_q /
-   n1 / ppw …)・`prescription` も対象。
-2. **すべての数値**に `|a − b| ≤ atol + rtol · max(|a|, |b|)`。**既定は `atol = 1e-15` / `rtol = 1e-13`**。
-   ⚠ **絶対項が主、相対項は補助**。F(s) は F(0)=1 に規格化され M 殻では符号を変えるので、
-   符号が変わる点で相対誤差は必ず発散する。**相対許容差だけを判定基準にするのは物理的に誤り** (原文に
-   実測の根拠あり: M5 Z=33 で最大相対差 3.613e-12 は F = -1.5e-11 の点、そこでの絶対差は 5.4e-23)。
-3. **形の違いは即不合格** — 配列長の違い / キー集合の違い / 型の違い。
-4. **非数値の葉 (文字列・真偽値・null) は完全一致**を要求。`settings.lkin_rule` が `"v6"` と `"v5"` は
-   丸め誤差ではなく**処方の取り違え**。
-5. **非有限値 (NaN / ±Inf) は別枠**。判定式 `d > atol + rtol·max(…)` は NaN でも Inf でも **False に
-   しかならない**ので、素直に書くと**素通りする**。片側だけ非有限なら不合格。
-   ⚠ 過去に実在した故障の型 (Cd-K / Sc-L1 / Se-L1 / Nb-M3 の σ 1e10〜1e23、球ベッセル Miller 規格化の
-   0/0 → NaN)。
-6. **`ENV_FIELDS` は部分木ごと除外**して別枠で報告 (`cache_provenance` のように中に数値を含むものが
-   あるため、値だけでなく木ごと外す)。**除外リストは Python 版から 1 項目も落とさずに写す。**
-7. **診断値 (パスに `.diag.` を含むもの) は別集計**にして合否に入れない。⚠ ただし**形の違いと非有限値は
-   診断値でも不合格**にする。
-8. **最大相対差と最大絶対差の両方を報告**する。
-9. **`--selftest`** の負の事例を**すべて**移植する。Python 版の `--selftest` が何を張っているかを
-   読んでから書くこと。
-
-### 4.4 移植の危険箇所
-
-- **`unicodedata` は表示幅の計算にしか使われていない** (`east_asian_width`、95 行目)。判定論理には
-  一切関わらないので、Julia 側で再現する必要は無い (整形は任意)。
-- **⚠⚠ どの JSON パーサを使うか — 一本化でここが効く。**
-  `src/l0_json.jl` は **F_\*.json を書いた側のパーサ**である。読み側にも使うと、書き/読みが対称に
-  間違っている欠陥を**打ち消して見逃す**。Python 版は stdlib の独立実装だったので、**独立性は
-  Python 版が担っていた**。一本化するなら、**その独立性を Julia の中で保つ**こと:
-  ⇒ **`src/l0_json.jl` を使わない。** `tools/jobq/queuectl.jl` の厳格パーサを流用するか、
-  `agreement_check.jl` 内に専用のものを書く。**選んだ理由をファイル冒頭に書き残すこと。**
-  ⇒ 採用したパーサが**出荷済み 525 本の `F_*.json` を全部読めること**を実測して示す。
-- **⚠ 整数と浮動小数の型の扱い**。Python の `json` は `1` を `int`、`1.0` を `float` にする。規則 3 が
-  「型の違いは即不合格」なので、**`1` と `1.0` の扱いが移植でずれやすい**。§5 の golden で必ず突くこと。
-- **⚠ 数値のパース精度**。17 桁の 10 進表記を Float64 に読むとき、Python の `float()` も Julia の
-  `parse(Float64, …)` も正しく丸めるので一致するはずだが、**思い込まずに golden で確かめる**
-  (17 有効桁・非正規化数・指数表記を事例に入れる)。
+- **判定器はもうワーカーの手元にある。** `tools/jobq/pack_code.sh` の `PATHS="src tools Project.toml"` は
+  **`tools/` ごと**書庫に入れる。ワーカーは書庫を sha256 で検証して展開するので、
+  **`$CODE_CWD/tools/agreement_check.py` が、数値を生んだコードと同じ `code_sha256` で固定された版として
+  既に存在する**。配布経路を新設する必要はない。
+- **依存は標準ライブラリだけ。** import は `argparse / glob / json / math / os / sys / unicodedata`。
+  numpy も scipy も要らない。
+- **必要な Python は 3.6 以上**。版に依存する構文は f-string だけ (walrus `:=` 0 箇所、`match` 0 箇所、
+  組込みジェネリック `list[...]` 0 箇所、`dataclasses` 0 箇所、`from __future__` 0 箇所)。
+  ⇒ **現行のどの Python 3 でも動く**。特定の版に固定する必要はない。
+- **三値の終了コードを既に返す**: **0 = 一致 / 1 = 不一致 / 2 = 判定不能**。
+  (`main()` は `return 2` を 3 箇所、`return 0 if ... else 1` を 2 箇所持つ。)
+- **2 ファイル指定に対応済み**: `agreement_check.py <fileA.json> <fileB.json>`。
 
 ---
 
-## 5. Part B — 移行検証 (Python を消す前に、その判定を凍結して持ち越す)
+## 5. Part A — 登録時に Python を導入する
 
-**差分テストは使えない** (2 実装を並存させないため)。代わりに、**Python 版の判定を消える前にデータとして
-凍結し、Julia 版がそれを再現することを要求する**。凍結した golden は、以後 Julia 版の回帰網になる。
+### 5.1 `bootstrap.ps1`
 
-### 5.1 手順
+**Git と julia の扱いをそのまま真似る。** 既存の枠組みがある:
 
-1. 事例の組 (下表) を `tools/jobq/test/` 配下に作る。**入力そのものをリポに入れる** (小さく作る。
-   出荷 `F_*.json` を丸ごと入れず、必要な構造だけを持つ縮小版でよい。ただし 1 件は実物を使う)。
-2. **まだ Python 版があるうちに**、全事例に対して Python 版を走らせ、
-   **終了コードと `--json` 出力を golden として凍結**する (`tools/jobq/test/agreement_golden/`)。
-3. Julia 版が **golden を完全に再現する**ことを検査する試験を書く (終了コード + `--json` の
-   合否・最大相対差・最大絶対差・不合格のパス)。
-4. 3 が全事例で通ってから、はじめて Python 版を消す (§10 の段 6)。
+- `Install-IfMissing [string]$id [scriptblock]$present` — `$present` が偽なら
+  `winget install --id $id -e --accept-source-agreements --accept-package-agreements` を実行し、
+  失敗したら **throw する** (= 登録がそこで止まる)。既に `Install-IfMissing 'Git.Git' { [bool](Find-GitBash) }`
+  として使われている。
+- `Find-GitBash` — 既定パス → レジストリ → PATH 上の実行ファイル、の順に探して**絶対パスを返す**。
 
-⚠ **順序を守ること。** 先に消すと、移植が正しいことを示す相手がいなくなる。
+やること:
 
-### 5.2 事例 (最低限。足すのは歓迎)
+1. **`Find-Python`** を `Find-GitBash` と同じ形で書く (既定パス → レジストリ → PATH)。
+   **絶対パスを返す**こと。
+   ⚠ **PATH に頼ってはいけない**。ワーカーは Task Scheduler から「ログオンしていなくても実行」で
+   起動するので、対話シェルとは PATH が違う。bootstrap.ps1 の 263 行目のコメントが同じ罠を
+   julia について書いている。
+2. **`Install-IfMissing '<winget の Python の id>' { [bool](Find-Python) }`** を、Git / julia の導入と
+   同じ場所 (345 行付近) に足す。id は winget に現存するものを実際に確認して選ぶ。
+   ⚠ **版は固定しない**。要求は 3.6 以上なので、そのとき手に入る 3.x でよい。
+3. 導入後に**実際に起動して確かめる**: `--version` が取れること、および
+   **`agreement_check.py --selftest` が exit 0 を返すこと**。ここまで通って初めて「導入できた」と言う。
+   ⚠ 版を表示させただけでは、標準ライブラリが揃っているかまでは分からない。
+4. 見つかった**絶対パスと版**を `LOCAL/worker.conf` と台帳 `hosts/<worker_id>.json` に記録する。
+5. 最後の `Say "done: ..."` の行に python も出す (今は `julia=... bash=...` まで)。
 
-| # | 事例 | 期待 |
-| --- | --- | --- |
-| 1 | 出荷済み `F_*.json` を自分自身と比較 (実物 1 件) | 一致 (0)。差は厳密に 0 |
-| 2 | **別の等価クラスの機械が出した実物の組** (あれば) | 一致 (0)。差は 1e-15 級 |
-| 3 | 1 つの数値を許容差の**内側**で動かす | 一致 (0) |
-| 4 | 1 つの数値を許容差の**外側**で動かす | 不一致 (1)、パスが一致 |
-| 5 | `settings.lkin_rule` を `"v6"` → `"v5"` | 不一致 (1) |
-| 6 | 配列を 1 要素短くする | 不一致 (1) |
-| 7 | キーを 1 つ足す / 消す | 不一致 (1) |
-| 8 | 値を `NaN` にする / 片側だけ `Inf` | 不一致 (1) |
-| 9 | `ENV_FIELDS` の中だけ違う | 一致 (0)、別枠で報告 |
-| 10 | `.diag.` の値だけ許容差の外 | 一致 (0) (合否に入れない) |
-| 11 | `.diag.` の**形**が違う / `.diag.` が NaN | 不一致 (1) |
-| 12 | `1` と `1.0` (整数 vs 浮動小数) | golden が定める答えに一致すること |
-| 13 | 17 有効桁・指数表記・非正規化数 | 一致 (0) |
-| 14 | 壊れた JSON / 存在しないファイル | 判定不能 (2) |
+### 5.2 `worker.conf`
 
-### 5.3 一本化で失うものと、その埋め合わせ
+`worker.conf` は **2 箇所**で作られる。**両方**直すこと:
 
-**失うもの**: 「2 つの独立実装が同じ答えを出す」という継続的な裏取り。
-**埋め合わせ**: (a) §5.1 の凍結 golden (移行時点の等価性を歴史として残す)、
-(b) §4.4 の**パーサ独立性**を Julia の中で保つこと、(c) `--selftest` の全事例の移植。
-**この 3 つが揃わないなら一本化してはいけない。**
+- `tools/jobq/bootstrap.ps1` が**自分で組み立てて書く** (キーの並びはテンプレートと同じにする規約)
+- `tools/jobq/worker.conf.template` の `@…@` を **`test/` の適合テストが sed で置換して作る**
+
+⇒ 新しいキー (例 `PYTHON=@PYTHON@`) を**テンプレートと bootstrap の両方**に足し、
+**e2e 側の sed にも足す**。片方だけだとテストのワーカーが python を見つけられない。
+
+### 5.3 既に登録済みの PC
+
+このコミットより前に登録された PC の `worker.conf` には新しいキーが無い。
+その場合ワーカーは §6.2-4 の経路 (判定不能 → FAIL、理由は「判定器を起動できなかった」) に落ちる。
+**フリートは止まらない** (影響するのは dup の枝だけ)。**再登録すれば直る**ことを README に書く。
 
 ---
 
-## 6. Part C — `publish_one` の判定差し替え
+## 6. Part B — `publish_one` の判定差し替え
 
 ### 6.1 変える枝
 
 `tools/jobq/worker.sh` の `publish_one`、**ステップ 5 の「不一致」の枝だけ**を変える。
 ステップ 1〜4 と「バイト一致なら成功」の速い経路は**一切触らない** (通常経路の費用をゼロに保つ)。
+判定器が走るのは**今なら FAIL していた場面だけ**である。
 
 ### 6.2 新しい規則
 
 バイト不一致のとき:
 
-1. **展開済みコードツリーの固定版** `tools/agreement_check.jl` を、**自分の成果物と公開済みの成果物の
-   2 ファイル**に対して走らせる。
+1. **展開済みコードツリーの固定版** `$CODE_CWD/tools/agreement_check.py` を、
+   **自分の成果物と公開済みの成果物の 2 ファイル**に対して走らせる。
    - ⚠ **sidecar manifest を混ぜない** (§6.5.1 の既知の罠)。2 ファイル指定なら自然に満たされる。
-   - ⚠ 判定器は**コードツリーの中のもの**を使う (`$CODE_CWD`)。`code_sha256` で固定されているので、
+   - ⚠ 判定器は**コードツリーの中のもの**を使う。`code_sha256` で固定されているので、
      **数値を生んだコードと同じ版の判定器**になる。共有や `$LOCAL/setup` の版を使ってはいけない。
    - ⚠ **許容差は既定のまま**。ワーカーが `--rtol` / `--atol` を渡してはいけない
      (§6.5 が「既定値そのものが判定基準」と定めている)。
-   - julia は worker と同じチャネル (`$JULIA` + `$(qj)`) で起動する。
-2. **終了コード 0 (一致) → 受理**。先客を残し (上書きしない)、**票は DONE として決着**させる (作者決定 §2-3)。
+   - ⚠ **`PYTHONIOENCODING=utf-8` を付ける** (既存の運用手順と同じ)。
+   - python は `worker.conf` の**絶対パス**で起動する (§5.1-1 の理由)。
+2. **終了コード 0 (一致) → 受理**。先客を残し (上書きしない)、**票は DONE として決着**させる (作者決定 §2-4)。
    - 自分の複製は `failed/<c>/dup/` ではなく、**判定済みと分かる場所**へ置く (名前と場所は実装者判断。
      ただし「未判定の dup」と混ざらないこと)。
    - **判定の結果を来歴に残す** — sidecar manifest か receipt に「別の run が publish したものを採用し、
@@ -211,7 +172,7 @@ julia tools/agreement_check.jl --selftest
      および**両者のホスト名**を書く。MANIFEST が「N 個は別 run の採用・判定済み」と集計できるように。
 3. **終了コード 1 (不一致) → 現状どおり FAIL**。`failed/<c>/dup/` へ移す。
    reason を「**測って不一致だった**」と書き分ける (今後はここに本物の食い違いだけが来る)。
-4. **終了コード 2、または判定器を起動できなかった → 現状どおり FAIL**。reason は
+4. **終了コード 2、python が無い、判定器を起動できなかった → 現状どおり FAIL**。reason は
    「**判定できなかった**」と書き分ける。
    ⚠⚠ **「判定不能」を「一致」に倒してはいけない。** ここが安全側の要。
 
@@ -223,86 +184,57 @@ julia tools/agreement_check.jl --selftest
 
 ---
 
-## 7. Part D — 参照の掃き替え (12 ファイル・41 箇所)
+## 7. Part C — 仕様の更新
 
-⚠ **2 種類に分けること。** 生きた手順は書き換える。**過去の測定の記録は、実際に使った道具の名前を
-残す** (歴史を書き換えない)。記録側には「この道具は 2026-08-22 に Julia へ一本化された」の一言を添える。
-
-### 7.1 生きた文書・コード — 書き換える
-
-| ファイル | 箇所 | 備考 |
-| --- | --- | --- |
-| `tools/jobq/PROTOCOL.md` | 10 | §5.4 (publish の規則そのもの) / §6.5.1 / §6.5.6 / §6.6 の表 / §7 の手順 3 |
-| `tools/jobq/README.md` | 6 | 運用者が打つコマンド行。`PYTHONIOENCODING=utf-8 python …` → `julia …` |
-| `tools/jobq/queuectl.jl` | 3 | docstring / コメント |
-| `tools/jobq/worker.sh` | 2 | コメント |
-| `tools/jobq/test/e2e_noop.sh` | 1 | コメント |
-| `tools/jobq/bootstrap.ps1` | 1 | コメント |
-| `docs/README.md` | 2 | 索引の説明文 |
-| `docs/notes/deep_run_plan_2026-08-22.md` | 1 | ⚠ **計画なら書き換え、記録なら注記**。中身を見て判断 |
-
-### 7.2 過去の記録 — 名前は残し、注記を添える
-
-| ファイル | 箇所 |
-| --- | --- |
-| `docs/notes/cross_machine_reproducibility_2026-08-21.md` | 5 |
-| `docs/handover/next_chat_2026-08-21_jobq.md` | 5 |
-| `docs/handover/next_chat_2026-08-22_jobq.md` | 1 |
-
-### 7.3 §5.4 の既存の ⚠ 4 項目
-
-2026-08-22 に追記した 4 項目 (dup の意味 / 帳簿と実体の食い違い / 衝突は `gen_production` 固有 /
-他 task は lane が 2 本並ぶ) は**消さずに、新しい挙動に合わせて書き直す**。
-「判定不能を一致に倒さない」を明記すること。
+- **`PROTOCOL.md` §5.4**: publish の記述を新しい規則に差し替える。2026-08-22 に追記した ⚠ の 4 項目
+  (dup の意味 / 帳簿と実体の食い違い / 衝突は `gen_production` 固有 / 他 task は lane が 2 本並ぶ) は
+  **消さずに、新しい挙動に合わせて書き直す**。「**判定不能を一致に倒さない**」を明記すること。
+- **`PROTOCOL.md` §9** (`worker.conf` と `PIN.json`): 新しいキーを載せる。
+- **`PROTOCOL.md` §10.2** (`bootstrap.ps1` の手順): **Python の導入**を段として書く。
+  「julia・Git と同じ扱い」「絶対パスを記録する」「`--selftest` が通ることまで確かめる」を明記。
+- **`tools/jobq/README.md`**: 前提に Python を足す。既登録の PC は再登録が要ることを書く (§5.3)。
 
 ---
 
 ## 8. 検証の要件 (これを示すまで「完了」と言わない)
 
 1. `bash -n tools/jobq/worker.sh` が通る。
-2. **改行**: `tools/jobq/**` は `.gitattributes` で `eol=lf` 固定。`tools/agreement_check.jl` は**その
-   規則の外**なので、どう扱うか決めて `.gitattributes` に書くこと。
-3. `python tools/md_emphasis_check.py tools/jobq/PROTOCOL.md` が 0 箇所
-   (⚠ この検査ツールは Python のまま。廃止するのは `agreement_check.py` だけ)。
-4. **golden 再現検査**が §5.2 の全事例で合格。
-5. `julia tools/agreement_check.jl --selftest` が合格。
-6. **`e2e_noop.sh` が緑** (現在 **PASS 182 / FAIL 0**)。加えて事例を 2 つ足す:
+2. `python tools/md_emphasis_check.py tools/jobq/PROTOCOL.md` が 0 箇所。
+3. `python tools/agreement_check.py --selftest` が今までどおり通る (**この道具は変えていない**ことの確認)。
+4. **`e2e_noop.sh` が緑** (現在 **PASS 182 / FAIL 0**)。加えて事例を 2 つ足す:
    - 先客と**丸め誤差の範囲内で違う**成果物を publish → **DONE になる** (`failed/` に落ちない)
    - 先客と**許容差を超えて違う**成果物を publish → **FAIL** し `dup` に残る
    ⇒ 期待値は **PASS 184 / FAIL 0**。
-7. **負のテスト**を 1 本追加 (`tools/jobq/test/` 配下、既存 2 本と同じ体裁: `hosts_outage_test.sh` /
-   `orphan_after_receipt_test.sh` を手本に)。**判定不能 (exit 2 / 判定器が無い) が FAIL になる**ことを
-   実演すること。
-8. **変異体テスト**: 新しい枝を 1 行無効化して、上の検査が**確かに落ちる**ことを見せる。
+5. **負のテスト**を 1 本追加 (`tools/jobq/test/` 配下、既存 2 本と同じ体裁: `hosts_outage_test.sh` /
+   `orphan_after_receipt_test.sh` を手本に)。**判定できないとき (python の絶対パスを存在しないものに
+   差し替える / 判定器が exit 2 を返す) に FAIL になる**ことを実演すること。
+   ⚠ ここが「判定不能を一致に倒さない」の実演であり、この変更で一番大事な負のテスト。
+6. **変異体テスト**: 新しい枝を 1 行無効化して、上の検査が**確かに落ちる**ことを見せる。
    ⚠⚠ **変異体が本当に変異したことを確かめる**。2026-08-22 に、アンカー行が別の関数にも同じ形で
    存在したため置換が適用されず、**無変異の複製に対して「全部 PASS」を出した**実例がある。
    (1) 一致件数を数えて 1 でなければ止める、(2) 変異後のファイルを grep して目印を確認する。
-9. **出荷済み 525 本の `F_*.json`** を採用したパーサが全部読めることを実測して示す。
-10. **削除後に参照が残っていないこと**: `grep -rn 'agreement_check\.py' .` が §7.2 の記録ファイルだけに
-    なること。
+7. `bootstrap.ps1` は **`-DryRun`** で流して、Python の段が意図どおり出ることを見せる
+   (実機での登録は作者が行う)。
 
 ---
 
 ## 9. 罠と既知の制約
 
-- **⚠⚠ 消す順序**。Python 版は**最後**に、**単独のコミット**で消す。§5 の golden を凍結し、Julia 版が
-  それを再現することを示してから。**先に消すと移植の正しさを示す相手がいなくなる。**
-- **⚠ 歴史を書き換えない**。§7.2 の記録は、その測定を実際に行った道具の名前を残す。
-- **⚠ `code_sha256` が動く。** 書庫は `PATHS="src tools Project.toml"` (`tools/jobq/pack_code.sh`) なので、
-  `tools/` の増減で**書庫の digest が変わる**。新しい書庫を `pack_code.sh` で作って共有に置き、
-  以後の campaign はその digest で issue すること。**走行中の campaign は古い書庫のまま**動く
-  (内容アドレスなので混ざらない)。
+- **⚠ `code_sha256` が動く。** 書庫は `PATHS="src tools Project.toml"` (`tools/jobq/pack_code.sh`) で、
+  `tools/jobq/worker.sh` も**その中に入っている**。worker.sh を直せば**書庫の digest が変わる**。
+  新しい書庫を `pack_code.sh` で作って共有に置き、以後の campaign はその digest で issue すること。
+  **走行中の campaign は古い書庫のまま**動く (内容アドレスなので混ざらない)。
 - **✅ `generator_source_fingerprint` は動かない。** `PRODUCTION_SOURCE_FILES` は `src/*.jl` の 10 本
   (`ionization.jl` / `l0_numerics.jl` / `l0_json.jl` / `l1_atomic.jl` / `l2_continuum.jl` / `l3_radial.jl` /
   `l4_angular.jl` / `l5_channel.jl` / `l5_exit_edx.jl` / `gen_production.jl`) だけを覆い、`tools/` を
   含まない。**データセットの身元は動かない。**
-- **✅ CI にも出荷物にも入っていない**。`.github/` に参照は無く、`src/prod*/` `dist/` `licenses/`
-  `schema/` にも無い (2026-08-22 実測)。削除で凍結物は壊れない。
 - **⚠ 本番フリートが走っていないことを確認してから** worker.sh を触ること
   (`tasklist /FI "IMAGENAME eq julia.exe"`)。走行中の worker は `$LOCAL/setup` の版で動いており、
   `sync_setup` は idle ループの先頭でしか再 exec しない。
 - **⚠ 共有 worktree**。作者は同じ repo で複数チャットを並行させている。commit 直前に `git status` を
   取り直し、`git diff` を全文読んで**自分の変更だけ**であることを確かめ、**パスを明示して** add する。
+- **⚠ PowerShell からネイティブを叩く罠**。`$ErrorActionPreference` で進捗表示が致命的エラーに化ける /
+  PS 5.1 が引用符を落とす。既存の `Invoke-NativeStreaming` / `Invoke-Native` を使い、自作しない。
 - **⚠ Bash ツール経由のバックスラッシュ**。長い置換を heredoc や `sed` で書くと `\` が食われる実例が
   複数ある。**置換は Python スクリプトをファイルに書いてから実行する**。
 - **⚠ 和文 md の強調**: 句読点・鉤括弧を `**` の内側で閉じるとリテラル表示になる
@@ -316,24 +248,21 @@ julia tools/agreement_check.jl --selftest
 
 | 段 | やること | ゲート |
 | --- | --- | --- |
-| 1 | 事例を作り、**Python 版で golden を凍結** (§5.1 の 1–2) | golden がリポに入る。Python 版はまだ消さない |
-| 2 | `tools/agreement_check.jl` を移植 (§4) | `--selftest` 合格。出荷 525 本を全部読める |
-| 3 | **golden 再現検査**を書いて全事例で合格 (§5.1 の 3) | 全 14 事例で終了コードと `--json` が一致 |
-| 4 | `publish_one` の枝を差し替え (§6) | `bash -n` / 負のテスト / 変異体 |
-| 5 | 参照の掃き替え (§7) と `e2e_noop.sh` に 2 事例 | `md_emphasis_check` 0 箇所 / **PASS 184 / FAIL 0** |
-| 6 | **`tools/agreement_check.py` を削除** | §8-10 の grep が §7.2 の記録だけになる |
-| 7 | `pack_code.sh` で書庫を作り直し、共有へ配置 | 新しい `code_sha256` を記録。以後の issue はそれを使う |
-
-⚠ 段 1〜3 は**挙動を一切変えない**ので、そこまでを 1 コミットにして先に出してよい。
-段 4 以降が挙動の変更。**段 6 は必ず単独のコミット**にする (移植の正しさと削除を歴史の上で分ける)。
+| 1 | `bootstrap.ps1` に `Find-Python` と `Install-IfMissing` を足し、`worker.conf` に所在を書く (§5) | `-DryRun` で段が出る。テンプレートと e2e の sed の**両方**に新キーが入っている |
+| 2 | `publish_one` の枝を差し替え (§6) | `bash -n` |
+| 3 | 負のテスト 1 本 (§8-5) と変異体 (§8-6) | 判定不能が FAIL になることを実演。変異体が本当に変異している |
+| 4 | `e2e_noop.sh` に 2 事例 (§8-4) | **PASS 184 / FAIL 0** |
+| 5 | 仕様の更新 (§7) | `md_emphasis_check` 0 箇所 |
+| 6 | `pack_code.sh` で書庫を作り直し、共有へ配置 | 新しい `code_sha256` を記録。以後の issue はそれを使う |
 
 ---
 
 ## 11. 参照
 
-- 判定規則の正本: `tools/agreement_check.py` の冒頭 docstring (⚠ 消す前に読む)
+- 判定規則の正本: `tools/agreement_check.py` の冒頭 docstring (**変更しない**)
 - 一致の判定と CPU 差の作者決定: `tools/jobq/PROTOCOL.md` §6.5、`docs/notes/cross_machine_reproducibility_2026-08-21.md`
 - publish と dup: `tools/jobq/PROTOCOL.md` §5.4、§4 の状態遷移表
+- 登録の手順: `tools/jobq/PROTOCOL.md` §10、`tools/jobq/bootstrap.ps1`
 - 既存の負のテストの体裁: `tools/jobq/test/hosts_outage_test.sh`、`tools/jobq/test/orphan_after_receipt_test.sh`
 - 直近の関連コミット: `4e2036b` (hosts ガード) / `62a628e` (回収と receipt) / `7af40eb` (dup の適用範囲) /
   `16c61a4` (RETURN の飢餓) / `c824328` (WORKER_ID の一意性)
