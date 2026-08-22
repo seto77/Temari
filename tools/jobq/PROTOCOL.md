@@ -117,7 +117,7 @@ tar -C <tree> --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric
 
 **`tools/jobq/pack_code.sh <source-tree> [--out-root ROOT] [--name temari] [--prod-fp HEX16] [--dry-run]`**:
 
-- パス一覧 (`src tools Project.toml`) が揃っていなければ**何もせず終了**する。
+- パス一覧 (`src tools Project.toml`) が揃っていなければ**何もせず終了**する。`src/prod_factors_v1` と `spec` が両方ある tree では、出荷生成の実行時入力としてこの二つも同梱する。一方だけなら壊れた出荷書庫を作らず停止する。`atom_cache` と任意の未追跡ファイルは同梱しない。
 - `git -C <tree> rev-parse HEAD` と `git status --porcelain -uno` を記録する。status が空でなければ記録する
   commit は `<sha>-dirty` になり、**大きく警告してから、それでも固める** (識別子は digest の方)。
 - `<ROOT>/code/<name>-<sha16>.tar.gz` を tmp + rename で書く。`sha16` = 書庫の sha256 の先頭 16 桁。

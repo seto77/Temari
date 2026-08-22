@@ -17,9 +17,10 @@
 #   読む側 (_git_probe) を直すと gen_production.jl が変わり、PRODUCTION_SOURCE_FINGERPRINT が
 #   ce058cce4fe9b31d から動いて走行中のフリートに合流できなくなる (実測: コメント 1 行で f8d9a89cc3c33a4e)。
 #
-# 識別子の定義: Git tree なら `git ls-files -- src tools Project.toml` の追跡ファイルだけを、
-# 非 Git tree なら従来どおり明示した 3 path を固める。⚠ src/ や tools/ をそのまま tar してはいけない:
-# 無視された本番表・ベンチ結果・キャッシュが混ざると、clean な commit を記録しても書庫は再現不能になる。
+# 識別子の定義: Git tree なら追跡された `src tools Project.toml` と、存在するときだけ明示した
+# 実行時データ (`src/prod_factors_v1`, `spec`) を固める。後者は .gitignore でも実行に必須なので、
+# 「追跡ファイルだけ」にすると gen_production が 0.0.0-dev へ fail-closed する。⚠ src/ や tools/ を
+# そのまま tar してはいけない: atom_cache・ベンチ結果等は whitelist に入れない。
 #
 # 出力: 標準出力に 64 桁の sha256 だけ (campaign にそのまま貼れる / SHA=$(pack_code.sh …) で受けられる)。
 #       人向けの報告は標準エラーへ出す。
@@ -27,6 +28,7 @@
 set -u
 
 PATHS="src tools Project.toml"      # ★ 識別子の一部。変えるなら世代を分けること
+RUNTIME_PATHS="src/prod_factors_v1 spec" # gen_production の明示的な実行時入力。キャッシュは含めない。
 CODE_NAME_RE='^[a-z][a-z0-9_-]{0,31}$'
 
 usage() { sed -n '2,26p' "$0" >&2; }
@@ -65,6 +67,17 @@ for p in $PATHS; do
   [ -e "$tree_abs/$p" ] || { err "パス一覧の $p が $tree_abs に無い"; miss=1; }
 done
 [ $miss -eq 0 ] || { err "パス一覧が揃っていないので何もしない (固めるのは: $PATHS)"; exit 1; }
+
+# factors と release spec は、本番生成だけが必要とする ignored runtime input。両方がある tree では
+# 必ず一緒に運ぶ。一方だけなら壊れた出荷書庫になるので止める (stub/e2e のように両方無い tree は許す)。
+runtime_present=0
+for p in $RUNTIME_PATHS; do
+  [ -e "$tree_abs/$p" ] && runtime_present=$((runtime_present + 1))
+done
+if [ "$runtime_present" -ne 0 ] && [ "$runtime_present" -ne 2 ]; then
+  err "実行時データが片方だけある (必要: $RUNTIME_PATHS) — 壊れた出荷書庫は作らない"
+  exit 1
+fi
 
 # --- 来歴 (git。強制はしない — 識別子は digest の方) --------------------------------
 commit=""; dirty=false; gitnote=""
@@ -105,13 +118,19 @@ cleanup() { rm -rf "$tmpdir"; }
 trap cleanup EXIT
 local_tar="$tmpdir/pack.tar.gz"
 
-# Git tree では内容アドレスの対象を追跡ファイルに限定する。`status --porcelain -uno` は untracked を
-# 表示しないので、ここで明示しなければ ignored な prod*/cache が clean archive に混ざってしまう。
-# NUL 区切りを tar に渡し、空白を含む path でも byte 列を変形しない。
+# Git tree では追跡ソースに限定しつつ、上で認めた実行時データだけを明示追加する。`status --porcelain
+# -uno` は ignored data を表示しないので、prod*/cache を tree 丸ごとで混ぜてはならない。NUL 区切りを
+# tar に渡し、空白を含む path でも byte 列を変形しない。
 file_list=""
 if git -C "$tree_abs" rev-parse --git-dir >/dev/null 2>&1; then
   file_list="$tmpdir/git-files.nul"
   git -C "$tree_abs" ls-files -z -- $PATHS > "$file_list" || { err "git ls-files が失敗した"; exit 3; }
+  if [ "$runtime_present" -eq 2 ]; then
+    # find を各 root で行う。tree 相対 path にして、tracked spec との重複を sort -z -u で除く。
+    { cat "$file_list"; (cd "$tree_abs" && find src/prod_factors_v1 spec -type f -print0); } \
+      | sort -z -u > "$file_list.sorted" || { err "実行時データの一覧を作れない"; exit 3; }
+    mv "$file_list.sorted" "$file_list"
+  fi
   [ -s "$file_list" ] || { err "追跡対象が 0 個 ($PATHS)"; exit 3; }
 fi
 
@@ -123,7 +142,7 @@ if [ -n "$file_list" ]; then
       -cf - 2>"$tmpdir/tar.err" | gzip -n -9 > "$local_tar"
 else
   tar -C "$tree_abs" --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric-owner \
-      -cf - $PATHS 2>"$tmpdir/tar.err" | gzip -n -9 > "$local_tar"
+      -cf - $PATHS $( [ "$runtime_present" -eq 2 ] && printf '%s' "$RUNTIME_PATHS" ) 2>"$tmpdir/tar.err" | gzip -n -9 > "$local_tar"
 fi
 rc=$?
 set +o pipefail
@@ -147,7 +166,7 @@ dest_meta="$root/code/$meta"
 {
   printf '\n'
   printf 'pack_code: source-tree = %s\n' "$tree_abs"
-  printf '           paths       = %s (%s entries)\n' "$PATHS" "$nfiles"
+  printf '           paths       = %s%s (%s entries)\n' "$PATHS" "$( [ "$runtime_present" -eq 2 ] && printf ' + runtime data' )" "$nfiles"
   printf '           commit      = %s%s\n' "${commit_rec:-(none)}" "$( [ -n "$gitnote" ] && printf ' [%s]' "$gitnote")"
   printf '           bytes       = %s\n' "$bytes"
   printf '           sha256      = %s\n' "$sha"
@@ -205,7 +224,7 @@ if [ -e "$dest_meta" ]; then
   err "sidecar が既にある — 触らない: $dest_meta"
   [ -n "$prodfp" ] && err "  (--prod-fp を入れ直したいなら $dest_meta を人が消してから再実行する)"
 else
-  paths_json=$(printf '%s' "$PATHS" | tr ' ' '\n' | sed 's/.*/"&"/' | paste -sd, -)
+  paths_json=$(printf '%s %s' "$PATHS" "$( [ "$runtime_present" -eq 2 ] && printf '%s' "$RUNTIME_PATHS" )" | tr ' ' '\n' | sed 's/.*/"&"/' | paste -sd, -)
   {
     printf '{"schema":1,"name":"%s","commit":"%s","dirty":%s,' "$name" "$commit_rec" "$dirty"
     printf '"paths":[%s],"sha256":"%s","bytes":%s,' "$paths_json" "$sha" "$bytes"

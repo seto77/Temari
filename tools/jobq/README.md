@@ -67,7 +67,7 @@ bash tools/jobq/pack_code.sh . --dry-run                          # 何を固め
 bash tools/jobq/pack_code.sh . --out-root //10.31.108.5/jobq      # 既定の ROOT はこれ
 ```
 
-- 固めるのは `src tools Project.toml` **だけ** (ツリー全体だと `atom_cache` で 619 MB になる)。0.7 MB。
+- 固めるのは追跡された `src tools Project.toml` と、出荷 tree に存在するときだけの実行時入力 `src/prod_factors_v1` / `spec`。ツリー全体は固めない (`atom_cache` などのキャッシュや任意の未追跡物は除外)。factors と spec は `gen_production --profile v6_high` が `6.0.0` を名乗るために必須であり、片方だけの tree は停止する。
 - 標準出力に **64 桁の sha256** が出る。これをそのまま campaign に貼る。`code/temari-<sha16>.tar.gz` と
   同名の `.json` (commit・dirty・paths・bytes・packed_utc) が置かれる。
 - **同じ内容なら同じ digest** (`--sort=name --mtime=… --owner=0 --group=0 --numeric-owner` + `gzip -n`)。
