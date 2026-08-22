@@ -195,7 +195,16 @@ finish_orphan() { # $1 orphan のフルパス  $2 reason
   c=${BASH_REMATCH[1]}; j=${BASH_REMATCH[2]}; e=${BASH_REMATCH[3]}; o=${BASH_REMATCH[4]}
   base="${c}_${j}.e${e}"; ep=$((10#$e)); ne=$((ep + 1)); nb=$(printf '%s_%s.e%03d' "$c" "$j" "$ne")
   mkdir -p "$SPOOL/queue/.tmp" "$SPOOL/failed/$c" 2>/dev/null
-  if [ "$ne" -gt "$MAX_EPOCH" ]; then
+  if has_receipt "$c" "$base"; then
+    # 260822Cl: 回収した**その票自身**が、回収の前後に完走していた。receipt があるなら成果物はもう
+    #   results/ にあるので、再投入してはいけない。⚠ ここを見ないと害は「無駄な再計算」で終わらない —
+    #   **別の CPU で計算するとバイト列が変わる** (§6.5 の作者決定) ので publish が dup として弾き、
+    #   `failed/<c>/dup/` に**偽の「不一致」の証拠**が残る。本物の処方の食い違いを探すときに見る信号を汚す。
+    # ⚠ pass() も REAP の直前に has_receipt を見るが、それでは足りない: retry_orphans は**後の走査**で
+    #   finish_orphan を呼び直すので、receipt が後から現れうる (窓は 1 周期 = 300 s 以上)。
+    outcome=already_finished
+    log "REISSUE skipped $nb: $base already has a receipt (the owner finished around the reap)"
+  elif [ "$ne" -gt "$MAX_EPOCH" ]; then
     outcome=exhausted
     put_json_new "$SPOOL/failed/$c/$base.$o.json" \
       "{\"schema\":1,\"receipt\":\"failed\",\"base\":\"$base\",\"campaign\":\"$c\",\"owner\":\"$o\",\"by\":\"reaper@$HOST\",\"utc\":\"$(date -u +%FT%TZ)\",\"reason\":\"$(json_esc "claim_epoch $ep reaped and $ne > max_claim_epoch $MAX_EPOCH; $2")\",\"outcome\":\"$outcome\",\"next_base\":\"$nb\",\"orphan\":\"failed/$c/orphan/$f\"}" \

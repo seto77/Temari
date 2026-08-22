@@ -329,6 +329,19 @@ tar -C <tree> --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric
 - 各成果物について §4 PUBLISH: `results/<c>/.tmp/<outname>.<owner>` へ複製 → `mv -n` → 最終名を読み直して
   sha256 を比較。同一なら成功 (先客が同一内容でも成功)。違えば自分の複製を `failed/<c>/dup/<outname>.<owner>`
   へ移して FAIL (reason = `dup`)。
+- ⚠⚠ **`dup` は「処方が食い違っている」証拠ではない** (2026-08-21 の作者決定のあと)。最終ファイルの
+  sha256 比較は**機械を跨いだバイト比較**であり、別の類のマシンの出力とは必ず最終ビットが違う (§6.5.2)。
+  §6.5.6 は「この区別を、バイト比較に触れるすべての場所に明記すること」と定めており、ここがその 1 箇所である。
+  そして**同じ成果物を 2 台が計算する経路は設計に組み込まれている** — ABANDON した worker は
+  **成果物だけを遅れて publish する** (§5.5) ので、再投入された epoch を持つ別の PC の worker と衝突しうる。
+  ⇒ **`dup` を見たら次の順で読む**:
+  1. 先客の `results/<c>/<outname>.manifest.json` と、自分の複製 `failed/<c>/dup/<outname>.<owner>` の来歴を
+     比べる。**`code_sha256` と `spec_sha256` が一致していれば処方は同じ** — 差は CPU の類の差である。
+  2. 2 つのファイルを `agreement_check.py` (§6.5.1) に掛ける。丸め誤差の範囲内なら**正常**。
+  3. `code_sha256` か `spec_sha256` が違えば**本物の食い違い**。走行を止めて原因を特定する。
+- ⚠ **この経路では帳簿と成果物が食い違う**: 先客の成果物は `results/` にあるのに、後から来た epoch の票は
+  `failed/` に落ちる (dup になった worker は DONE receipt を書けないため)。campaign を集計するときは
+  **「failed だが成果物は揃っている」を dup として別に数える**こと。数だけを見て失敗と読まない。
 - 続いて sidecar `results/<c>/<outname>.manifest.json` を同じ規則で置く (先客があれば残す — そのバイトを
   説明しているのは先客の方)。
 - 全部置けたら `done/<c>/<base>.<owner>.json` (§8 のポインタ) を書き、`running/<base>.<owner>.json` を消し、
@@ -767,6 +780,13 @@ BLAS スレッド数という**正当に PC ごとに違う値**を持つ。同�
   **`args` に自由書式の文字列を足すときは、この前提が壊れる。**
   — なお grep が騙されても向きは安全側で、値が 1 個でなければ上の `bad_ticket` に落ちて隔離される
   (誤った epoch で queue を汚すことはない)。書き換え後の票も `mv` の前にもう一度数え直す。
+- ⚠⚠ **REISSUE の前に、回収した票自身の receipt をもう一度見る**。`done/<c>/<base>.*` か
+  `failed/<c>/<base>.*` (直下) があれば **outcome = `already_finished` で再投入しない**。
+  REAP の直前にも見ているが、それでは足りない — REISSUE が確認できずに orphan を残した場合、
+  次の走査の retry が**その票を数百秒後に拾い直す**ので、その間に本人が完走して receipt を書きうる。
+  ⚠ 見落とした場合の害は「無駄な再計算」では**終わらない**: 別の CPU で計算するとバイト列が変わる
+  (§6.5) ので publish が dup として弾き、`failed/<c>/dup/` に**偽の「不一致」の証拠**が残る —
+  本物の処方の食い違いを探すときに見る信号そのものを汚す。
 - **REISSUE に失敗しても票は失われない** — orphan ファイルが残るので、後の走査が同じ規則で拾い直す:
   「`failed/<c>/orphan/` にあり、epoch+1 の base が queue / running / done / failed / orphan の**どこにも無い**」
   orphan は REISSUE の再試行対象。⇒ 「回収したのに再投入できなかった」を 1 日待たずに次の周期で直せる。
