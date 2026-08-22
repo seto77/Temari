@@ -451,6 +451,11 @@ verify OK: <n> artefact(s)
 ファイル名から組む。一度でも使われた epoch は lane 名が衝突しうるので二度と投入しない。
 ⚠ `temari.gen_production` の成果物名は lane を含まないので `results/` からは epoch を復元できない。
 本番生成 campaign の重複投入は queue / running / done / failed / orphan の痕跡だけで防ぐ。
+⚠⚠ **したがって receipt を消すと重複投入の防壁も消える**。完走した campaign の `done/<c>/` と
+`failed/<c>/` を容量整理でアーカイブ退避したあとに `queuectl issue <c>` を再実行すると、**痕跡が
+どこにも無いので全票の epoch 1 がそのまま queue に戻り、完成済みの計算をフリート全体がやり直す**。
+成果物は壊れない (`publish` が同一内容の先客として弾く) が、数千時間の計算資源が失われる。
+⇒ **完走した campaign の receipt は消さない**。容量を空けるなら receipt ではなく run ログを消すこと。
 
 ### 6.4 task allowlist — 玩具 1 つから本番生成までの 7 段 (2026-08-21 作者決定)
 
