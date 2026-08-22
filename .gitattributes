@@ -14,6 +14,7 @@ tools/jobq/share_README.txt text eol=crlf
 
 # 260823Cl: Deep / atom-cache のコード・試験・運用メモも Windows で LF を維持する。
 docs/notes/deep_run_plan_2026-08-22.md text eol=lf
+docs/notes/certification_v4_preregistration_2026-08-20.md text eol=lf
 docs/handover/next_chat_2026-08-22_jobq.md text eol=lf
 src/l5_channel.jl text eol=lf
 tools/cache_race_test.jl text eol=lf
