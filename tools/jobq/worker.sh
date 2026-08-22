@@ -970,6 +970,50 @@ load_may_work() {
   [ "$SLOT" -lt "$LOAD_ACTIVE" ]
 }
 
+# ---- Deep の終盤を遅い機に取らせない制御 (control/tail.json) ----------------------------------------------
+# 票を発行する側は LPT にしても、最後に遅い host が長い 1 票を取れば尾だけは後から直せない。
+# そこで Deep 専用の、来歴を持つ 1 行 JSON を各 idle slot が読む。中央の調停や時計の比較はしない。
+#
+# JSON は意図的に canonical な 1 行・鍵順固定に限定する。bash に汎用 JSON parser を持ち込まないためで、
+# 壊れた・未知の版・自分の速度が載っていない policy は必ず全開に倒す。形式:
+# {"schema":1,"campaign":"temari_sigma_deep","fleet_slots":36,"k_per_slot":1,"median_slowdown":1.81,
+#  "threshold_multiplier":1.30,"rescue_seconds":600,"slowdown_by_worker_id":{"host-guid":2.38,...}}
+# rescue は NAS/host の時計を比較せず liveness を守るための自ホスト時計だけの脱出口。速い host が不在なら
+# 遅い host もこの秒数後には 1 票を取る。走行中の票にはこの判定を一切掛けない。
+TAIL_F=$SPOOL/control/tail.json
+TAIL_BLOCKED_SINCE=0; TAIL_REASON=""
+tail_may_work() {  # 0 = claim 可 / 1 = 今回は standby。異常はすべて 0 (fail-open)
+  TAIL_REASON=""; [ -f "$TAIL_F" ] || { TAIL_BLOCKED_SINCE=0; return 0; }
+  local raw camp fleet k med x rescue map own re n remaining first limit cutoff elapsed
+  raw=$(tr -d '\r\n' < "$TAIL_F" 2>/dev/null) || { TAIL_BLOCKED_SINCE=0; return 0; }
+  # 空白や余分な鍵を許さない。鍵の重複・NaN/指数表記・文字列 escape もここで拒否する。
+  re='^\{"schema":1,"campaign":"([a-z][a-z0-9_]{2,39})","fleet_slots":([1-9][0-9]*),"k_per_slot":([1-9][0-9]*),"median_slowdown":([0-9]+([.][0-9]+)?),"threshold_multiplier":([0-9]+([.][0-9]+)?),"rescue_seconds":([1-9][0-9]*),"slowdown_by_worker_id":\{(.*)\}\}$'
+  [[ "$raw" =~ $re ]] || { TAIL_BLOCKED_SINCE=0; return 0; }
+  camp=${BASH_REMATCH[1]}; fleet=${BASH_REMATCH[2]}; k=${BASH_REMATCH[3]}; med=${BASH_REMATCH[4]}; x=${BASH_REMATCH[6]}; rescue=${BASH_REMATCH[8]}; map=${BASH_REMATCH[9]}
+  [[ "$map" =~ ^\"[a-z0-9][a-z0-9-]{0,40}\":[0-9]+([.][0-9]+)?(,\"[a-z0-9][a-z0-9-]{0,40}\":[0-9]+([.][0-9]+)?)*$ ]] || { TAIL_BLOCKED_SINCE=0; return 0; }
+  # worker_id は allowlist 済みなので動的 regex に埋めても文字列を解釈しない。
+  re="(^|,)\\\"$WORKER_ID\\\":([0-9]+([.][0-9]+)?)(,|$)"
+  [[ "$map" =~ $re ]] || { TAIL_BLOCKED_SINCE=0; return 0; }
+  own=${BASH_REMATCH[2]}
+  awk -v a="$med" -v b="$x" -v c="$own" 'BEGIN { exit !(a>0 && b>0 && c>0) }' || { TAIL_BLOCKED_SINCE=0; return 0; }
+  # 先頭票が別 campaign ならそれを普通に進める。Deep の policy が他 campaign を止めてはならない。
+  first=$(find "$SPOOL/queue" -maxdepth 1 -type f -name '*.json' -printf '%f\n' 2>/dev/null | LC_ALL=C sort | head -1)
+  [[ "$first" == "$camp"_* ]] || { TAIL_BLOCKED_SINCE=0; return 0; }
+  remaining=$(find "$SPOOL/queue" -maxdepth 1 -type f -name "$camp"'_*.json' -printf x 2>/dev/null | wc -c | tr -d ' ')
+  [[ "$remaining" =~ ^[0-9]+$ ]] || { TAIL_BLOCKED_SINCE=0; return 0; }
+  limit=$((fleet * k)); [ "$remaining" -lt "$limit" ] || { TAIL_BLOCKED_SINCE=0; return 0; }
+  cutoff=$(awk -v a="$med" -v b="$x" 'BEGIN { printf "%.12g", a*b }')
+  awk -v a="$own" -v b="$cutoff" 'BEGIN { exit !(a>b) }' || { TAIL_BLOCKED_SINCE=0; return 0; }
+  n=$(now); [ "$TAIL_BLOCKED_SINCE" -gt 0 ] || TAIL_BLOCKED_SINCE=$n
+  elapsed=$((n - TAIL_BLOCKED_SINCE))
+  if [ "$elapsed" -ge "$rescue" ]; then
+    TAIL_REASON="control/tail: rescue after ${elapsed}s (remaining=$remaining < $limit; slowdown=$own > $cutoff)"
+    TAIL_BLOCKED_SINCE=0; return 0
+  fi
+  TAIL_REASON="control/tail: remaining=$remaining < $limit; slowdown=$own > $cutoff; rescue in $((rescue-elapsed))s"
+  return 1
+}
+
 
 # ★ 試験用フック: 規則の解決だけを 1 回行って表示し、終了する (NAS も julia も要らない)。
 #   本番経路では JOBQ_LOAD_RULE_TEST を誰も設定しないので何もしない。
@@ -978,6 +1022,20 @@ if [ "${JOBQ_LOAD_RULE_TEST:-0}" = 1 ]; then
   load_refresh
   printf 'active=%s threads=%s may_work=%s
 ' "${LOAD_ACTIVE:--}" "${LOAD_THREADS:--}"          "$(load_may_work && echo yes || echo no)"
+  exit 0
+fi
+if [ "${JOBQ_TAIL_RULE_TEST:-0}" = 1 ]; then
+  log() { :; }
+  if tail_may_work; then printf 'may_work=yes reason=%s\n' "$TAIL_REASON"
+  else printf 'may_work=no reason=%s\n' "$TAIL_REASON"; fi
+  exit 0
+fi
+if [ "${JOBQ_TAIL_RULE_TEST:-0}" = rescue ]; then
+  log() { :; }
+  tail_may_work || :
+  sleep "${JOBQ_TAIL_RULE_TEST_SLEEP:-1}"
+  if tail_may_work; then printf 'may_work=yes reason=%s\n' "$TAIL_REASON"
+  else printf 'may_work=no reason=%s\n' "$TAIL_REASON"; fi
   exit 0
 fi
 
@@ -1022,6 +1080,10 @@ while :; do
   load_refresh
   if ! load_may_work; then
     write_status standby "control/load: active_slots=$LOAD_ACTIVE"; idle_tick
+    sleep_status "$HEARTBEAT_INTERVAL"; continue
+  fi
+  if ! tail_may_work; then
+    write_status standby "$TAIL_REASON"; idle_tick
     sleep_status "$HEARTBEAT_INTERVAL"; continue
   fi
   [ -n "$LOAD_THREADS" ] && THREADS=$LOAD_THREADS   # 票ごとに julia を起動し直すので再起動は要らない

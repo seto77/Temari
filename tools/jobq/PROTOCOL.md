@@ -425,6 +425,27 @@ d317-10   *        *                0
   2. **走行中の票を殺さない** — 評価するのは idle ループの先頭だけ。
   3. **中央のデーモンを置かない** — 各スロットが自分の時計で評価する。単一障害点を作らない。
 
+### 5.8 `control/tail.json` — Deep の終盤を遅い host に取らせない
+
+Deep の LPT 発行後でも、残票が少なくなった時点で遅い host が長い 1 票を claim すると尾だけは回復不能になる。
+この policy は**指定 campaign の先頭票だけ**に、idle ループで適用する。他 campaign を止めず、走行中の票も
+殺さない。無い・読めない・schema/書式が違う・自 host の速度が無い場合はすべて claim 可（fail-open）。
+
+policy は空白なし・鍵順固定の canonical な 1 行 JSON とする（worker は汎用 JSON parser を持たない）:
+
+```json
+{"schema":1,"campaign":"temari_sigma_deep","fleet_slots":36,"k_per_slot":1,"median_slowdown":1.81,"threshold_multiplier":1.30,"rescue_seconds":600,"slowdown_by_worker_id":{"d317-5-0123abcd":2.38,"m616-2-0123abcd":3.46}}
+```
+
+- `remaining < fleet_slots × k_per_slot` かつ `own_slowdown > median_slowdown × threshold_multiplier`
+  のときだけ `standby` する。等号は止めない。
+- `slowdown_by_worker_id` は host 名ではなく、F v6 sidecar manifest に記録された一意の `worker_id` を使う。
+  再登録で id が変わった場合は**Deep の事前登録時に新しい実測値へ作り直す**。古い値を host 名へ勝手に移さない。
+- `rescue_seconds` は高速 host が実際には不在の時の liveness 脱出口である。worker 自身の単調な経過時間だけを
+  用い、共有や別 host の時計は比較しない。時間後は 1 票を claim し、次の idle loop からまた通常判定する。
+- policy の発行時は canonical 生バイト SHA-256、F v6 manifest の列挙・集計方法、中央値、K/X、除外 host を
+  campaign preregistration に記録する。`control/tail.json` は次の campaign に持ち越さない。
+
 ## 6. queuectl.jl — task テンプレートと検証 (唯一の知識の置き場)
 
 外部依存なし (Julia 標準ライブラリのみ。JSON は自前の最小実装: object / array / string (エスケープ
@@ -885,7 +906,7 @@ checker_log, recorded_utc}`。`verdict` は `accepted|disagreement|unjudged`。�
 
 - `worker_sha` は走っている `worker.sh` 自身の SHA-256 の先頭 16 桁。**どのホストがどの版で
   回っていたかを receipt を読まずに一覧するためだけ**にある (版の同一性の照合には使わない — それは `code_sha256`)。
-- `standby` は `control/load` (§5.7) が稼働スロット数を絞っている状態。**票は取らないが tick は打つ**
+- `standby` は `control/load` (§5.7) または `control/tail.json` (§5.8) が次の票を抑制している状態。**票は取らないが tick は打つ**
   ので、reaper から見れば idle と同じく生きている。
 - `tick` は**単調増加する整数**。書くたびに +1 し、`LOCAL/state/tick.s<slot>` に持って再起動を跨いで増え続ける
   (reaper が「増えたか」だけを見るので、値の意味は問わない)。

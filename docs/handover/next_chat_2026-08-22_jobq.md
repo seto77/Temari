@@ -133,6 +133,13 @@ API readback、sidecar 来歴まで実装・結合試験 13/0。D317-10 は退�
   知っている。`残りキュー < K × フリート総スロット` になったら、中央値の X 倍より遅いホストは
   claim をやめて standby する。中央の調停は不要。⚠ **fail-open**: 自分の速度が分からない
   (完了ゼロ) ホストは普通に claim する。K と X は F v6 の実測ログから決める
+
+  **2026-08-23 実装・定量化済**: `worker.sh` の `control/tail.json` は canonical schema 1 のみを読み、
+  壊れた policy・未知 host・他 campaign は fail-open。F v6 の manifest 320 本から中央値 slowdown=1.81、
+  **K=1 / X=1.30 / rescue=600 s** を採用した。36 slots で残票<36、slowdown>2.353 の d317-5 と
+  m616-2 を standby にする。実測の該当5票は合計1,258.3 min。`tail_control_test.sh` は形式破損、未知 host、
+  等号、境界、他 campaign、main loop の非claim、rescue を負で検査する。Deep 事前登録時に、再登録後の
+  worker_id を使って共有の policy を新規発行し SHA-256 を記録する。d317-10/d317-1 は map に入れない。
 - **(c) 票をもっと細かく** — 1 票 = 1 行にすると尾は縮むが、行ごとに SCF の準備をやり直す費用が乗る。
   **どれだけ乗るかを測ってから**決める
 - **(d) 最後の数票を二重に走らせて先着を採る** — publish は no-clobber rename + sha 照合なので二重に
