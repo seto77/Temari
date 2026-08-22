@@ -332,6 +332,23 @@ check "書庫が無い票は queue/ へ RETURN される (同じ epoch)" test -f
 check "書庫が無い票は failed/ に落ちない" eq "$(nfiles "$SPOOL/failed/temari_e2e_nodig" '*.json')" 0
 check "RETURN のあと running/ に残らない" eq "$(nfiles "$SPOOL/running" 'temari_e2e_nodig_*.json')" 0
 check "status が degraded を記録している" grep -q '"state" *: *"degraded"' "$SPOOL/hosts/${WID}-s0.status.json"
+# C-3b. RETURN される票の**後ろ**にある票が飢えない (§5.5 の「自分が RETURN した票はしばらく飛ばす」)
+#   ⚠ ここではまだ nodig の票を消さない — それが詰まりの原因そのものなので、置いたまま検査する。
+#   名前順は temari_e2e_nodig_… < zz_e2e_after_… なので、記憶が無ければ worker は毎回 nodig を取り、
+#   RETURN し、degraded で眠り、また nodig を取る… を繰り返して後ろの票に永久に到達しない。
+printf '[{"seconds":1}]\n' > "$log_dir/after.args.json"
+queuectl new-campaign --name zz_e2e_after --task jobq.noop --code-sha256 "" \
+         --args-json "$log_dir/after.args.json" >"$log_dir/nc_after.log" 2>&1
+check "new-campaign zz_e2e_after (jobq.noop)" eq "$?" 0
+queuectl issue zz_e2e_after >>"$log_dir/nc_after.log" 2>&1
+check "issue zz_e2e_after" test -f "$SPOOL/queue/zz_e2e_after_000001.e001.json"
+run_worker_fg 240 "$log_dir/worker_starve.log" JOBQ_MAX_IDLE_LOOPS=4
+check "その worker は先に nodig を RETURN している" \
+      grep -q 'RETURN temari_e2e_nodig_000001\.e001' "$log_dir/worker_starve.log"
+check "RETURN される票の後ろにある票が完走する (飢えない)" \
+      test -f "$SPOOL/results/zz_e2e_after/zz_e2e_after_lane000001001.jsonl"
+check "nodig の票は queue/ に残る (他のホストには試させる)" \
+      test -f "$SPOOL/queue/temari_e2e_nodig_000001.e001.json"
 rm -f "$SPOOL/queue/temari_e2e_nodig_000001.e001.json"     # 以後の worker に拾わせない
 
 # =====================================================================================

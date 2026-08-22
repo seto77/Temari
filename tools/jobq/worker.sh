@@ -301,12 +301,22 @@ recover() {  # RECOVER: 自分の worker_id+slot の、より古い boot_seq の
   done < <(find "$SPOOL/running" -maxdepth 1 -type f -name "*.$WORKER_ID-s$SLOT-b*.json" 2>/dev/null | LC_ALL=C sort)
   return 1
 }
+# 260822Cl: この worker が RETURN したばかりの票 (base -> 再 claim してよい時刻)。§5.5。
+#   ⚠ RETURN は票を**同じ名前で** queue/ に戻すので、記憶しないと claim() は名前順の先頭にある
+#     その票を毎回また取る。ホストではなく**票か共有の側**に理由がある RETURN (例: 書庫が共有に
+#     置き忘れられている) では全ワーカーがそれを取り続け、**後ろの票に永久に到達しない**。
+#   ⚠ 共有には書かない — 他のホストには試させる (それが RETURN の趣旨)。忘れるのは自分だけ。
+declare -A RETURNED_UNTIL
 claim() {  # CLAIM: queue/*.json を名前順に、rename できた (0.5 s 後も自分のものだった) 最初の票
   CLAIMED=""
   local name base dst
   while IFS= read -r name; do
     [ -n "$name" ] && [[ "$name" =~ $QUEUE_RE ]] || continue
     base=${name%.json}; dst="$SPOOL/running/$base.$OWNER.json"
+    if [ -n "${RETURNED_UNTIL[$base]:-}" ]; then                  # さっき自分が RETURN した票 (§5.5)
+      [ "$(now)" -lt "${RETURNED_UNTIL[$base]}" ] && continue     # まだ待つ: 後ろの票へ進む
+      unset "RETURNED_UNTIL[$base]"                               # 期限切れ: もう一度試してよい
+    fi
     if mv "$SPOOL/queue/$name" "$dst" 2>/dev/null; then
       if rename_settled "$dst" "$SPOOL/queue/$name"; then log "CLAIM $base"; CLAIMED=$base; return 0; fi
       log "CLAIM $base: rename returned 0 but the claim is not ours after 0.5 s (chain rename) -> next"
@@ -427,14 +437,18 @@ prepare_code() {  # 内容アドレスの tar.gz を取得 → sha256 を検証 
   return 0
 }
 host_failure() {  # ホスト側の事情。Julia 未起動なら RETURN + degraded (戻り 1 = 票を離した)。起動済みなら同一ホストで再試行 (戻り 0) か FAIL
-  local reason=$1
+  local reason=$1 returned=""
   if [ "$ATTEMPT" -eq 0 ]; then
+    returned=$BASE
     if mv -n "$TICKET" "$SPOOL/queue/$BASE.json" 2>/dev/null && [ -f "$SPOOL/queue/$BASE.json" ] && [ ! -f "$TICKET" ]; then
       log "RETURN $BASE: $reason"
     else log "RETURN $BASE failed ($reason) -- claim left for the reaper"; fi
     BASE=""; ATTEMPT=0
     log "degraded: $reason; sleeping $DEGRADED_SLEEP s"
     write_status degraded "$reason"; sleep_status "$DEGRADED_SLEEP"
+    # ⚠ 数え始めるのは**眠ったあと**。RETURN の時点から degraded_sleep を数えると、目覚めた瞬間に
+    #   期限が切れていて飛ばせない (この worker はまた同じ票を取る) — スキップが無効になる。
+    RETURNED_UNTIL[$returned]=$(( $(now) + DEGRADED_SLEEP ))
     return 1
   fi
   if ! attempts_left; then finish_fail "max_attempts ($(max_attempts)) exceeded; last: $reason"; return 1; fi
