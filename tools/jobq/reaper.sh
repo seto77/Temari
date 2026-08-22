@@ -115,6 +115,33 @@ jstr() { # $1 file $2 key — 平坦な JSON から文字列を 1 個 (null / �
 snap_read() { tr -d '\n\r' < "$1" 2>/dev/null; }                 # 読めなければ空 (= 沈黙。§7 の非対称は意図的)
 snap_num()  { printf '%s' "$1" | grep -oE "\"$2\"[[:space:]]*:[[:space:]]*[0-9]+" | head -1 | sed -E 's/.*:[[:space:]]*//'; }
 snap_str()  { printf '%s' "$1" | grep -oE "\"$2\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 | sed -E 's/.*:[[:space:]]*"//; s/"$//'; }
+hosts_readable() {  # 0 = hosts/ は使える / 1 = 使えない (§7 の全滅ガード)
+  # ⚠ 確かめたいのは**ワーカーが生きているか**ではなく**共有の hosts/ が読み書きできる状態か**。
+  #   死んだワーカーの status は「読めるが古い」ので、読めれば hosts/ は健全だという証拠になる。
+  #   両者を混同すると、running/ だけ読める状況で**生きているフリート全体が claim_timeout 後に
+  #   一斉に回収される** (2026-08-22 の外部レビューが挙げた経路)。
+  local f probe seen=0
+  for f in "$SPOOL"/hosts/*.status.json; do
+    seen=1
+    [ -n "$(snap_read "$f")" ] && return 0      # 1 つでも読めれば健全。正常時はここで 1 個読んで抜ける
+  done
+  # **ファイルはあるのに 1 つも読めない** = それ自体が障害の署名 (ファイル単位の ACL 変更、他プロセスの
+  #   排他ロック、ウイルス対策のスキャンロック、ハンドル枯渇)。**プローブを試してはいけない** —
+  #   「作成は通るが既存ファイルの読み取りは拒否される」状態でプローブが成功し、ガードが外れて
+  #   一斉回収になる (2026-08-22 の外部レビュー 4 巡目)。
+  [ "$seen" -eq 1 ] && return 1
+  # ここに来るのは status が **0 個** のときだけ。**障害** と **本当に 1 つも無い** (運用者が掃除した・
+  #   新しい共有・全台退役) を分ける。分けないと、前者では誤 REAP、後者では**回収が永久に止まる**。
+  #   ⚠ 「N 周期続いたらガードを外す」という脱出口は採らない — 1 時間続く障害の後に、まさに防ぎたかった
+  #      一斉回収が起きるだけだから。判定は**自分で書いて読み直す**という直接の検査で行う。
+  # ⚠ 名前に $$ を付けない: SIGKILL で消し損ねた残骸が**次回に上書きされず溜まり続ける**。固定名なら
+  #   自己修復する。衝突しても両者が同じ内容を書くので、最悪でも 1 pass だけ保守側に倒れるだけ。
+  probe="$SPOOL/hosts/.reaper-probe.$HOST"      # ドットファイル (§12: *.status.json の glob に見えない)
+  if printf 'probe\n' > "$probe" 2>/dev/null && [ "$(tr -d '\n\r' < "$probe" 2>/dev/null)" = probe ]; then
+    rm -f "$probe" 2>/dev/null; return 0        # hosts/ は使える = 本当に status が無いだけ → 通常どおり回収する
+  fi
+  rm -f "$probe" 2>/dev/null; return 1          # 書けない / 読み直せない = hosts/ が使えない → ガードを効かせる
+}
 
 # ---- 成果物・受理の有無 (§4/§7) -------------------------------------------------------------------
 has_receipt() { # $1 campaign $2 base — done/ failed/ の直下だけ (orphan/ dup/ は見ない)
@@ -243,8 +270,12 @@ retry_orphans() {
 }
 
 pass() {
-  local now p f c j e o wid slot bseq base sf tick prev snap
+  local now p f c j e o wid slot bseq base sf tick prev snap hosts_ok=1
   now=$(date +%s); SEEN=(); HANDLED=()
+  # 260822Cl §7: hosts/ が丸ごと読めない pass では strike を積まず REAP もしない。誤って回収すると
+  #   50 時間走った計算が捨てられ、同じ票が別の PC で二重計算になる。**WARN を出す** — 恒久的に
+  #   読めなくなれば回収が止まるので、静かに効き続けてはいけない。
+  hosts_readable || { hosts_ok=0; log "WARN hosts/ not readable as a whole (no status file could be read); no strikes, no reaping this pass (§7)"; }
   for p in "$SPOOL"/running/*.json; do
     f=${p##*/}
     [[ $f =~ $RE_RUN ]] || { log "WARN running/$f: unparsable name, skipped"; continue; }
@@ -264,10 +295,18 @@ pass() {
       S_OWNER[$base]=$o; S_TICK[$base]=${tick:--}; S_LAST[$base]=$now; S_STRIKES[$base]=0
     elif [ -n "$tick" ] && { [ "$prev" = "-" ] || [ "$tick" -gt "$prev" ]; }; then
       S_TICK[$base]=$tick; S_LAST[$base]=$now; S_STRIKES[$base]=0     # 生きている
+    elif [ "$hosts_ok" -eq 0 ]; then
+      :                                                              # 障害と沈黙を区別できない pass: 何も積まない
+    elif [ "$now" -lt "${S_LAST[$base]}" ]; then
+      # 時計が戻った (NTP の補正・スリープ復帰)。戻り側そのものは安全 (差が負なので閾値に届かない) が、
+      # 放置すると跳んだ幅のあいだ回収が止まる。測り直す。⚠ **前進側は塞いでいない** — §7 の既知の限界。
+      log "WARN clock went backwards ($((S_LAST[$base] - now))s) while watching $base; re-basing the silence measurement"
+      S_LAST[$base]=$now
     elif [ $((now - S_LAST[$base])) -ge "$CLAIM_TIMEOUT" ]; then
       S_STRIKES[$base]=$(( S_STRIKES[$base] + 1 ))
       [ "${S_STRIKES[$base]}" -le 2 ] && log "STRIKE $f strikes=${S_STRIKES[$base]} tick=${tick:-none} last=$prev silent=$((now - S_LAST[$base]))s"
     fi
+    [ "$hosts_ok" -eq 1 ] || continue                                # hosts/ 全滅の pass では回収しない
     [ "${S_STRIKES[$base]}" -ge 2 ] || continue
     if has_receipt "$c" "$base"; then
       if [ -f "$SPOOL/done/$c/$base.$o.json" ] || [ -f "$SPOOL/failed/$c/$base.$o.json" ]; then
