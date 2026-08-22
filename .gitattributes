@@ -8,6 +8,7 @@ spec/*.json -text
 # CRLF になり、MSYS bash が `\r` で壊れる (`$'\r': command not found`)。
 # 例外は 2 種類だけ: cmd.exe が読む *.cmd と、Notepad で開く共有直下の README (どちらも CRLF)。
 tools/jobq/** text eol=lf
+tools/agreement_check.py text eol=lf
 tools/jobq_rows_sigma.jl text eol=lf
 tools/jobq/*.cmd text eol=crlf
 tools/jobq/share_README.txt text eol=crlf

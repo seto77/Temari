@@ -48,6 +48,7 @@ import glob
 import json
 import math
 import os
+import struct
 import sys
 import unicodedata
 
@@ -71,6 +72,23 @@ DIAG_MARKERS = (".diag.", "diag.")
 
 # ⚠ atol の下限。0 (や 1e-300) にすると F の零点近傍で必ず落ちる — 数値の欠陥ではなく判定式の誤り。
 ATOL_FLOOR = 1e-30
+
+
+def one_ulp_toward_positive(x):
+    """Return the adjacent Float64 toward +infinity on Python 3.6+.
+
+    math.nextafter arrived only in Python 3.9. Bootstrap accepts Python 3.6
+    and later, so the self-test must not depend on that newer convenience API.
+    """
+    if hasattr(math, "nextafter"):
+        return math.nextafter(x, math.inf)
+    if math.isnan(x) or x == math.inf:
+        return x
+    if x == 0.0:
+        return struct.unpack(">d", struct.pack(">Q", 1))[0]
+    bits = struct.unpack(">Q", struct.pack(">d", x))[0]
+    bits = bits - 1 if x < 0.0 else bits + 1
+    return struct.unpack(">d", struct.pack(">Q", bits))[0]
 
 
 def rel(a, b):
@@ -366,7 +384,7 @@ def selftest(rtol=1e-13, atol=1e-15):
         d["rows"][0]["F"][3] += 5.4e-23                     # 零点近傍: 相対 9.4e-13 / 絶対 5.4e-23
 
     def ulp(d):
-        d["rows"][0]["F"][1] = math.nextafter(d["rows"][0]["F"][1], 2.0)
+        d["rows"][0]["F"][1] = one_ulp_toward_positive(d["rows"][0]["F"][1])
 
     def diag_noise(d):
         d["rows"][0]["diag"]["rtail"] *= (1.0 + 7.5e-14)    # 診断値は合否に入れない
