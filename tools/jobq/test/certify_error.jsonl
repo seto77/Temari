@@ -1,0 +1,9 @@
+{"z":54,"tag":"M4","e0_keV":400.0,"window_id":"w1","n_windows_in_row":3,"cert_fp":"fpA","scaled":1.0e-8}
+{"z":54,"tag":"M4","e0_keV":400.0,"window_id":"w2","n_windows_in_row":3,"cert_fp":"fpA","scaled":1.0e-8}
+{"z":54,"tag":"M4","e0_keV":400.0,"window_id":"w3","n_windows_in_row":3,"cert_fp":"fpA","scaled":1.0e-8}
+{"z":26,"tag":"K","e0_keV":200.0,"window_id":"w1","n_windows_in_row":3,"cert_fp":"fpA","scaled":1.0e-8}
+{"z":26,"tag":"K","e0_keV":200.0,"window_id":"w2","n_windows_in_row":3,"cert_fp":"fpA","scaled":1.0e-8}
+{"z":26,"tag":"K","e0_keV":200.0,"window_id":"w3","n_windows_in_row":3,"cert_fp":"fpA","scaled":1.0e-8}
+{"z":26,"tag":"K","e0_keV":200.0,"window_id":"w3","n_windows_in_row":3,"cert_fp":"fpA","scaled":1.0e-8}
+
+{"z":26,"tag":"K","e0_keV":200.0,"error":"DomainError: boom","cert_fp":"fpA"}

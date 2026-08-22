@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "campaign": "temari_sigma_test",
+  "jobseq": 7,
+  "claim_epoch": 1,
+  "task": "temari.certify_sigma_v2",
+  "code_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "code_commit": "0123456789abcdef0123456789abcdef01234567",
+  "args": {
+    "rule": "v4",
+    "rows": [
+      [
+        54,
+        "M4",
+        400.0
+      ],
+      [
+        26,
+        "K",
+        200
+      ]
+    ]
+  },
+  "created_utc": "2026-08-21T13:00:00Z",
+  "issued_by": "fixture"
+}

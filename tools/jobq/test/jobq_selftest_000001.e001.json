@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "campaign": "jobq_selftest",
+  "jobseq": 1,
+  "claim_epoch": 1,
+  "task": "jobq.noop",
+  "code_sha256": "",
+  "code_commit": "",
+  "args": {
+    "seconds": 0,
+    "lines": 2
+  },
+  "created_utc": "2026-08-21T13:00:00Z",
+  "issued_by": "fixture"
+}

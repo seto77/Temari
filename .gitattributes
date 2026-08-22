@@ -1,3 +1,11 @@
 # 260820Cl: canonical JSON (spec と E0 目録、registry) は生バイトの SHA-256 で承認される — checkout で改行を変換してはいけない
 # (autocrlf=true の Windows で worktree を切ると CRLF になり、承認 hash と一致しなくなる。2026-08-20 の起動時に実際に起きた)
 spec/*.json -text
+
+# 260821Cl: jobq — 共有へ配るスクリプトは LF 固定。core.autocrlf=true の環境で checkout すると
+# CRLF になり、MSYS bash が `\r` で壊れる (`$'\r': command not found`)。
+# 例外は 2 種類だけ: cmd.exe が読む *.cmd と、Notepad で開く共有直下の README (どちらも CRLF)。
+tools/jobq/** text eol=lf
+tools/jobq_rows_sigma.jl text eol=lf
+tools/jobq/*.cmd text eol=crlf
+tools/jobq/share_README.txt text eol=crlf

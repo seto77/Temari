@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "campaign": "temari_ladder",
+  "jobseq": 1,
+  "claim_epoch": 1,
+  "task": "temari.selftest",
+  "code_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "code_commit": "",
+  "args": {},
+  "created_utc": "2026-08-21T13:00:00Z",
+  "issued_by": "fixture"
+}

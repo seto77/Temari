@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "campaign": "temari_gen_test",
+  "jobseq": 4,
+  "claim_epoch": 1,
+  "task": "temari.gen_production",
+  "code_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "code_commit": "7991cdb4e2a05c73d6b18f4a2c05e739b1d4a8c2-dirty",
+  "args": {
+    "tags": [
+      "M5"
+    ],
+    "lane": 3,
+    "lane_count": 8,
+    "profile": "v6_high"
+  },
+  "created_utc": "2026-08-21T13:00:00Z",
+  "issued_by": "fixture"
+}

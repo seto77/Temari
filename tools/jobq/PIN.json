@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "julia_version": "1.11.9",
+  "max_claim_epoch": 5,
+  "claim_timeout": 900,
+  "reaper_interval": 300,
+  "heartbeat_interval": 180,
+  "threads_default": 2,
+  "slot_fraction": 0.75,
+  "code": {
+    "name": "temari"
+  }
+}

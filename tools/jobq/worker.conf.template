@@ -1,0 +1,30 @@
+# jobq worker.conf の雛形 (PROTOCOL.md §9) — LOCAL/worker.conf の正本の並び。
+#
+# 誰が使うか:
+#   - bootstrap.ps1 は**この並びと同じキー**を自分で組み立てて LOCAL/worker.conf を書く
+#     (テンプレートは読まない。PIN.json に stall_seconds などがあればその値を初期値にする)。
+#   - test/ の適合テストは本ファイルの @…@ を sed で置換して worker.conf を作る。
+#   ⇒ キーを足す・名前を変えるときは bootstrap.ps1 と本ファイルの両方を直すこと。
+#
+# 置換する目印は 6 つ: @ROOT@ @SPOOL@ @LOCAL@ @WORKER_ID@ @SLOTS@ @THREADS@
+#
+# bash が source する。値は単純な代入のみ (コマンド置換・展開を書かない)。
+# 優先順は 環境変数 JOBQ_<大文字> > 本ファイル > PIN.json > 組み込み既定 (§9)。
+# JOBQ_ROOT / JOBQ_SPOOL / JOBQ_LOCAL は source した後に環境変数で上書きし直される。
+# 間隔はすべて整数 ≥ 1 (worker.sh が起動時に検査する)。
+JOBQ_ROOT=@ROOT@
+JOBQ_SPOOL=@SPOOL@
+JOBQ_LOCAL=@LOCAL@
+WORKER_ID=@WORKER_ID@
+SLOTS=@SLOTS@
+THREADS=@THREADS@
+# julia の実体 (任意)。既定は PATH の `julia`。Store 版のアプリ実行エイリアスを MSYS が辿れない
+# ホストでだけ、実体のランチャを絶対パスで指す。⚠ パスにパッケージ版数が入るので、
+# Store が Julia を更新したら書き直しが要る。
+#JOBQ_JULIA_BIN=C:/Program Files/WindowsApps/JuliaComputingInc.Julia_<ver>_x64__5z4q23t4ga8jg/Julia/julialauncher.exe
+STALL_SECONDS=7200
+MAX_ATTEMPTS=5
+# 1 拍で「生存を知らせる + 仕事を探す」を行う。間隔の設定はこの 1 つだけ
+HEARTBEAT_INTERVAL=180
+RETRY_BACKOFF=30
+DEGRADED_SLEEP=600
