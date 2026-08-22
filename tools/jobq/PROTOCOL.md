@@ -342,6 +342,15 @@ tar -C <tree> --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric
 - ⚠ **この経路では帳簿と成果物が食い違う**: 先客の成果物は `results/` にあるのに、後から来た epoch の票は
   `failed/` に落ちる (dup になった worker は DONE receipt を書けないため)。campaign を集計するときは
   **「failed だが成果物は揃っている」を dup として別に数える**こと。数だけを見て失敗と読まない。
+- ⚠ **名前が衝突するのは `temari.gen_production` だけ**である。他の task の結果は lane 名
+  `<c>_lane<jobseq6><epoch3><ext>` (§2) で、**epoch を名前に持つ**ので、再投入された epoch は
+  **別のファイル**を書き dup にならない。`gen_production` の成果物名 `F_<tag>_Z<z>.json` にだけ lane が無い
+  (1 票が複数チャネルを出すため) — つまり**この問題は本番のテーブル生成に固有**である。
+- ⚠ その代わり他の task では、**同じ行を持つ lane が 2 本 `results/` に並ぶ**ことになる (e001 が
+  ABANDON 後に遅れて publish し、e002 も完走した場合)。`certify_sigma_v2 --summary` の既存 glob
+  `^(.*)_lane\d+\.jsonl$` は**両方を読む**。⇒ 再投入が起きた campaign を集計するときは、
+  **重複した lane があることを承知して読む** (どちらを採るか・どう畳むかは集計側の規則であって、
+  キューは決めない)。
 - 続いて sidecar `results/<c>/<outname>.manifest.json` を同じ規則で置く (先客があれば残す — そのバイトを
   説明しているのは先客の方)。
 - 全部置けたら `done/<c>/<base>.<owner>.json` (§8 のポインタ) を書き、`running/<base>.<owner>.json` を消し、
