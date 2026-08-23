@@ -6,7 +6,7 @@
   "reaper_interval": 300,
   "heartbeat_interval": 180,
   "threads_default": 2,
-  "slot_fraction": 0.75,
+  "slot_fraction": 1.0,
   "code": {
     "name": "temari"
   }

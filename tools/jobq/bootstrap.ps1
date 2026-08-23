@@ -391,7 +391,7 @@ $pin = Get-Content -LiteralPath $pinPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $nasTestSrc = Join-Path $setupSrc 'nastest.ps1'
 if (-not (Test-Path -LiteralPath $nasTestSrc)) { throw "nastest.ps1 not found: $nasTestSrc (run tools/jobq/deploy_setup.sh first)" }
 $juliaVer = [string](Prop $pin 'julia_version' '1.11.9')
-$slotFraction = [double](Prop $pin 'slot_fraction' 0.75)
+$slotFraction = [double](Prop $pin 'slot_fraction' 1.0)
 if ($Threads -le 0) { $Threads = [int](Prop $pin 'threads_default' 2) }
 
 # ---------------------------------------------------------------- hardware -> slots
