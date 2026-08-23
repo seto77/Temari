@@ -26,7 +26,7 @@
 | ファイル | 役割 |
 | --- | --- |
 | `PROTOCOL.md` | 仕様 (正本) |
-| `PIN.json` | 全 PC 共通の最大枠 (julia 1.11.9 / `claim_timeout` 900 s / reaper 300 s / threads 2 / slot 1.0 / `code.name`)。日中などの実稼働率は中央 `control/load` で下げる。bootstrap 登録の Deep reaper は action の 1800 s で上書き |
+| `PIN.json` | 全 PC 共通の最大枠 (julia 1.11.9 / `claim_timeout` 900 s / reaper 300 s / threads 2 / 論理コア基準 slot 1.0 / `code.name`)。日中などの実稼働率は中央 `control/load` で下げる。bootstrap 登録の Deep reaper は action の 1800 s で上書き |
 | `worker.conf.template` | `LOCAL/worker.conf` の雛形 (§9 の鍵の一覧。テストが実体を確かめる) |
 | `bootstrap.ps1` | PC の登録本体 (`register.cmd` が昇格して呼ぶ)。winget で Git / Python / juliaup → Python selftest → NAS 試験 → タスク登録 → 台帳 |
 | `../agreement_check.py` | 数値一致の判定器。setup 版は登録時の Python selftest 専用、publish はコード書庫内の固定版を使う |

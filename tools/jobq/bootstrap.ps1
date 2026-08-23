@@ -392,6 +392,8 @@ $nasTestSrc = Join-Path $setupSrc 'nastest.ps1'
 if (-not (Test-Path -LiteralPath $nasTestSrc)) { throw "nastest.ps1 not found: $nasTestSrc (run tools/jobq/deploy_setup.sh first)" }
 $juliaVer = [string](Prop $pin 'julia_version' '1.11.9')
 $slotFraction = [double](Prop $pin 'slot_fraction' 1.0)
+$slotBasis = [string](Prop $pin 'slot_basis' 'logical')
+if ($slotBasis -notin @('physical', 'logical')) { throw "PIN.json slot_basis must be physical or logical (got '$slotBasis')" }
 if ($Threads -le 0) { $Threads = [int](Prop $pin 'threads_default' 2) }
 
 # ---------------------------------------------------------------- hardware -> slots
@@ -400,8 +402,9 @@ $coresPhys = [int]($cpus | Measure-Object -Property NumberOfCores -Sum).Sum
 $coresLog = [int]($cpus | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
 $cpuName = ($cpus[0].Name -replace '\s+', ' ').Trim()
 $ramGb = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 1)
-if ($Slots -le 0) { $Slots = [int][math]::Max(1, [math]::Floor($coresPhys * $slotFraction / $Threads)) }
-Say "cpu='$cpuName' cores=$coresPhys/$coresLog ram=${ramGb}GB -> slots=$Slots threads=$Threads (slot_fraction=$slotFraction) julia=$juliaVer"
+$slotCores = if ($slotBasis -eq 'logical') { $coresLog } else { $coresPhys }
+if ($Slots -le 0) { $Slots = [int][math]::Max(1, [math]::Floor($slotCores * $slotFraction / $Threads)) }
+Say "cpu='$cpuName' cores=$coresPhys/$coresLog ram=${ramGb}GB -> slots=$Slots threads=$Threads (slot_basis=$slotBasis slot_fraction=$slotFraction) julia=$juliaVer"
 
 # ---------------------------------------------------------------- step 1: Git, Python, juliaup, julia channel
 Install-IfMissing 'Git.Git' { [bool](Find-GitBash) }

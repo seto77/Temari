@@ -963,7 +963,7 @@ DEGRADED_SLEEP=600
 
 ```json
 { "schema": 1, "julia_version": "1.11.9", "max_claim_epoch": 5, "claim_timeout": 900,
-  "reaper_interval": 300, "threads_default": 2, "slot_fraction": 1.0,
+  "reaper_interval": 300, "threads_default": 2, "slot_fraction": 1.0, "slot_basis": "logical",
   "code": { "name": "temari" } }
 ```
 
@@ -1025,7 +1025,7 @@ cmd.exe が読むので**必ず CRLF**。中身の規則:
    `worker.conf` ごとディスクを複製したとき**で、そのとき bootstrap は既存の `WORKER_ID` を保持する。
    ⇒ **PC を複製して台数を増やすなら、複製先で `worker.conf` を消してから登録する** (新しい id が振られる)。
    台帳 `hosts/<worker_id>.json` の `hostname` が知らないうちに変わっていたら、この事故を疑うこと。
-   slots = `max(1, floor(物理コア × slot_fraction / threads))`。既定の `slot_fraction=1.0` は物理コアを使い切る**最大枠**であり、日中などの実稼働率は中央 `control/load` (§5.7) で下げる。`-JuliaBin` があれば Git Bash から指定版を
+   slots = `max(1, floor(slot_basis のコア数 × slot_fraction / threads))`。既定の `slot_basis=logical` と `slot_fraction=1.0` は論理コアを使い切る**最大枠**であり、日中などの実稼働率は中央 `control/load` (§5.7) で下げる。`-JuliaBin` があれば Git Bash から指定版を
    起動確認し、空白を保つ shell quote 付きで worker.conf へ書く。既存値は再登録で保持する。
 3. **NAS 試験タスク** `jobq-nastest` を登録して即実行 (タスク実行アカウント = 現在のユーザー、パスワード保存、
    ログオン有無に関わらず実行)。中身は配布された `LOCAL/setup/nastest.ps1`: `whoami`、`$env:USERPROFILE`、

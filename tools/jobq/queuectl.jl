@@ -241,7 +241,7 @@ const TASK_MAX_ATTEMPTS  = Dict("temari.certify_sigma_v2" => "8")
 const LOG_MARKER = Dict("temari.selftest" => r"^ALL PASS \(", "temari.refcheck" => r"^WORST vs Python = .*\(OK:")
 
 const DEFAULT_PIN = JObj("schema" => 1, "julia_version" => "1.11.9", "max_claim_epoch" => 5, "claim_timeout" => 900,
-                         "reaper_interval" => 300, "threads_default" => 2, "slot_fraction" => 1.0,
+                         "reaper_interval" => 300, "threads_default" => 2, "slot_fraction" => 1.0, "slot_basis" => "logical",
                          "code" => JObj("name" => "temari"))
 base_name(c, j, e) = @sprintf("%s_%06d.e%03d", c, j, e)
 lane_name(c, j, e, ext) = @sprintf("%s_lane%06d%03d%s", c, j, e, ext)
