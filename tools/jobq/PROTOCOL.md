@@ -17,7 +17,7 @@
 
 2026-08-21 の改訂点 (前版との差): 共有直下を人向けに空け `spool/` を新設 / コードの配布を **git clone から
 内容アドレスの tar.gz** へ (§1.4) / `leases/` と `running/.reaping/` を**廃止** (§4・§7) / task allowlist を
-**7 段のはしご**へ (§6.4) / 複数成果物の publish (§4・§5.4)。
+**8 段のはしご**へ (§6.4) / 複数成果物の publish (§4・§5.4)。
 
 ★★★ **2026-08-21 夕の改訂 (作者決定)**: **ホストごとの gate (旧 §13) を全廃した**。フリート参加の可否を
 ビット一致で決めるのをやめ、**正常性の判定基準を「丸め誤差の範囲内で一致するか」にする** (§6.5)。
@@ -164,7 +164,7 @@ tar -C <tree> --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric
 
 | 種類 | 名前 | 使う task |
 | --- | --- | --- |
-| lane 名 (1 票 = 1 個) | `<campaign>_lane<jobseq6><epoch3><ext>`。数字だけなので `certify_sigma_v2 --summary` の既存 glob `^(.*)_lane\d+\.jsonl$` に乗る | `jobq.noop` (`.jsonl`) / `temari.certify_sigma_v2` (`.jsonl`) / `temari.selftest`・`temari.refcheck`・`temari.check_tables` (`.log`) / `temari.bitident` (`.txt`) |
+| lane 名 (1 票 = 1 個) | `<campaign>_lane<jobseq6><epoch3><ext>`。数字だけなので `certify_sigma_v2 --summary` の既存 glob `^(.*)_lane\d+\.jsonl$` に乗る | `jobq.noop`・`jobq.cpu_bench` (`.jsonl`) / `temari.certify_sigma_v2` (`.jsonl`) / `temari.selftest`・`temari.refcheck`・`temari.check_tables` (`.log`) / `temari.bitident` (`.txt`) |
 | ツールが決める名前 (1 票 = 複数個) | `F_<tag>_Z<z>.json` | `temari.gen_production` |
 
 ファイル名の分解は次の正規表現で行う (queuectl と bash で同じもの):
@@ -522,13 +522,14 @@ verify OK: <n> artefact(s)
 成果物は壊れない (`publish` が同一内容の先客として弾く) が、数千時間の計算資源が失われる。
 ⇒ **完走した campaign の receipt は消さない**。容量を空けるなら receipt ではなく run ログを消すこと。
 
-### 6.4 task allowlist — 玩具 1 つから本番生成までの 7 段 (2026-08-21 作者決定)
+### 6.4 task allowlist — 診断から本番生成までの 8 段
 
-`{OUT}` `{THREADS}` `{WORKDIR}` は plan が置換する。cwd は必ずコードツリー (`jobq.noop` を除く)。
+`{OUT}` `{THREADS}` `{WORKDIR}` は plan が置換する。cwd は必ずコードツリー（jobq task を除く）。
 
 | task | project | args | argv | 成果物 / verify |
 | --- | --- | --- | --- | --- |
 | `jobq.noop` | jobq (書庫不要) | `seconds` 0..3600, `fail` (bool, 任意), `lines` 1..100 (任意、既定 1) | `julia +<ch> -e '<sleep して {OUT} に lines 行の {"noop":true,"i":k} を書く。fail なら書かずに exit 1>'` | lane 名 `.jsonl`。`lines` 行、各行 `noop == true` |
+| `jobq.cpu_bench` | jobq (書庫不要) | `seconds` 10..900 | `julia +<ch> -t {THREADS} -e '<固定 sin/cos Float64 kernel を時間まで反復し、各 block の JSONL を flush>'` | lane 名 `.jsonl`。最後の行の schema/kind/seconds、経過時間が指定の 90 % 以上、正の反復数と threads を検査。sidecar に `kernel=sincos-f64-v1`、`work_units_per_s`、threads、経過時間を記録。**PC 固有の合否閾値は置かない** |
 | `temari.selftest` | temari | 無し | `julia +<ch> --project=. -t {THREADS} src/ionization.jl selftest` | lane 名 `.log` (実行ログ)。exit 0 かつログに `^ALL PASS \(` |
 | `temari.refcheck` | temari | 無し | `julia +<ch> --project=. -t {THREADS} src/ionization.jl refcheck` | lane 名 `.log`。exit 0 かつログに `^WORST vs Python = .*\(OK:` |
 | `temari.bitident` | temari | `cases` ∈ {v3, v4} (既定 v4), `quadrature` ∈ {quick, high} (既定 quick) | `julia +<ch> --project=. -t {THREADS} tools/bitident_snapshot.jl {OUT} [--v4] [--high]` | lane 名 `.txt` (スナップショット本体)。exit 0、1 行目が `^# bitident snapshot  julia=`、`^== Z=` の節が v3 なら 5 個・v4 なら 7 個。⚠ **同一マシン内の回帰検査専用** — 出力をマシン跨ぎで突き合わせてはいけない (§6.5.6) |
@@ -540,7 +541,7 @@ verify OK: <n> artefact(s)
 
 | task | `JOBQ_PERMANENT_EXIT` | `JOBQ_PERMANENT_RE` |
 | --- | --- | --- |
-| `jobq.noop` | (空) | (空) |
+| `jobq.noop` / `jobq.cpu_bench` | (空) | (空) |
 | `temari.selftest` | (空) | `AssertionError` |
 | `temari.refcheck` / `bitident` | (空) | (空 — 合否は verify が決める。§6.2) |
 | `temari.check_tables` | (空) | `\[NG\] ` |
@@ -569,7 +570,7 @@ plan が出す残りの task 依存の値 (§6.1):
 
 | task | `JOBQ_OUT` | `JOBQ_OUT_FROM_LOG` | `JOBQ_WATCH_PATH` |
 | --- | --- | --- | --- |
-| `jobq.noop` | `{WORKDIR}/<lane 名>.jsonl` | 0 | `JOBQ_OUT` |
+| `jobq.noop` / `jobq.cpu_bench` | `{WORKDIR}/<lane 名>.jsonl` | 0 | `JOBQ_OUT` |
 | `temari.selftest` / `refcheck` / `check_tables` | `{WORKDIR}/<lane 名>.log` | **1** | (空 = `run.<attempt>.log`) |
 | `temari.bitident` | `{WORKDIR}/<lane 名>.txt` | 0 | `JOBQ_OUT` |
 | `temari.gen_production` | `{WORKDIR}/run` (ディレクトリ) | 0 | `JOBQ_OUT` (直下エントリの最新 mtime) |
@@ -1127,7 +1128,7 @@ cmd.exe が読むので**必ず CRLF**。中身の規則:
 - **票のファイル名は queue 形式も running 形式も受ける** (worker は CLAIM 後に plan を呼ぶため)。
   それ以外の basename は exit 2。
 - **未知の args キーは拒否**する (allowlist 意味論)。`noop.lines` は省略時 1。
-- **`jobq.noop` の `-e` に埋める出力パスは `C:/…` 形式**に直す (MSYS は `sleep(` で始まる引数を変換しない)。
+- **jobq task の `-e` に埋める出力パスは `C:/…` 形式**に直す (MSYS は `sleep(` で始まる引数を変換しない)。
 - **manifest の `threads`** は worker が実際に使った値 (`verify --threads`)。渡されなければ
   `JOBQ_THREADS` > worker.conf の `THREADS` > PIN の `threads_default` の順で解決する。
 - **`CERT_FP_V2` を再実装しない**: 指紋を人が控えるための `queuectl fingerprint` (§6.3) は指紋を

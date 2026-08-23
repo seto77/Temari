@@ -248,7 +248,7 @@ julia +1.11.9 tools/jobq/queuectl.jl issue temari_sigma_deep
 ### 3.5 共通の決まり
 
 - campaign 名は `^[a-z][a-z0-9_]{2,39}$`、先頭に `temari_` / `jobq_`。
-- `--code-sha256` は **project が `jobq` でない task では必須**。`jobq.noop` では `--code-sha256 ""`。
+- `--code-sha256` は **project が `jobq` でない task では必須**。`jobq.noop` と `jobq.cpu_bench` では `--code-sha256 ""`。
 - `--code-commit` は**人が読むための来歴**でしかない (ワーカーは検査しない)。空でも `<sha>-dirty` でもよい。
 - ⚠ **期待指紋 (`expected_source_fp` / `expected_cert_fp`) はもう受け取らない** (2026-08-21。PROTOCOL §6.5.5)。
   campaign の option として渡しても、票の args のキーとして残っていても、**どちらも exit 2 で拒否**する
@@ -284,6 +284,25 @@ julia +1.11.9 tools/jobq/queuectl.jl resume [worker_id]
 ```
 
 実体は `spool/control/PAUSE` / `spool/control/PAUSE.<worker_id>` の有無。PC に触らずに止められる。
+
+### 5.1 共通 CPU ベンチマーク
+
+`jobq.cpu_bench` は、新規 PC の動作確認とフリート性能の比較に共通で使う ticket である。CPU 名や世代ごとの
+合否値は持たず、固定の `sincos-f64-v1` kernel を指定時間だけ実行する。sidecar manifest の
+`task_info.work_units_per_s` が比較値で、比較時は少なくとも **kernel・Julia 版・kernel_threads** が同じ行だけを
+並べる。短い疎通確認は 10 秒、通常の記録値は 600 秒を使う。
+
+```bash
+printf '[{"seconds":10}]\n' > /tmp/cpu-bench-10s.json
+julia +1.11.9 tools/jobq/queuectl.jl new-campaign --name jobq_cpu_smoke \
+      --task jobq.cpu_bench --code-sha256 "" --args-json /tmp/cpu-bench-10s.json
+julia +1.11.9 tools/jobq/queuectl.jl issue jobq_cpu_smoke
+```
+
+特定 PC の全体性能を記録するときは、他の worker を `pause <worker_id>` で止めて対象だけを `resume` し、
+対象 host の slots 数と同数の `{"seconds":600}` を args JSON に入れて発行する。完走後、対象 host の各 sidecar の
+`work_units_per_s` を合計する。これにより、1 slot あたりの性能と、その PC が同時に出せる総量の両方を同じ形式で残せる。
+ベンチ完了後は対象を pause へ戻す。これは計算参加の gate ではなく、性能の来歴・比較用の測定である。
 
 ## 6. failed/ の読み方
 

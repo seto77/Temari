@@ -192,6 +192,7 @@ const TAGS = ("K", "L1", "L2", "L3", "M1", "M2", "M3", "M4", "M5")
 # task allowlist (§6.4)。project = "jobq" の task はコード書庫を要らない。
 const TASKS = Dict{String,NamedTuple{(:project, :enabled, :reason),Tuple{String,Bool,String}}}(
     "jobq.noop"               => (project = "jobq",   enabled = true, reason = ""),
+    "jobq.cpu_bench"          => (project = "jobq",   enabled = true, reason = ""),
     "temari.selftest"         => (project = "temari", enabled = true, reason = ""),
     "temari.refcheck"         => (project = "temari", enabled = true, reason = ""),
     "temari.bitident"         => (project = "temari", enabled = true, reason = ""),   # ⚠ 同一マシン内の回帰検査 (§6.10)。マシン間の門ではない
@@ -199,7 +200,7 @@ const TASKS = Dict{String,NamedTuple{(:project, :enabled, :reason),Tuple{String,
     "temari.gen_production"   => (project = "temari", enabled = true, reason = ""),
     "temari.certify_sigma_v2" => (project = "temari", enabled = true, reason = ""))
 # 成果物の拡張子 (§2 の「lane 名」)。gen_production だけはツールが名前を決めるので lane 名を持たない。
-const OUT_EXT = Dict("jobq.noop" => ".jsonl", "temari.certify_sigma_v2" => ".jsonl", "temari.bitident" => ".txt",
+const OUT_EXT = Dict("jobq.noop" => ".jsonl", "jobq.cpu_bench" => ".jsonl", "temari.certify_sigma_v2" => ".jsonl", "temari.bitident" => ".txt",
                      "temari.selftest" => ".log", "temari.refcheck" => ".log", "temari.check_tables" => ".log",
                      "temari.gen_production" => "")
 # 恒久判定 (§6.4 の表)。空 = その判定をしない。
@@ -211,7 +212,7 @@ const OUT_EXT = Dict("jobq.noop" => ".jsonl", "temari.certify_sigma_v2" => ".jso
 #         atom_cache の ArgumentError (同一ホストの兄弟スロットとの書き込み競合。再試行すれば直る)。
 #   旧版はこれを 1 回で恒久 FAIL にしていた (86 票中 1 票を焼いた)。⇒ 恒久性はログ本文 = PERM_RE だけで決める。
 #   ⚠ キーは消さない — :467 が PERM_EXIT[t.task] で添字参照する。
-const PERM_EXIT = Dict("jobq.noop" => "", "temari.certify_sigma_v2" => "", "temari.gen_production" => "",
+const PERM_EXIT = Dict("jobq.noop" => "", "jobq.cpu_bench" => "", "temari.certify_sigma_v2" => "", "temari.gen_production" => "",
                        "temari.selftest" => "", "temari.refcheck" => "", "temari.bitident" => "", "temari.check_tables" => "")
 # 各選択肢は src の error() 文言に 1 対 1 で対応する (selftest が src と突き合わせる)。
 # ⚠ 多バイトの文字クラス ([にの] 等) は使わない — grep -E がバイト志向で走ると危険。
@@ -353,6 +354,11 @@ function validate_args(task::String, a)
         s = get(a, "seconds", nothing); (isnum(s) && 0 <= s <= 3600) || throw(TicketError("noop.seconds は 0..3600"))
         l = get(a, "lines", 1); (l isa Int && 1 <= l <= 100) || throw(TicketError("noop.lines は 1..100"))
         return (seconds = s, fail = getbool(a, "fail", false), lines = l)
+    elseif task == "jobq.cpu_bench"
+        only_keys("seconds")
+        s = get(a, "seconds", nothing)
+        (s isa Int && 10 <= s <= 900) || throw(TicketError("cpu_bench.seconds は 10..900"))
+        return (seconds = s,)
     elseif task == "temari.selftest" || task == "temari.refcheck"
         only_keys(); return NamedTuple()
     elseif task == "temari.bitident"
@@ -448,6 +454,19 @@ function task_plan(t::Ticket, julia::String, threads::Int, workdir::String, env)
         a = t.args; body = a.fail ? "exit(1)" :
             "open($(jl_lit(nativepath(out))), \"w\") do io; for k in 1:$(a.lines); print(io, $(jl_lit("{\"noop\":true,\"i\":")), k, $(jl_lit("}\n"))); end; end"
         return (["julia", J, "-e", "sleep($(a.seconds)); $body"], out, false, out)
+    elseif t.task == "jobq.cpu_bench"
+        # 10 分級の受入ベンチ。各 block で JSONL を flush するので、CPU を実際に使っていることと
+        # 経過時間・反復数を worker の watch / receipt の両方から追える。sin/cos を使い、最適化で
+        # 空ループになることを防ぐ。数値の絶対値は CPU 世代間で比較しない（来歴と性能測定値）。
+        a = t.args
+        body = "using Base.Threads; const D=$(a.seconds); const OUT=$(jl_lit(nativepath(out))); " *
+               "warm=sin(1.0)+cos(1.0); t0=time(); deadline=t0+D; iters=Ref(0); chk=Ref(warm); " *
+               "open(OUT, \"w\") do io; while time() < deadline; vals=zeros(Float64,nthreads()); " *
+               "@threads for tid in 1:nthreads(); x=Float64(tid); s=0.0; @inbounds for i in 1:200000; " *
+               "x=sin(x+1.0e-7*i)+cos(x*1.0000001); s+=x; end; vals[tid]=s; end; " *
+               "iters[]+=200000*nthreads(); chk[]+=sum(vals); elapsed=time()-t0; " *
+               "println(io, \"{\\\"schema\\\":1,\\\"kind\\\":\\\"cpu_bench\\\",\\\"seconds\\\":\",D,\",\\\"elapsed_s\\\":\",elapsed,\",\\\"iterations\\\":\",iters[],\",\\\"checksum\\\":\",chk[],\",\\\"threads\\\":\",nthreads(),\"}\"); flush(io); end; end"
+        return (["julia", J, "-t", T, "-e", body], out, false, out)
     elseif t.task == "temari.selftest"
         return (["julia", J, "--project=.", "-t", T, "src/ionization.jl", "selftest"], out, true, "")
     elseif t.task == "temari.refcheck"
@@ -541,6 +560,22 @@ function verify_noop(t::Ticket, out::String)
         (d isa JObj && get(d, "noop", false) === true) || throw(TempError("noop: 行が不正: $l"))
     end
     JObj("lines" => length(lines))
+end
+function verify_cpu_bench(t::Ticket, out::String)
+    lines = [l for l in eachline(out) if !isempty(strip(l))]
+    isempty(lines) && throw(TempError("cpu_bench: 進捗行が無い"))
+    d = try json_parse(last(lines)) catch e; throw(TempError("cpu_bench: 最終 JSONL が読めない: $(sprint(showerror, e))")) end
+    d isa JObj || throw(TempError("cpu_bench: 最終行がオブジェクトでない"))
+    get(d, "schema", nothing) === 1 && get(d, "kind", nothing) == "cpu_bench" ||
+        throw(TempError("cpu_bench: schema/kind が不正"))
+    get(d, "seconds", nothing) == t.args.seconds || throw(TempError("cpu_bench: seconds が票と違う"))
+    elapsed = get(d, "elapsed_s", nothing); iters = get(d, "iterations", nothing); nth = get(d, "threads", nothing)
+    (elapsed isa Real && elapsed >= 0.90 * t.args.seconds) || throw(TempError("cpu_bench: 実行時間が短い ($(repr(elapsed)))"))
+    (iters isa Int && iters > 0) || throw(TempError("cpu_bench: work units が無い ($(repr(iters)))"))
+    (nth isa Int && nth >= 1) || throw(TempError("cpu_bench: threads が不正 ($(repr(nth)))"))
+    JObj("bench_schema" => 1, "kernel" => "sincos-f64-v1", "requested_seconds" => t.args.seconds,
+         "elapsed_s" => Float64(elapsed), "work_units" => iters, "work_units_per_s" => iters / Float64(elapsed),
+         "kernel_threads" => nth, "progress_samples" => length(lines), "checksum" => get(d, "checksum", nothing))
 end
 "ログの合格印 (task 自身が出す文字列)。selftest / refcheck は終了コードだけでは判定できない (refcheck は常に 0 を返す)"
 function verify_marker(out::String, re::Regex)
@@ -646,6 +681,7 @@ function task_verify(t::Ticket, out::String, log::String)
     end
     isfile(out) || throw(TempError("結果が無い: $out"))
     info = t.task == "jobq.noop" ? verify_noop(t, out) :
+           t.task == "jobq.cpu_bench" ? verify_cpu_bench(t, out) :
            t.task == "temari.certify_sigma_v2" ? verify_certify(t, out) :
            t.task == "temari.bitident" ? verify_bitident(t, out) :
            t.task == "temari.check_tables" ? verify_check_tables(t, out) : verify_marker(out, LOG_MARKER[t.task])
@@ -1022,6 +1058,8 @@ function cmd_selftest(io::IO, args)
     noop_t = joinpath(fx, "jobq_selftest_000001.e001.json"); cert_t = joinpath(fx, "temari_sigma_test_000007.e001.json")
     gen_t = joinpath(fx, "temari_gen_test_000004.e001.json")
     mut = joinpath(root, "mut"); mkpath(mut)
+    cpu_t = joinpath(root, "fixture", "jobq_cpu_bench_000001.e001.json"); mkpath(dirname(cpu_t))
+    write(cpu_t, "{\"schema\":1,\"campaign\":\"jobq_cpu_bench\",\"jobseq\":1,\"claim_epoch\":1,\"task\":\"jobq.cpu_bench\",\"code_sha256\":\"\",\"code_commit\":\"\",\"args\":{\"seconds\":10},\"created_utc\":\"2026-08-23T00:00:00Z\",\"issued_by\":\"selftest\"}\n")
     function mutated(src, name, f)   # 票を読んで f で壊し、name で保存 → plan の exit
         o = json_load(src); f(o); p = joinpath(mut, name); write(p, json_pretty(o)); run_cmd(cmd_plan, p, P...)[1]
     end
@@ -1047,6 +1085,7 @@ function cmd_selftest(io::IO, args)
        "certify: expected_cert_fp は受け取らない (§6.10 で廃止 — 古い票を黙って通さず未知のキーで 2)")
     ok(mutated(cert_t, "temari_sigma_test_000007.e001.json", o -> (o["args"]["cwd"] = "/tmp")) == 2, "args に未知のキー")
     ok(mutated(noop_t, "jobq_selftest_000001.e001.json", o -> (o["args"]["seconds"] = 5000)) == 2, "noop.seconds > 3600")
+    ok(mutated(cpu_t, "jobq_cpu_bench_bad_000001.e001.json", o -> (o["args"]["seconds"] = 9)) == 2, "cpu_bench.seconds < 10")
     ok(mutated(noop_t, "Jobq_selftest_000001.e001.json", o -> nothing) == 2, "ファイル名に大文字")
     ok(mutated(gen_t, "temari_gen_test_000004.e001.json", o -> (o["args"]["lane"] = 8)) == 2, "gen: lane ≥ lane_count")
     ok(mutated(gen_t, "temari_gen_test_000004.e001.json", o -> (o["args"]["lane_count"] = 67)) == 0,
@@ -1089,6 +1128,9 @@ function cmd_selftest(io::IO, args)
     ok(c == 0 && occursin("JOBQ_PROJECT='jobq'", out) && occursin("JOBQ_CODE_SHA256=''", out) && occursin("JOBQ_CODE_ARCHIVE=''", out) &&
        occursin("JOBQ_CODE_DIR=''", out) && occursin("JOBQ_PERMANENT_RE=''", out), "noop: 変数 (書庫を要らない)")
     ok(occursin("JOBQ_ARGV=('julia' '+1.11.9' '-e' 'sleep(0); open(", out) && occursin("{\\\"noop\\\":true,\\\"i\\\":", out), "noop: argv は julia +ch -e の 1 要素")
+    c, out = run_cmd(cmd_plan, cpu_t, "--threads", "3", "--work-dir", joinpath(root, "work dir", "bench"), P...)
+    ok(c == 0 && occursin("JOBQ_PROJECT='jobq'", out) && occursin("JOBQ_OUTNAME='jobq_cpu_bench_lane000001001.jsonl'", out),
+       "cpu_bench: 書庫なし・指定 threads の固定カーネルを計画")
     lad = joinpath(root, "work dir", "ladder")
     for (name, jseq, want) in (("temari_ladder_000001.e001.json", 1, "'src/ionization.jl' 'selftest'"),
                                ("temari_ladder_000002.e001.json", 2, "'src/ionization.jl' 'refcheck'"),
@@ -1206,6 +1248,16 @@ function cmd_selftest(io::IO, args)
                               resolve_env(Dict{String,Any}("root" => root, "local" => local_)))
     pr = run(ignorestatus(Cmd(argv)))
     ok(pr.exitcode == 1 && !isfile(joinpath(root, "jobq_selftest_lane000002001.jsonl")), "noop fail=true: exit 1・書かない")
+    bench_t = load_ticket(cpu_t, DEFAULT_PIN)
+    bargv, bout, _, _ = task_plan(bench_t, "1.11.9", 3, joinpath(root, "work dir", "bench"), resolve_env(Dict{String,Any}("root" => root, "local" => local_)))
+    mkpath(dirname(bout))
+    bpr = run(ignorestatus(Cmd(bargv)))
+    ok(bpr.exitcode == 0 && isfile(bout), "cpu_bench: 10 秒の固定 kernel を実行して JSONL を出す")
+    c, boutmsg = run_cmd(cmd_verify, cpu_t, "--out", bout, "--manifest-dir", mdir, "--threads", "3", P...); print(io, boutmsg)
+    bman = joinpath(mdir, "jobq_cpu_bench_lane000001001.jsonl.manifest.json")
+    bmi = c == 0 && isfile(bman) ? json_load(bman)["task_info"] : JObj()
+    ok(c == 0 && bmi["kernel"] == "sincos-f64-v1" && bmi["work_units_per_s"] > 0 && bmi["kernel_threads"] == 3,
+       "cpu_bench: 固定 kernel / throughput / threads を manifest に記録")
     println(io, "[6] verify certify (fixture。error 行の扱いは certify の load_done_v2 と同じ: 全窓が揃った行の error 行は失格にしない)")
     cmdir = joinpath(root, "mans"); mkpath(cmdir)
     for (f, want, nerr, what) in (("certify_complete.jsonl", 0, 0, "完全 (重複行あり)"), ("certify_incomplete.jsonl", 1, 0, "窓が欠ける"),
