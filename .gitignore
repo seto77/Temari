@@ -54,3 +54,7 @@ CLAUDE.md
 
 # $id が名乗る URL で配信するための schema 複製 (pages.yml がビルド時に作る。二重管理しない)
 docs/src/schema/
+
+# ダミー走行の生成物 (tools/dummy/make_dummy_assets.py が作り直す)。
+# ⭐ 2026-09-03 (作者決定): tools/dummy/spec/ は追跡する。目録の写しをやめて本物の spec/ を相対 path で
+#   指すようにしたので二重管理ではなくなった。残る 2 ファイルはバイト不変で、変われば diff に出る。

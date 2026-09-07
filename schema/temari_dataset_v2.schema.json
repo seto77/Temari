@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://seto77.github.io/Temari/schema/temari_dataset_v2.schema.json",
   "title": "Temari ionization form-factor table (schema_version 2)",
-  "description": "One file per channel (Z, subshell). Each row is one incident beam energy E0. This schema is normative for schema_version 2, shipped as dataset v5.x. NOTE the sign and unit conventions in the property descriptions - they are the part most often got wrong by consumers.",
+  "description": "One file per channel (Z, subshell). Each row is one incident beam energy E0. This schema is normative for schema_version 2, shipped as dataset F v5.x, v6.0.0 and v7.0.0. Which fields are required depends on the generation - see the allOf block at the end. The exact top-level key set of a given release is pinned by that release's approved spec (spec/RELEASES.json -> file_top_level_keys) and enforced by tools/check_tables.jl C16b; this schema is the looser, consumer-facing statement. NOTE the sign and unit conventions in the property descriptions - they are the part most often got wrong by consumers.",
   "type": "object",
   "required": [
     "schema_version", "dataset_version", "model_id", "provenance",
@@ -51,6 +51,54 @@
       "description": "Quadrature knobs actually used. Present so a consumer can tell HIGH from PROD output.",
       "additionalProperties": true
     },
+    "prescription_id": {
+      "type": "object",
+      "description": "Machine-readable prescription: the exact keyword set the generator ran with. Every input that changes the numbers has a field here, so a consumer can re-derive model_id and dataset_version from the file alone. The human-readable 'prescription' above is prose and is checked by nothing. Added in dataset F v6.0.0; absent in v5 and earlier.",
+      "additionalProperties": true
+    },
+    "spec_sha256": { "type": "string", "description": "SHA-256 of the raw bytes of the approved specification that defines this file's dataset_version (spec/RELEASES.json -> spec file). 'none' when the file claims no shipping version." },
+    "generator_source_fingerprint": { "type": "string", "description": "16-hex fingerprint of the generator source closure (the .jl files that can change the numbers). Every file of one dataset carries the same value." },
+    "generation_context_sha256": { "type": "string", "description": "SHA-256 over settings + source fingerprint + approved spec + s grid + acceptance gates, plus the nucleus block when the nucleus is finite. Row checkpoints are only resumed when this matches, so it is also what keeps two runs from mixing." },
+    "cache_provenance": { "type": "object", "description": "Provenance of the SCF cache the atomic solutions came from.", "additionalProperties": true },
+    "nucleus_provenance_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the canonical JSON of the 'nucleus' block below. Present only for finite-nucleus datasets." },
+    "nucleus": {
+      "type": "object",
+      "description": "Provenance of the finite nuclear charge distribution. Present ONLY for finite-nucleus datasets (model_id ending in -FNUS or -FNUSX). Every point-nucleus generation (v4 / v5 / v6) omits the field entirely, which is why those files are unchanged by its introduction.",
+      "required": ["shape", "radius_source", "rms_to_sphere", "count_elements", "elements"],
+      "properties": {
+        "shape": { "enum": ["uniform_sphere"], "description": "Nuclear charge model. Only the uniformly charged sphere is defined for schema_version 2; the difference against a two-parameter Fermi distribution at fixed <r^2> is NOT covered." },
+        "radius_source": { "enum": ["formula_1p2A13", "experimental_rms"], "description": "R = 1.2*A^(1/3) fm, or the abundance-weighted experimental rms charge radius converted with sqrt(5/3). The two differ by ~16 % for light elements, so the choice is part of the model_id (-FNUS vs -FNUSX)." },
+        "rms_to_sphere": { "type": "string", "description": "The rms-to-sphere conversion factor as repr(Float64), i.e. sqrt(5/3)." },
+        "count_elements": { "type": "integer", "description": "Number of entries in 'elements' (the shipping Z set)." },
+        "published_radii": { "type": "integer", "description": "Number of published charge radii read from the input table." },
+        "cross_checked_radii": { "type": "integer", "description": "Number of radii confirmed identical between the two independent input tables." },
+        "abundance_coverage_min_percent": { "type": "string", "description": "Lower bound on the natural abundance an element's measured radii must cover, as repr(Float64)." },
+        "abundance_total_tolerance_percent": { "type": "string", "description": "Tolerance on the per-element abundance sum against 100 %, as repr(Float64)." },
+        "formula_gap_z": { "type": "array", "items": { "type": "integer" }, "description": "The fixed set of elements allowed to fall back to the formula because no published radius exists (Tc, Pm, At). Any OTHER element falling back is an error, not a fallback." },
+        "tables": {
+          "type": "array",
+          "description": "The input tables by file name and SHA-256 of their raw bytes. The tables themselves are third-party data and are not redistributed with the dataset; the resolved radii below are.",
+          "items": { "type": "object", "required": ["file", "sha256"], "properties": { "file": { "type": "string" }, "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } } }
+        },
+        "elements": {
+          "type": "object",
+          "description": "Per-element resolved radius and how it was obtained, keyed 'Z<n>'.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["radius_a0", "radius_a0_bits", "class", "policy", "covered_percent", "isotopes"],
+            "properties": {
+              "radius_a0": { "type": "string", "description": "Sphere radius in bohr as repr(Float64)." },
+              "radius_a0_bits": { "type": "string", "pattern": "^[0-9a-f]{16}$", "description": "The same radius as its IEEE-754 binary64 bit pattern, so the value survives any decimal round-trip." },
+              "class": { "enum": ["natural", "reference", "formula"], "description": "natural = abundance-weighted over the natural isotopes; reference = one reference isotope (elements with no natural abundance, i.e. Po-209 and Rn-222); formula = no published radius." },
+              "policy": { "type": "string", "description": "The aggregation rule actually applied to this element, in words." },
+              "covered_percent": { "type": "string", "description": "Percentage of the natural abundance covered by measured radii, as repr(Float64). Below 100 for S, V and Ta, whose minor isotopes have no measured radius." },
+              "isotopes": { "type": "array", "items": { "type": "integer" }, "description": "Mass numbers actually used." }
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
     "prescription": { "type": "object", "description": "Human-readable statement of the physics (bound state, continuum, exchange, final state).", "additionalProperties": true },
     "failures": {
       "type": "array",
@@ -65,6 +113,19 @@
     "generated_utc_note": { "type": "string", "description": "Timestamps are deliberately omitted so output is deterministic." }
   },
   "additionalProperties": true,
+  "allOf": [
+    {
+      "$comment": "A file claiming an approved shipping version must carry the machine-readable provenance that version is defined by. dataset F v5.0.0 and earlier predate these fields, so the requirement is conditional rather than global.",
+      "if": { "required": ["dataset_version"], "properties": { "dataset_version": { "enum": ["6.0.0", "7.0.0"] } } },
+      "then": { "required": ["prescription_id", "spec_sha256", "generator_source_fingerprint", "generation_context_sha256"] }
+    },
+    {
+      "$comment": "A file whose model_id names a finite nucleus must carry the nuclear provenance, and a point-nucleus file must not. Keyed on model_id rather than on the block, because the name cannot be deleted whereas the block can (that hole was real: a set claiming -FNUSX with every nucleus block removed used to pass).",
+      "if": { "required": ["model_id"], "properties": { "model_id": { "pattern": "-FNUSX?$" } } },
+      "then": { "required": ["nucleus", "nucleus_provenance_sha256"] },
+      "else": { "not": { "anyOf": [{ "required": ["nucleus"] }, { "required": ["nucleus_provenance_sha256"] }] } }
+    }
+  ],
   "$defs": {
     "row": {
       "type": "object",

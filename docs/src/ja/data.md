@@ -10,8 +10,8 @@ description: >-
 
 | | データセット | 版 | 入手先 |
 |---|---|---|---|
-| **F(s, E₀)** | STEM-EDX 用の内殻イオン化形状因子、525 チャネル | dataset **5.0.0** | Zenodo [10.5281/zenodo.21872050](https://doi.org/10.5281/zenodo.21872050) · GitHub release [`dataset-v5.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-v5.0.0) |
-| **f_x(s), f_e(s)** | X 線・電子線の原子散乱因子、中性原子 86 種 | dataset-factors **1.0.0** | GitHub release [`dataset-factors-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0) (DOI はまだありません) — [後述](#factors) |
+| **F(s, E₀)** | STEM-EDX 用の内殻イオン化形状因子、525 チャネル | dataset **7.0.0** | Zenodo [10.5281/zenodo.22643468](https://doi.org/10.5281/zenodo.22643468) · GitHub release [`dataset-v7.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-v7.0.0) |
+| **f_x(s), f_e(s)** | X 線・電子線の原子散乱因子、中性原子 86 種 | dataset-factors **1.0.0** | Zenodo [10.5281/zenodo.22644248](https://doi.org/10.5281/zenodo.22644248) · GitHub release [`dataset-factors-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0) — [後述](#factors) |
 
 この 2 つは、別の系統の数値です。$F(s, E_0)$ は、ある元素・ある副殻・あるビーム
 エネルギーについて、*内殻イオン化*が運動量移行にどう分布するかを記述するもので、
@@ -20,7 +20,7 @@ X 線結晶学・電子線結晶学で普通に使われる*弾性*散乱の原�
 Waasmaier & Kirfel (1995) や Peng et al. (1996) がパラメータ化している数値 — で、
 ここではフィットから読み出す代わりに、同じ原子から計算しています。
 
-## 内殻イオン化形状因子 F(s, E₀) — dataset v5.0.0
+## 内殻イオン化形状因子 F(s, E₀) — dataset v7.0.0
 
 !!! warning "数値を使う前にこのページを読んでください"
     F は符号付きで、運動量の規約は q = 4πs、`s_cert` より先の値は物理ではなく
@@ -28,13 +28,31 @@ Waasmaier & Kirfel (1995) や Peng et al. (1996) がパラメータ化してい�
     コードを壊した実績があります。詳細は後述の [仕様](#the-contract) にまとめて
     あり、アーカイブに同梱した実行可能な参照 loader が検査します。
 
+!!! warning "核模型の正誤表: dataset F v4.0.0–v6.0.0"
+    来歴の記述「有限核 (一様球 R = 1.2 A^{1/3} fm)」は誤りです。これらの release は
+    SCF・束縛状態・緩和イオン・連続状態のすべてで**点核**を使っています。
+    **点核の表**として読んでください。元のアーカイブ・数値・チェックサムは
+    そのままで、組み直してはいません。
+
+    dataset F v7.0.0 で、有限の一様帯電球を導入しました。model_id は末尾が
+    `-FNUSX` で区別され、来歴の記述も直してあります。球の半径は IAEA が
+    まとめた実測の rms 電荷半径から求めています。ただし Tc・Pm・At の 3 元素は、
+    文書化してある式による fallback です。
+
+    同じ数値設定で計算した点核の対照と比べると、F の最大絶対差は、表の各行の
+    s 格子上で 1.5 × 10⁻⁸ 〜 5.0 × 10⁻⁴ の範囲に入ります (全 525 チャネル・
+    14,796 行。1 行 = 1 チャネル × 1 加速電圧)。これは**観測された模型差**で
+    あって誤差の上界ではなく、殻によって違います。古い release との差には
+    数値手法の更新も含まれます。対照の表は v7.0.0 のアーカイブの
+    `control_point_nucleus/` に同梱してあるので、この比較は独立に再計算できます。
+
 ### 入手先
 
 | | |
 |---|---|
-| **正本の記録** | Zenodo、[10.5281/zenodo.21872050](https://doi.org/10.5281/zenodo.21872050) — 版 DOI |
-| **ミラー** | [GitHub release `dataset-v5.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-v5.0.0) |
-| サイズ | 圧縮 45 MB、展開 112 MB |
+| **正本の記録** | Zenodo、[10.5281/zenodo.22643468](https://doi.org/10.5281/zenodo.22643468) — 版 DOI |
+| **ミラー** | [GitHub release `dataset-v7.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-v7.0.0) |
+| サイズ | 圧縮 92 MB、展開 235 MB — うち点核の対照一式が 111 MB |
 | ライセンス | **データは CC-BY-4.0**、同梱 loader は MIT |
 
 2 つの複製は**バイト同一**です。アーカイブは決定論的に組んであります
@@ -43,8 +61,8 @@ gzip のタイムスタンプ無し)。ですから、Zenodo 上の複製と Git
 信用するのではなく*比較*できます。
 
 ```bash
-sha256sum -c temari-dataset-v5.0.0.tar.gz.sha256   # the archive
-tar -xzf temari-dataset-v5.0.0.tar.gz && cd temari-dataset-v5.0.0
+sha256sum -c temari-dataset-v7.0.0.tar.gz.sha256   # the archive
+tar -xzf temari-dataset-v7.0.0.tar.gz && cd temari-dataset-v7.0.0
 python tools/temari_contract.py .                  # the contents; non-zero on failure
 ```
 
@@ -53,21 +71,22 @@ python tools/temari_contract.py .                  # the contents; non-zero on f
 **ダウンロード前に眺める**: チャネルの索引はリポジトリに
 [`tables/channels.csv`](https://github.com/seto77/Temari/blob/main/tables/channels.csv)
 としてコミットしてあります — 525 行で、GitHub が検索可能な表として表示します。
-「自分の元素と吸収端は入っているか」という問いに、45 MB のダウンロード無しで
+「自分の元素と吸収端は入っているか」という問いに、92 MB のダウンロード無しで
 答えてくれます。
 
 ### 中身
 
 ![収録範囲: Z と副殻にわたる 525 チャネル](../assets/figures/coverage.svg)
 
-版 **5.0.0**、schema **2**、Julia 1.11.9 上の Temari で生成しました。
+版 **7.0.0**、schema **2**、Julia 1.11.9 上の Temari で生成しました。
 
 | | |
 |---|---|
 | チャネル | **525** — K、L1–L3、M1–M5 |
 | 行 (チャネル × E₀) | **14,796** |
 | 運動量格子 | s = 0 … 16 Å⁻¹、**等間隔 321 節点** (刻み 0.05 Å⁻¹) |
-| モデル | `DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4-DSCF` |
+| モデル | `DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4-DSCF-FNUSX` — 末尾の `-FNUSX` が有限核を表します |
+| 同梱するもう 1 組 | `control_point_nucleus/` — 同じ 525 チャネルを、同じ数値設定で点核として計算した対照一式です。核模型の効きを読者が再計算できるように同梱しています。⚠ **使うためのデータではありません** — `dataset_version` は `0.0.0-dev` で、独自の manifest を持ち、top level の manifest には入っていません |
 
 殻ごとの収録範囲:
 
@@ -192,23 +211,23 @@ from temari_contract import load_channel, f_at
 
 ch = load_channel("F_K_Z26.json")                # 鉄の K 殻
 value, bound, region = f_at(ch, 200.0, 1.25)     # E₀ は keV、s は Å⁻¹
-# -> 0.6877601086513626, 0.0, 'tabulated'
+# -> 0.6877590692528429, 0.0, 'tabulated'
 ```
 
 `f_at` は 3 要素を返し、**効いてくるのは 3 番目**です。[仕様](#the-contract)の 3 つの
 領域のどこに入ったかを教えてくれるので、`s_cert` と自分で比べる必要がありません。
 
 ```python
-f_at(ch,  30.0, 14.0)   # (0.0029482858, 0.0,        'tabulated')  計算値
-f_at(ch,  30.0, 14.2)   # (0.0,          0.005896770, 'unrecorded') s_cert の先。bound が効く
+f_at(ch,  30.0, 14.0)   # (0.0029481544, 0.0,        'tabulated')  計算値
+f_at(ch,  30.0, 14.2)   # (0.0,          0.005896507, 'unrecorded') s_cert の先。bound が効く
 f_at(ch,  30.0, 15.0)   # (0.0,          nan,         'impossible') そのビーム対は存在しない
 ```
 
 E₀ 方向の補間も、出荷している利用側と同じ座標で行われます —
 `f_at(ch, 160.0, 2.5)` はファイルに存在しない行を評価します。
 
-!!! warning "これは v5.0.0 の使用例であって、Temari の Python API ではありません"
-    `load_channel` と `f_at` は、**dataset v5.0.0 に同梱された**参照 loader の
+!!! warning "これは v7.0.0 の使用例であって、Temari の Python API ではありません"
+    `load_channel` と `f_at` は、**dataset v7.0.0 に同梱された**参照 loader の
     入口 2 つです。そのアーカイブが凍結されているので、その版に対しては安定です。
     しかしパッケージではなく、データセットと独立に版が付いているわけでもなく、
     同じファイルの他の部分 — とくにスプラインの内部 — は界面ではありません。
@@ -258,17 +277,21 @@ E₀ 方向の補間も、出荷している利用側と同じ座標で行われ
 (Dirac) な自己無撞着場 (SCF) から求めたものです。これは F(s, E₀) とは*別のデータセット
 系統*で、E₀ 軸を持たず、独立した版の系列と独自の release
 [`dataset-factors-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0)
-(データは CC-BY-4.0、同梱 loader は MIT) を持ちます。**DOI はまだ発行して
-いません**。発行されるまでは、版付きの release タグを引用し、アーカイブは公開
-している SHA-256 で同定してください。
+(データは CC-BY-4.0、同梱 loader は MIT) を持ちます。独自の DOI
+[10.5281/zenodo.22644248](https://doi.org/10.5281/zenodo.22644248) を
+2026-09-07 に発行しました。⚠ これは F(s, E₀) とは**別の Zenodo 系列**であって、
+F の新しい版ではありません。
 
 !!! warning "v1.0.0 アーカイブへの正誤表 (2026-08-19)"
-    アーカイブに同梱した `README.md` の中に、誤った記述が 2 つあります。
+    アーカイブに同梱した `README.md` の中に、いま読むと事実と合わない記述が 2 つあります。
     アーカイブはそのために組み直しては**いません** — バイト列とその SHA-256 は
     正本のままです。表の数値は 1 つも変わりません。
 
-    - この系統が「独立した版**と DOI**」を持つ、と書いてあります。持っているのは
-      独立した版の系列だけで、上記のとおり DOI は発行していません。
+    - この系統が「独立した版**と DOI**」を持つ、と書いてあります。アーカイブを
+      凍結した時点で持っていたのは独立した版の系列だけでした。⭐ これは誤りと
+      いうより**追い越された**記述です — この系統で最初の DOI
+      [10.5281/zenodo.22644248](https://doi.org/10.5281/zenodo.22644248) を
+      アーカイブより後の 2026-09-07 に発行しました。
     - 交換を「exact exchange in the KLI approximation」、1 箇所では
       「KLI exact exchange」と書いています。どちらも **OEP に対する交換のみの
       KLI 近似**と読み替えてください。この区別はこの表自身で測れるものです —
@@ -395,20 +418,20 @@ release は `dataset-vX.Y.Z`、散乱因子データセットの release は
 引用してください:
 
 > Seto, Y. (2026). *Inner-shell ionization form factors F(s, E0) for STEM-EDX:
-> 525 channels (K, L1-L3, M1-M5) computed with Temari* (Version 5.0.0)
-> \[Data set\]. Zenodo. <https://doi.org/10.5281/zenodo.21872050>
+> 525 channels (K, L1-L3, M1-M5) computed with Temari* (Version 7.0.0)
+> \[Data set\]. Zenodo. <https://doi.org/10.5281/zenodo.22643468>
 
-⚠ **版 DOI を引用してください**。`10.5281/zenodo.21872050` です — これは、ファイルが
+⚠ **版 DOI を引用してください**。`10.5281/zenodo.22643468` です — これは、ファイルが
 それ以後変わっていないことを保証します。`10.5281/zenodo.21872049` は版に依存しない
 DOI で、その時点の最新版に解決されます。これが欲しいのは、使った数値ではなく
 データセット一般に言及するときだけです。
 
-散乱因子については、DOI はまだありません:
+散乱因子は別の Zenodo 系列です:
 
 > Seto, Y. (2026). *Atomic X-ray and first-Born electron scattering factors
 > f_x(s), f_e(s) for 86 neutral atoms (Z = 1–86), computed with Temari*
-> (Version 1.0.0) \[Data set\]. GitHub release `dataset-factors-v1.0.0`,
-> <https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0>.
+> (Version 1.0.0) \[Data set\]. Zenodo.
+> <https://doi.org/10.5281/zenodo.22644248>
 
 **データは CC-BY-4.0 で同梱 loader は MIT です**。帰属表示はリンクで構いません。
 表をファイルとしてではなくバイナリリソースに埋め込んで配る場合でも運用できるのは

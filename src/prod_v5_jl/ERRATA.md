@@ -49,3 +49,18 @@ dataset v5.0.0 の数値は、**MANIFEST と `docs/src/*/data.md` が述べる�
 本書が足すのは「出荷後に測った、出荷処方の 2 つの数値的な項の大きさ」であり、M 殻の s ≤ 0.5 と
 重 Z (Z ≳ 80) の K 以外の殻を使う利用者は、上の表の大きさを見込んでおくこと。次世代 (v6) は両方を
 処方として直して再生成する (DOI は取り直す)。
+
+## 4. 核模型の provenance 誤記 — 実装は**点核** (出荷後の確認、2026-08-29)
+
+各行の JSON `prescription.continuum` は「finite nucleus (uniform sphere R=1.2 A^{1/3} fm)」と記すが、**κ 分解 Dirac 経路の実装は
+SCF・束縛・relaxed ion 場・連続状態のすべてが点核**である (SCF の −Z/r `src/l1_atomic.jl:657-676`、`V_bound_callable` 822、束縛の原点種
+`_dirac_gf` 1077、relaxed ion 場 1213、連続の原点種 `src/l2_continuum.jl:612` の点核指数 γ = √(κ² − (Z/c)²))。一様球の `dVnuc` は
+legacy の scalar 相対論 `RelCont` (`--rel` = v3 の SRC 経路) からしか呼ばれない。文字列は `gen_production.jl` の `presc_block` の固定文だった
+(Sol 1 巡目の指摘、Claude が検算。`docs/notes/future_directions_codex_2026-08-29.md` §11.1 / §12.3 / §14.7)。
+
+- **作者決定 (2026-08-29): dataset v4 / v5 / v6 は「点核の表」と定義し直す**。数値・checksum は不変。有限核 (一様球) は次世代の別 `model_id` の処方
+  として、2×2 の監査 (`docs/notes/finite_nucleus_2x2_preregistration_2026-08-29.md`) の後に導入する
+- 効きの桁 (点核 Dirac–Coulomb 束縛状態への一次摂動、独立に検算): Au K の固有値 +61.85 eV (結合エネルギーは 62 eV 小さくなる向き、
+  80.7 keV に対し 7.7e-4)、Rn K +139.62 eV、L1 は 1/6、M5 は 1e-13 eV 級。F・σ_own への伝播は未測定 (監査 1 で測る)。閾値は Bote 端なので
+  運動学の端は動かない
+- 生成コードの固定文字列は次世代で `NucleusSpec` から生成する形に直す (それまで `presc_block` は誤記のまま。本書が正)

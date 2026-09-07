@@ -1,5 +1,36 @@
 /.gitattributes text eol=lf
 
+# 260904Cl: ⚠⚠ **一般則はここ (例外より前) に置く。** .gitattributes は**後の規則が勝つ**ので、
+#   これを末尾に足すと下の `tools/jobq/*.cmd text eol=crlf` や `-text` の例外を全部潰す (codex2)。
+#
+# なぜ要るか: 書庫 (`tools/jobq/pack_code.sh`、`PATHS="src tools Project.toml"`) は `git ls-files` から
+#   **名前**だけを取り、tar は**ディスクのバイト**を読む。⇒ `code_sha256` は「どの worktree で固めたか」で
+#   決まる。`core.autocrlf` はこの機では **system 全体** (`C:/Program Files/Git/etc/gitconfig`) で `true`。
+#   実測 (2026-09-04、commit 11d1014): 4 つの worktree で `src/l0_numerics.jl` と `src/l1_atomic.jl` の
+#   改行が 4 通りに分かれ、同じ commit からソース指紋が 3 通り出ていた。
+#   ⚠ 指紋のほうはコード側でも正規化した (l5_channel.jl / gen_production.jl) が、**書庫の `code_sha256` は
+#     この規則でしか揃わない**。
+#   ⚠⚠ **この規則だけでは既存の worktree は直らない** — 属性は checkout のときにしか効かず、既にディスクに
+#     ある CRLF を書き戻さない。実測: `src/gen_production.jl` は `attr/text eol=lf` かつ `w/crlf` のまま
+#     (`git ls-files --eol` で見える。`git status` は git が読むとき正規化するので clean)。
+#     ⇒ 本番の pack は**新しく checkout した木**から固めるか、pack 時に `git ls-files --eol` で
+#     `eol=lf` かつ `w/crlf` を fail-closed にする必要がある (pack_code.sh は Yonabe の正本なので依頼した)。
+#
+# ⚠ `text=auto` にしてある (裸の `text` ではない) — `tools/lane_watchdog.sh` は git が binary と判定して
+#   いる (`i/-text`)。強制 `text` を掛けると binary を改行変換の対象にしてしまう (codex2)。
+# ⚠ 安全性の実測 (2026-09-04): 追跡 765 本のうち blob が CRLF / mixed なのは **20 本だけで全部
+#   `docs/notes/data/deep_v3_seal_20260831/` の中**、しかも全件すでに `-text`。`src` / `tools` /
+#   `Project.toml` の中で `i/lf` でないのは改行を 1 つも持たない 3 本と上の binary 1 本だけ。
+#   ⇒ **この規則は blob の中身を 1 バイトも変えない**。変わるのは checkout がディスクへ書く形だけ。
+Project.toml text=auto eol=lf
+src/** text=auto eol=lf
+tools/** text=auto eol=lf
+
+# 260904Cl: σ 係数表は生バイトの SHA-256 が `tools/check_tables.jl:79` の `BOTE_SALVAT_SHA256` に
+#   固定されている (C16c)。⚠ **現状は無害** — 実測で改行を 1 つも持たない単一行 JSON (70,778 B) なので
+#   CRLF 変換は恒等。将来この表を改行つきで作り直したときに C16c が黙って落ちないよう先に釘を刺す。
+src/bote_salvat.json -text
+
 # 260820Cl: canonical JSON (spec と E0 目録、registry) は生バイトの SHA-256 で承認される — checkout で改行を変換してはいけない
 # (autocrlf=true の Windows で worktree を切ると CRLF になり、承認 hash と一致しなくなる。2026-08-20 の起動時に実際に起きた)
 spec/*.json -text
@@ -17,9 +48,29 @@ tools/jobq/share_README.txt text eol=crlf
 docs/notes/deep_run_plan_2026-08-22.md text eol=lf
 docs/notes/certification_v4_preregistration_2026-08-20.md text eol=lf
 docs/handover/next_chat_2026-08-22_jobq.md text eol=lf
+docs/notes/deep_r3_incident_postmortem_2026-08-26.md text eol=lf
 src/l5_channel.jl text eol=lf
 tools/cache_race_test.jl text eol=lf
 tools/cache_wiring_test.jl text eol=lf
 tools/cert_v2_dedup_test.py text eol=lf
 tools/cert_v2_report.py text eol=lf
 tools/certify_sigma_v2.jl text eol=lf
+
+# 証拠データは sha256 を安定させるため LF 固定 (checkout の改行方針で指紋が動くのを防ぐ)
+docs/notes/data/** text eol=lf
+docs/notes/attribution_preregistration_2026-08-26.md text eol=lf
+docs/handover/next_chat_2026-08-27.md text eol=lf
+docs/handover/session_record_2026-08-26_claude.md text eol=lf
+
+# 260831Cl: deep v3 の封印証拠は**実行したバイトそのもの**を残す (改行を正規化しない)。
+#   cert_canonicalize.py は実際に CRLF で実行され、その SHA が seal の postseal_instrument.sha256.txt に
+#   固定されている。text eol=lf を掛けると SHA が動き、封印との照合ができなくなる。
+#   ⚠ docs/notes/data/** の text eol=lf より**後**に置くこと (後の規則が勝つ)。
+docs/notes/data/deep_v3_seal_20260831/** -text
+
+# 260901Cl: ダミー走行の資産。gen_dummy.jl は**自分自身のバイトから指紋を作る**ので、
+#   checkout の改行方針で値が動くと CRLF のホストと LF のホストが同じ run dir に入れなくなる。
+#   ⚠ コード側でも正規化してあるが、二重に守る (dummy_*.json は SHA で承認される canonical JSON)。
+tools/dummy/** text eol=lf
+tools/dummy/dummy_cost.json -text
+tools/dummy/dummy_identity.json -text

@@ -483,7 +483,7 @@ s グリッドはエンジンの既定。E₀ 掃引や複数曲線の重ね描�
 | `julia -t 1 tools/verify_simd_bessel.jl` | 8 レーン SIMD 球 Bessel カーネルをスカラー版と比べます。288 ケース。 | 不一致があれば非ゼロ |
 | `julia -t 1 tools/verify_e5_qlane.jl` | 動径積分の q レーンをその参照と比べます。75 ケース (非相対論 `RlTable`)。 | 不一致があれば非ゼロ |
 | `julia -t 1 tools/verify_e5_qlane_dirac.jl` | Dirac 版 `RlTable` — v4 出荷経路 — について同じこと。 | 不一致があれば非ゼロ |
-| `julia -t 1 tools/verify_angular_pack.jl` | パックした角度 (Legendre) 累積を、残してあるオラクルと比べます。 | 不一致があれば非ゼロ |
+| `julia -t 1 tools/verify_angular_pack.jl` | パックした角度 (Legendre) 累積を、残してある参照解と比べます。 | 不一致があれば非ゼロ |
 | `julia -t auto tools/e5_dump.jl <outdir>` | `refcheck` の 4 チャネルについて `F`、`N0`、`E_bound` を生の `Float64` バイトとしてダンプします。編集の前後で SHA-256 が一致すれば、端から端までビット同一です。 | 0 |
 | `julia tools/bench_e5_rltable.jl` | 動径積分累積のカーネルベンチマーク。累積そのものの利得を球 Bessel 評価から切り離します。 | 0 |
 

@@ -10,8 +10,8 @@ line. You do not need to run anything, and you do not need Julia.
 
 | | Dataset | Version | Where |
 |---|---|---|---|
-| **F(s, E₀)** | Inner-shell ionization form factors for STEM-EDX, 525 channels | dataset **5.0.0** | Zenodo [10.5281/zenodo.21872050](https://doi.org/10.5281/zenodo.21872050) · GitHub release [`dataset-v5.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-v5.0.0) |
-| **f_x(s), f_e(s)** | X-ray and electron atomic scattering factors, 86 neutral atoms | dataset-factors **1.0.0** | GitHub release [`dataset-factors-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0) (no DOI yet) — see [below](#factors) |
+| **F(s, E₀)** | Inner-shell ionization form factors for STEM-EDX, 525 channels | dataset **7.0.0** | Zenodo [10.5281/zenodo.22643468](https://doi.org/10.5281/zenodo.22643468) · GitHub release [`dataset-v7.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-v7.0.0) |
+| **f_x(s), f_e(s)** | X-ray and electron atomic scattering factors, 86 neutral atoms | dataset-factors **1.0.0** | Zenodo [10.5281/zenodo.22644248](https://doi.org/10.5281/zenodo.22644248) · GitHub release [`dataset-factors-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0) — see [below](#factors) |
 
 The two are different families of numbers. $F(s, E_0)$ describes how an
 *inner-shell ionization* is distributed in momentum transfer, for one element,
@@ -21,7 +21,7 @@ factors of X-ray and electron crystallography — the numbers that
 Waasmaier & Kirfel (1995) or Peng et al. (1996) parameterize — computed here
 from the same atom instead of read from a fit.
 
-## Inner-shell ionization form factors F(s, E₀) — dataset v5.0.0
+## Inner-shell ionization form factors F(s, E₀) — dataset v7.0.0
 
 !!! warning "Read this page before using the numbers"
     F is signed, the momentum convention is q = 4πs, values past `s_cert` are
@@ -30,13 +30,36 @@ from the same atom instead of read from a fit.
     out under [The contract](#the-contract) below, and checked by an executable
     reference loader shipped inside the archive.
 
+!!! warning "Nuclear-model erratum: dataset F v4.0.0–v6.0.0"
+    The provenance description "finite nucleus (uniform sphere
+    R = 1.2 A^{1/3} fm)" is incorrect. These releases used a point
+    nucleus throughout the SCF, bound-state, relaxed-ion and continuum
+    calculations. Interpret them as **point-nucleus tables**. Their
+    original archives, numerical values and checksums remain unchanged.
+
+    Dataset F v7.0.0 introduces a finite, uniformly charged sphere
+    under a distinct model_id ending in `-FNUSX`, with corrected
+    provenance. Sphere radii are derived from IAEA-compiled experimental
+    rms charge radii where available; Tc, Pm and At use the documented
+    formula fallback.
+
+    Against a point-nucleus control computed with identical numerical
+    settings, the maximum absolute difference in F over each tabulated
+    row's s grid ranges from 1.5 × 10⁻⁸ to 5.0 × 10⁻⁴ across all 525
+    channels and 14,796 rows — one row being one channel at one beam
+    energy. These are observed model differences, not error bounds, and
+    they vary by shell; changes from older releases also include
+    numerical-method updates. The control tables are included in the
+    v7.0.0 archive under `control_point_nucleus/`, so this comparison can
+    be recomputed independently.
+
 ### Where to get it
 
 | | |
 |---|---|
-| **Record of reference** | Zenodo, [10.5281/zenodo.21872050](https://doi.org/10.5281/zenodo.21872050) — the version DOI |
-| **Mirror** | [GitHub release `dataset-v5.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-v5.0.0) |
-| Size | 45 MB compressed, 112 MB expanded |
+| **Record of reference** | Zenodo, [10.5281/zenodo.22643468](https://doi.org/10.5281/zenodo.22643468) — the version DOI |
+| **Mirror** | [GitHub release `dataset-v7.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-v7.0.0) |
+| Size | 92 MB compressed, 235 MB expanded — of which the point-nucleus control set is 111 MB |
 | Licence | **data CC-BY-4.0**, bundled loader MIT |
 
 The two copies are **byte-identical**. The archive is built deterministically —
@@ -45,8 +68,8 @@ gzip timestamp — so the copy on Zenodo and the copy on GitHub can be *compared
 rather than merely trusted.
 
 ```bash
-sha256sum -c temari-dataset-v5.0.0.tar.gz.sha256   # the archive
-tar -xzf temari-dataset-v5.0.0.tar.gz && cd temari-dataset-v5.0.0
+sha256sum -c temari-dataset-v7.0.0.tar.gz.sha256   # the archive
+tar -xzf temari-dataset-v7.0.0.tar.gz && cd temari-dataset-v7.0.0
 python tools/temari_contract.py .                  # the contents; non-zero on failure
 ```
 
@@ -56,20 +79,21 @@ python tools/temari_contract.py .                  # the contents; non-zero on f
 repository as
 [`tables/channels.csv`](https://github.com/seto77/Temari/blob/main/tables/channels.csv)
 — 525 rows, rendered by GitHub as a searchable table. It answers "is my element
-and edge in here?" without a 45 MB download.
+and edge in here?" without a 92 MB download.
 
 ### What is in it
 
 ![Coverage: 525 channels over Z and subshell](../assets/figures/coverage.svg)
 
-Version **5.0.0**, schema **2**, generated with Temari on Julia 1.11.9.
+Version **7.0.0**, schema **2**, generated with Temari on Julia 1.11.9.
 
 | | |
 |---|---|
 | Channels | **525** — K, L1–L3, M1–M5 |
 | Rows (channel × E₀) | **14,796** |
 | Momentum grid | s = 0 … 16 Å⁻¹, **321 uniform nodes** (step 0.05 Å⁻¹) |
-| Model | `DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4-DSCF` |
+| Model | `DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4-DSCF-FNUSX` — the `-FNUSX` suffix records the finite nucleus |
+| Also shipped | `control_point_nucleus/` — a point-nucleus control set of the same 525 channels, computed with identical numerical settings, so the size of the nuclear model change can be recomputed. **Not for use**: it carries `dataset_version` `0.0.0-dev`, its own manifest, and it is not part of the top-level manifest |
 
 Coverage by shell:
 
@@ -201,7 +225,7 @@ from temari_contract import load_channel, f_at
 
 ch = load_channel("F_K_Z26.json")                # iron K
 value, bound, region = f_at(ch, 200.0, 1.25)     # E₀ in keV, s in Å⁻¹
-# -> 0.6877601086513626, 0.0, 'tabulated'
+# -> 0.6877590692528429, 0.0, 'tabulated'
 ```
 
 `f_at` returns a triple, and **the third element is the one that matters**: it
@@ -209,17 +233,17 @@ tells you which of the three regions of [the contract](#the-contract) you landed
 in, so you never have to compare against `s_cert` yourself.
 
 ```python
-f_at(ch,  30.0, 14.0)   # (0.0029482858, 0.0,        'tabulated')  -- computed
-f_at(ch,  30.0, 14.2)   # (0.0,          0.005896770, 'unrecorded') -- past s_cert; `bound` applies
+f_at(ch,  30.0, 14.0)   # (0.0029481544, 0.0,        'tabulated')  -- computed
+f_at(ch,  30.0, 14.2)   # (0.0,          0.005896507, 'unrecorded') -- past s_cert; `bound` applies
 f_at(ch,  30.0, 15.0)   # (0.0,          nan,         'impossible') -- no such Bloch pair exists
 ```
 
 Interpolation in E₀ is handled for you, in the coordinates the shipping consumer
 uses — `f_at(ch, 160.0, 2.5)` evaluates a row that does not exist in the file.
 
-!!! warning "This is a v5.0.0 example, not a Temari Python API"
+!!! warning "This is a v7.0.0 example, not a Temari Python API"
     `load_channel` and `f_at` are the two entry points of the reference loader
-    **bundled with dataset v5.0.0**, and they are stable for that archive because
+    **bundled with dataset v7.0.0**, and they are stable for that archive because
     that archive is frozen. They are not a package, they are not versioned
     independently of the dataset, and nothing else in that file — the spline
     internals in particular — is an interface. Pin the dataset version you read
@@ -277,17 +301,20 @@ of Krieger et al. (1992). This is a *different dataset
 family* from F(s, E₀): no E₀ axis, an independent version line, and its own
 release
 [`dataset-factors-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0)
-(CC-BY-4.0 for the data, MIT for the bundled loader). **No DOI has been minted
-yet**; until one exists, cite the versioned release tag and identify the archive
-by its published SHA-256.
+(CC-BY-4.0 for the data, MIT for the bundled loader). It has its own DOI,
+[10.5281/zenodo.22644248](https://doi.org/10.5281/zenodo.22644248), minted on
+2026-09-07 — a **separate Zenodo series** from F(s, E₀), not a new version of it.
 
 !!! warning "Erratum for the v1.0.0 archive (2026-08-19)"
     Two sentences inside the archive's own `README.md` are wrong. The archive is
     **not** rebuilt for them — its bytes and its SHA-256 stay canonical — and no
     number in the tables changes.
 
-    - It says the family carries "an independent version **and DOI**". It carries
-      an independent version line only; no DOI has been minted, as above.
+    - It says the family carries "an independent version **and DOI**". When the
+      archive was frozen it carried an independent version line only. That is now
+      superseded rather than wrong: the family's first DOI,
+      [10.5281/zenodo.22644248](https://doi.org/10.5281/zenodo.22644248), was
+      minted on 2026-09-07, after the archive.
     - It describes the exchange as "exact exchange in the KLI approximation", and
       once as "KLI exact exchange". Read both as **the exchange-only KLI
       approximation to the OEP** — the distinction is measurable in these very
@@ -428,20 +455,20 @@ Cite the software through `CITATION.cff` in the repository, and the dataset by
 its own DOI:
 
 > Seto, Y. (2026). *Inner-shell ionization form factors F(s, E0) for STEM-EDX:
-> 525 channels (K, L1-L3, M1-M5) computed with Temari* (Version 5.0.0)
-> \[Data set\]. Zenodo. <https://doi.org/10.5281/zenodo.21872050>
+> 525 channels (K, L1-L3, M1-M5) computed with Temari* (Version 7.0.0)
+> \[Data set\]. Zenodo. <https://doi.org/10.5281/zenodo.22643468>
 
-⚠ **Cite the version DOI**, `10.5281/zenodo.21872050` — it guarantees the files
+⚠ **Cite the version DOI**, `10.5281/zenodo.22643468` — it guarantees the files
 have not changed since. `10.5281/zenodo.21872049` is version-independent and
 resolves to whichever version is current, which is what you want only when
 referring to the dataset in general rather than to the numbers you used.
 
-For the scattering factors, no DOI exists yet:
+For the scattering factors, which are a separate Zenodo series:
 
 > Seto, Y. (2026). *Atomic X-ray and first-Born electron scattering factors
 > f_x(s), f_e(s) for 86 neutral atoms (Z = 1–86), computed with Temari*
-> (Version 1.0.0) \[Data set\]. GitHub release `dataset-factors-v1.0.0`,
-> <https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0>.
+> (Version 1.0.0) \[Data set\]. Zenodo.
+> <https://doi.org/10.5281/zenodo.22644248>
 
 **The data is CC-BY-4.0; the bundled loader is MIT.** Attribution may be given
 by link, which is what makes it workable when the tables are embedded in a
