@@ -223,11 +223,31 @@ class Element:
         self.doc = doc
         self.z = int(doc["z"])
         self.s = s_nodes()
+        ver = doc.get("schema_version")
+        # 260909Cl: ⭐ schema v2 (荷電種) を読めるようにした。⚠⚠ **v1 の経路は 1 行も変えない** —
+        #   このファイルは公開済み factors v1.0.0 の書庫に同梱されており、
+        #   v1 の読み方が変わると既に配った archive の意味が変わる。
+        #   ⇒ v2 で足す検査は `ver == 2` の枝の中だけに置く。
+        self.charge = float(doc.get("charge", 0.0))
+        # ⚠ artifact_role — 認証済みと計算値の境界 (作者決定 I9、2026-09-09)。
+        #   v1 は欄が無くて当然なので "certified" とみなす (⚠ 公開済み 86 本は書き換えられない)。
+        #   v2 は required で、欠けていたら fail-closed。
+        self.artifact_role = "certified"
         if check:
-            if doc.get("dataset") != "temari-factors" or doc.get("schema_version") != 1:
+            if doc.get("dataset") != "temari-factors" or ver not in (1, 2):
                 raise ValueError("dataset/schema_version が契約と違う")
-            if doc.get("charge") != 0 or float(doc.get("n_electrons")) != float(self.z):
-                raise ValueError("中性原子の表ではない")
+            if ver == 1:
+                if doc.get("charge") != 0 or float(doc.get("n_electrons")) != float(self.z):
+                    raise ValueError("中性原子の表ではない")
+            else:
+                role = doc.get("artifact_role")
+                if not isinstance(role, str):
+                    raise ValueError("schema v2 には artifact_role が要る")
+                if role not in ("certified", "computed", "control"):
+                    raise ValueError("artifact_role が未知の値: %r" % (role,))
+                self.artifact_role = role
+                if float(self.z) - float(doc.get("n_electrons")) != self.charge:
+                    raise ValueError("n_electrons ≠ Z − charge")
             if expect_z is not None and self.z != expect_z:
                 raise ValueError("内部の z=%d が期待 %d と違う (ファイル名を信じない)" % (self.z, expect_z))
             g = doc["s_grid"]
@@ -236,15 +256,40 @@ class Element:
             if nodes_sha256(self.s) != g["sha256_f64le"]:
                 raise ValueError("s 節点の再構成が sha256 と合わない")
         self.fx_nodes = [float(v) for v in doc["f_x"]]
-        self.fe_nodes = [float(v) for v in doc["f_e_A"]]
-        if len(self.fx_nodes) != N_NODES or len(self.fe_nodes) != N_NODES:
+        raw_fe = doc["f_e_A"]
+        if len(self.fx_nodes) != N_NODES or len(raw_fe) != N_NODES:
             raise ValueError("配列長が 7681 ではない")
-        if check and not all(math.isfinite(v) for v in self.fx_nodes + self.fe_nodes):
-            raise ValueError("非有限値がある")
+        # ⭐ 260909Cl: 荷電種は f_e = C/s² + f_e_regular で、**単極子は表に無い**。
+        #   ⚠⚠ 正則部を「f_e − 単極子」の引き算で作ってはいけない (低 s で桁が消える) ので、
+        #   表に載っている正則部をそのまま使う。⚠ f_e_A[0] は荷電種では null (発散するため)。
+        self.c_mono = float(doc.get("monopole_coefficient_A_inv", 0.0))
+        if ver == 2 and "f_e_regular_A" in doc:
+            self.fe_reg_nodes = [float(v) for v in doc["f_e_regular_A"]]
+            if len(self.fe_reg_nodes) != N_NODES:
+                raise ValueError("f_e_regular_A の長さが 7681 ではない")
+        else:
+            self.fe_reg_nodes = [float(v) for v in raw_fe]
+        if self.charge == 0.0:
+            self.fe_nodes = [float(v) for v in raw_fe]
+        else:
+            # ⚠ s=0 は表せない。⭐ 勝手に有限値を作らず、符号つき無限大を置く
+            inf = math.inf if self.c_mono > 0 else -math.inf
+            self.fe_nodes = [inf] + [float(v) for v in raw_fe[1:]]
+        if check:
+            if not all(math.isfinite(v) for v in self.fx_nodes):
+                raise ValueError("f_x に非有限値がある")
+            if not all(math.isfinite(v) for v in self.fe_reg_nodes):
+                raise ValueError("f_e_regular に非有限値がある")
+            if self.charge == 0.0 and not all(math.isfinite(v) for v in self.fe_nodes):
+                raise ValueError("中性なのに f_e に非有限値がある")
         # 契約の補間 (loader が唯一持ってよい規約)
         self._fx = CubicSpline(self.s, self.fx_nodes, "clamped", "not-a-knot", left_value=0.0)
         self._t = [v * v for v in self.s]
-        self._fe = CubicSpline(self._t, self.fe_nodes, "not-a-knot", "not-a-knot")
+        # ⚠ 荷電種では f_e 全体を補間しない (s→0 で発散する)。⭐ 補間するのは**正則部**で、
+        #   規約は中性の f_e と同じ (t = s² 上の両端 not-a-knot)。
+        self._fe_reg = CubicSpline(self._t, self.fe_reg_nodes, "not-a-knot", "not-a-knot")
+        self._fe = (self._fe_reg if self.charge != 0.0 else
+                    CubicSpline(self._t, self.fe_nodes, "not-a-knot", "not-a-knot"))
 
     @staticmethod
     def _guard(s):
@@ -261,8 +306,32 @@ class Element:
         return self._fx(self._guard(s))
 
     def fe(self, s):
+        """f_e [Å]。⭐ 260909Cl: 荷電種では **単極子 C/s² と正則部を組んで**返す。
+
+        ⚠⚠ 正則部だけを返してはいけない — 単極子が抜けた値を「f_e」と呼ぶことになる。
+        ⚠ s = 0 は荷電種では表せないので `±inf` を返す (勝手に有限値を作らない)。
+        ⚠ 単極子係数はファイルの `monopole_coefficient_A_inv` をそのまま使い、
+        **loader 側で作り直さない** (この loader は物理定数 a₀ を持たない設計なので、
+        `C = q/(8π²a₀)` を再計算すると a₀ の写しが 2 つできる)。"""
         s = self._guard(s)
-        return self._fe(s * s)
+        reg = self._fe_reg(s * s)
+        if self.charge == 0.0:
+            return reg
+        if s == 0.0:
+            return math.inf if self.c_mono > 0 else -math.inf
+        return self.c_mono / (s * s) + reg
+
+    def fe_regular(self, s):
+        """⭐ 正則部だけ [Å]。荷電種でも **s = 0 を含めて全域で有限**。
+
+        ⚠ 中性では f_e と同じ値になる (単極子が厳密に 0 のため)。"""
+        return self._fe_reg(self._guard(s) ** 2)
+
+    def is_certified(self):
+        """⭐ 通常入口が読んでよいか (作者決定 I9)。
+
+        ⚠ `computed` (認証前) と `control` (対照) は**研究入口だけ**が読む。"""
+        return self.artifact_role == "certified"
 
 
 # ---------------------------------------------------------------------------

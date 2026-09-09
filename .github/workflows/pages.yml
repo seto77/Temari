@@ -48,7 +48,7 @@ jobs:
         run: |
           set -eu
           mkdir -p docs/src/schema
-          for f in temari_dataset_v2 temari_factors_v1; do
+          for f in temari_dataset_v2 temari_factors_v1 temari_factors_v2; do
             src="schema/$f.schema.json"
             cp "$src" "docs/src/schema/$f.schema.json"
             cmp "$src" "docs/src/schema/$f.schema.json"
