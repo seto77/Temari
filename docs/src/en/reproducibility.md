@@ -134,8 +134,8 @@ Two consequences, both of which have been exercised:
 ## The interpreter is part of the dataset
 
 Julia's own version is pinned per dataset generation and recorded in the
-manifest — **1.11.9** for the F(s, E₀) datasets (v3, v4 and the current
-v5.0.0), **1.12.6** for dataset-factors v1.0.0. Code generation and libm
+manifest — **1.11.9** for the F(s, E₀) datasets (v3, v4, v5.0.0 and the
+current v7.0.0), **1.12.6** for dataset-factors v1.0.0. Code generation and libm
 implementations change between versions, which can break bit identity without
 any change to this repository. **Updating the interpreter therefore ranks with a
 full table regeneration**, and is declared the same way.

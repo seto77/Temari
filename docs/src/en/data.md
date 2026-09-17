@@ -1,19 +1,20 @@
 ---
 description: >-
-  The two published datasets, where to get them, and the contract their numbers carry: F is signed, the momentum convention is q = 4*pi*s, and values past each row's s_cert are padding rather than physics.
+  The published datasets, where to get them, and the contract their numbers carry: F is signed, the momentum convention is q = 4*pi*s, and values past each row's s_cert are padding rather than physics.
 ---
 
 # Data
 
-Two datasets are **published in their own right**, each with its own version
+Three datasets are **published in their own right**, each with its own version
 line. You do not need to run anything, and you do not need Julia.
 
 | | Dataset | Version | Where |
 |---|---|---|---|
 | **F(s, E₀)** | Inner-shell ionization form factors for STEM-EDX, 525 channels | dataset **7.0.0** | Zenodo [10.5281/zenodo.22643468](https://doi.org/10.5281/zenodo.22643468) · GitHub release [`dataset-v7.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-v7.0.0) |
-| **f_x(s), f_e(s)** | X-ray and electron atomic scattering factors, 86 neutral atoms | dataset-factors **1.0.0** | Zenodo [10.5281/zenodo.22644248](https://doi.org/10.5281/zenodo.22644248) · GitHub release [`dataset-factors-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0) — see [below](#factors) |
+| **f_x(s), f_e(s)** | X-ray and electron atomic scattering factors, 86 neutral atoms | dataset-factors **2.0.0** | Zenodo [10.5281/zenodo.22820415](https://doi.org/10.5281/zenodo.22820415) · GitHub release [`dataset-factors-v2.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v2.0.0) — see [below](#factors) |
+| **f_x(s), f_e(s), anions** | The same two factors for 22 Watson-sphere-stabilised anions | dataset-factors-ion **1.0.0** | Zenodo [10.5281/zenodo.22820492](https://doi.org/10.5281/zenodo.22820492) · GitHub release [`dataset-factors-ion-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-ion-v1.0.0) — see [below](#factors-ion) |
 
-The two are different families of numbers. $F(s, E_0)$ describes how an
+F and the scattering factors are different families of numbers. $F(s, E_0)$ describes how an
 *inner-shell ionization* is distributed in momentum transfer, for one element,
 one subshell and one beam energy; it is what a STEM-EDX or ALCHEMI simulation
 needs. $f_x(s)$ and $f_e(s)$ are the ordinary *elastic* atomic scattering
@@ -291,7 +292,7 @@ uses — `f_at(ch, 160.0, 2.5)` evaluates a row that does not exist in the file.
 
 See [Verification](verification.md) for what is checked and how.
 
-## Atomic scattering factors f_x(s), f_e(s) — dataset-factors v1.0.0 { #factors }
+## Atomic scattering factors f_x(s), f_e(s) — dataset-factors v2.0.0 { #factors }
 
 The X-ray atomic scattering factor $f_x(s)$ [electrons] and the first-Born
 electron scattering factor $f_e(s)$ [Å] for the **86 neutral atoms Z = 1–86**,
@@ -300,10 +301,34 @@ the exchange-only KLI approximation to the optimized effective potential (OEP)
 of Krieger et al. (1992). This is a *different dataset
 family* from F(s, E₀): no E₀ axis, an independent version line, and its own
 release
-[`dataset-factors-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0)
-(CC-BY-4.0 for the data, MIT for the bundled loader). It has its own DOI,
-[10.5281/zenodo.22644248](https://doi.org/10.5281/zenodo.22644248), minted on
-2026-09-07 — a **separate Zenodo series** from F(s, E₀), not a new version of it.
+[`dataset-factors-v2.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v2.0.0)
+(CC-BY-4.0 for the data, MIT for the bundled loader). Its version DOI is
+[10.5281/zenodo.22820415](https://doi.org/10.5281/zenodo.22820415), in a
+**separate Zenodo series** from F(s, E₀) (series DOI
+[10.5281/zenodo.22644247](https://doi.org/10.5281/zenodo.22644247), which
+resolves to the current version). A DOI identifies the archived release for
+citation and preservation; it does not assert certification or an error bound.
+
+!!! warning "No file carries a certified error bound"
+    Every table of v2.0.0 declares `artifact_role = "computed"` and
+    `certification_status = "not_certified"`. The stopping-error bound that
+    v1.0.0 stated was **withdrawn on 2026-09-13**, because its basis is
+    conditional: it rests on an assumed allowance for the residual of the
+    tighter (τ/10) reference solution, which was checked against τ/100 only
+    for H, He, Ne and Na. **This is not a statement that the numbers are
+    wrong**, and v1.0.0
+    ([10.5281/zenodo.22644248](https://doi.org/10.5281/zenodo.22644248)) is not
+    retracted; the same limits apply to the guarantee it stated. The outcome
+    of the 2026-08 grid certification is kept in every file as history
+    (`certification_history`), not as a guarantee.
+
+    What changed against v1.0.0 is what each file says about itself, not the
+    prescription: the files follow schema 2, and $f_x$ and $f_e$ are
+    bit-identical to v1.0.0 for 84 elements. For Ba and Ta the last stored
+    digits differ (at most 1.0e-9 electrons in $f_x$ and 4.0e-9 Å in $f_e$,
+    about a tenth of the SCF stopping budget; their eigenvalues and moments
+    moved as well), because their SCF stopped at a different iterate inside the
+    stopping tolerance when the tables were regenerated.
 
 !!! warning "Erratum for the v1.0.0 archive (2026-08-19)"
     Two sentences inside the archive's own `README.md` are wrong. The archive is
@@ -321,7 +346,7 @@ release
       tables, see [The tables are KLI, not Dirac–Hartree–Fock](#tables-are-kli-not-dhf)
       below.
 
-    Both are corrected in the next dataset-factors release. The same erratum is
+    Both are corrected in the `README.md` of v2.0.0. The same erratum is
     on the
     [release page](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0).
 
@@ -329,10 +354,13 @@ release
 
 86 files `SF_Z<zzz>.json`, one per atom, each with f_x and f_e on the fixed grid
 s_i = 6 i / 7680 (i = 0..7680, 7681 nodes, 0 ≤ s ≤ 6 Å⁻¹), decimal-rounded to
-11 significant digits; radial moments M₂, M₄, M₆, M₈; the prescription; a
-generation-time gate ledger; and provenance (generator commit and a source
-fingerprint). Model `DHFS-KLI-DTM1-dt16-neutral-v1`, schema 1, generated with
-Temari on Julia 1.12.6 (pinned in the archive's `MANIFEST.md`). γ (the
+11 significant digits; radial moments M₂, M₄, M₆, M₈, M₁₀; the prescription; a
+generation-time gate ledger; the file's own status (`artifact_role`,
+`certification_status` and its reason, `certification_history`); and provenance
+(generator commit and a source fingerprint). Model
+`DHFS-KLI-DTM1-dt16-neutral-v1`, schema 2, generated with Temari on Julia 1.12.6
+(pinned in the archive's `MANIFEST.md`). The eigenvalues and the moments above
+the fourth are stored as computed: their accuracy was not assessed. γ (the
 incident-electron relativistic factor) is **not** included in f_e — the same
 first-Born convention as Doyle & Turner (1968) and Peng et al. (1996); the
 crystal-potential code applies γ itself.
@@ -388,34 +416,44 @@ inside the 1e-7 Å release budget, so an accuracy check of your own will pass it
 while in relative terms it is 1.5×10⁻⁹.
 
 ```bash
-tar -xzf temari-factors-v1.0.0.tar.gz && cd temari-factors-v1.0.0
+tar -xzf temari-factors-v2.0.0.tar.gz && cd temari-factors-v2.0.0
 python tools/temari_factors_contract.py . --negative     # exits non-zero on failure
 python tools/temari_factors_contract.py . --values-from ALT --negative   # conformance alone
 ```
 
-(`--values-from` is newer than the v1.0.0 archive; take that copy of
-`temari_factors_contract.py` from the repository until the next data release
-re-packs it.)
-
 ### How far the numbers are trusted
 
 The release budgets are T_comp = 1e-7 electrons (f_x) and T_comp,e = 1e-7 Å
-(f_e). They are **acceptance budgets** — supported by measured differences and
-conservative allocations, not by an a-priori error theorem:
+(f_e). They are **acceptance budgets** — what the numbers were held to,
+supported by measured differences and conservative allocations, **not by an
+error theorem, and no file carries a certified error bound**. What was measured:
 
-- the radial grid dt/16 was certified element by element (density L¹ bound,
-  worst 0.58 × B_grid);
-- the SCF stopping error of every shipped solve was measured against a τ/10
-  reference (worst 0.39 × B_scf);
-- the interpolation-plus-rounding error was measured on sealed midpoints for all
-  86 elements (worst 0.16 × B_repr for f_x, 0.34 × B_repr,e for f_e);
-- the sensitivity to the tested endpoint extensions of the radial grid was
+- the radial grid dt/16 against coarser and finer grids, element by element, in
+  2026-08 (the classification kept in `certification_history` is the outcome of
+  that procedure);
+- the SCF stopping error of every shipped solve against a τ/10 reference (worst
+  0.39 × B_scf for f_x), including an **assumed** 0.10 allowance for the
+  residual of that reference — the assumption on which the withdrawn bound
+  rested;
+- the interpolation-plus-rounding error on sealed midpoints for all 86 elements
+  (worst 0.16 × B_repr for f_x, 0.34 × B_repr,e for f_e);
+- the sensitivity to the tested endpoint extensions of the radial grid,
   ≤ 0.9 % of B_grid (an observed sensitivity, not an infinite-domain bound).
+
+All 86 tables of v2.0.0 were regenerated from an empty cache at a single commit
+and accepted under a rule fixed before the run: structure and identity against
+an inventory frozen beforehand, the quality checks of every table, and the
+difference from the baseline tables within the SCF stopping budget (here zero).
+The shipped bytes are the accepted bytes — the SHA-256 of every table is bound
+to the generation ledger and to the acceptance result. **Acceptance is not an
+error bound.** The archive's `README.md` lists what decided acceptance, what was
+only recorded, and what the acceptance does not show.
 
 **Regeneration of the table bytes is not guaranteed.** The SCF can stop at a
 different iterate between processes (observed sporadically, within the stopping
-tolerance); the released archive bytes and their SHA-256 are canonical. Neutral
-atoms only.
+tolerance; it is why Ba and Ta differ from v1.0.0); the released archive bytes
+and their SHA-256 are canonical. Neutral atoms only — charged species are the
+[separate family below](#factors-ion) and are not derivable from these tables.
 
 #### The tables are KLI, not Dirac–Hartree–Fock { #tables-are-kli-not-dhf }
 
@@ -423,7 +461,13 @@ $f_x$ was compared with the DHF values of OFFV1 (Olukayode et al., 2023) on
 eight elements (maximum relative difference 0.07–0.26 % over 0–6 Å⁻¹, largest
 for the light elements) and, for C, Si, Fe and Au, agrees to 0.03–0.15 %
 relative RMS over s ≤ 2 Å⁻¹ — the level at which the Waasmaier–Kirfel fit
-itself agrees with OFFV1. But the
+itself agrees with OFFV1. For v2.0.0 the comparison was also run, as a report
+and not as an acceptance criterion, for the 85 elements the two tables share
+(He–Rn; OFFV1 starts at He), on the nodes the two grids share exactly: the largest relative
+difference is 1.1 % (He, s = 5 Å⁻¹) and the largest absolute difference 0.043
+electrons (Yb, s = 0.3 Å⁻¹). The two tables come from different models, and the
+comparison does not separate the model difference from the numerical error of
+either table. The
 prescription is exchange-only **in the KLI approximation**, and the one place
 where that shows is $f_e$ as $s \to 0$: against DHF (through Mott–Bethe) the
 shipped $f_e$ is low by up to 2 % for the d block and 4 % for Cr and Cu at
@@ -437,11 +481,73 @@ Krieger et al. (1992) publish for the ten closed-subshell atoms they tabulate.
 $f_x$ is affected at ≤ 0.22 % for every d-block element. The curves and the
 Z sweep are on the [comparison page](comparison.md#fe-s0-deficit).
 
+## Scattering factors of anions — dataset-factors-ion 1.0.0 { #factors-ion }
+
+$f_x(s)$ and $f_e(s)$ for **22 charged species**: the anions N³⁻, O²⁻, P³⁻, S²⁻,
+As³⁻, Se²⁻, Sb³⁻ and Te²⁻, each at the coordination numbers for which
+Alsalman et al. (2024) tabulate an anion radius. Same prescription, s grid (7681
+nodes, 0 ≤ s ≤ 6 Å⁻¹) and interpolation convention as the neutral family, but a
+**separate family with its own version line and its own Zenodo series**: release
+[`dataset-factors-ion-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-ion-v1.0.0),
+version DOI
+[10.5281/zenodo.22820492](https://doi.org/10.5281/zenodo.22820492), series DOI
+[10.5281/zenodo.22820491](https://doi.org/10.5281/zenodo.22820491) (CC-BY-4.0
+for the data, MIT for the bundled loader). The charged species are not derivable
+from the neutral tables.
+
+!!! warning "No file carries a certified error bound"
+    Every table declares `artifact_role = "computed"` and
+    `certification_status = "not_certified"`. An earlier pre-registered
+    certification was **withdrawn on 2026-09-13**: the assumption behind its
+    stopping term was tested directly on all 22 species and failed for every
+    one of them. **This is not a statement that the numbers are wrong.** The
+    classification from the post-hoc reanalysis is kept in every file as
+    history (`certification_history`), not as a guarantee.
+
+Three things are specific to this family; the archive's `README.md` has the
+detail.
+
+1. **The model choice is not an error bar.** Multiply charged anions do not
+   bind as free ions in this prescription. They are stabilised with a Watson
+   sphere — a uniformly charged shell of charge Q at radius R, with R set to
+   that anion radius — which enters the self-consistent field but is **not**
+   part of the scattering source. For O²⁻ at R = 1.40 Å, switching Q between
+   the two values Watson (1958) computed changes the regular part of $f_e$ by
+   16–20 % at small s (one measured example, not a band for every species);
+   above s ≈ 0.5 Å⁻¹ the change falls below 1e-4. The radius and its source
+   are recorded per file in `external_field_spec`.
+2. **Coordination number is part of the species identity.** The same ion at two
+   coordination numbers is two files (`SF_Z<zzz>_<16-hex>.json`, the hex being
+   a digest of the electron configuration and the external field), because the
+   crystallographic site is something the user knows and the table does not.
+3. **$f_e$ is not tabulated as a whole**, because it diverges as s → 0 for any
+   net charge. The files hold the closed-form monopole coefficient C
+   (`monopole_coefficient_A_inv`) and the regular part, which is finite
+   everywhere: $f_e(s) = C/s^2 + f_{e,\mathrm{regular}}(s)$. Do not reconstruct
+   the regular part by subtracting the monopole from a total — near s = 0 both
+   diverge and the difference loses all its digits. `f_e_regular_A` is
+   interpolated like the neutral $f_e$ (cubic in t = s², not-a-knot at both
+   ends), $f_x$ like the neutral $f_x$.
+
+Version 1.0.0 is the first release of this family that fixes what the tables
+describe, the verification the release has passed (bound to the shipped bytes),
+and the terms of use (every table computed, no strict error bound claimed). All
+22 tables were regenerated from an empty cache at a single commit and accepted
+under a rule fixed before the run; **acceptance is not an error bound**, and it
+says nothing about the Watson-sphere model choice. A comparison of $f_x$ of the
+O²⁻ tables with the analytic parametrisation of Waasmaier & Kirfel (1995) was
+run as a diagnostic (largest relative difference about 1.2 % up to s = 2 Å⁻¹;
+3.3 % lower at s = 6 Å⁻¹); it shows where the model sits and is not a
+verification of the numbers. The only earlier public release of this family is
+[`dataset-factors-ion-v0.1.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-ion-v0.1.0)
+(2026-09-09, older external-field numerics, no DOI).
+
 ## Versioning
 
 The datasets and the software carry **independent version lines**. An F(s, E₀)
 dataset release is tagged `dataset-vX.Y.Z`, a scattering-factor dataset release
-`dataset-factors-vX.Y.Z`; a software release is tagged `vX.Y.Z`. They are never
+`dataset-factors-vX.Y.Z` (neutral atoms) or `dataset-factors-ion-vX.Y.Z`
+(charged species); a software release is tagged `vX.Y.Z`. They are never
 mixed in the same release.
 
 A new dataset generation is what the [reproducibility
@@ -467,8 +573,17 @@ For the scattering factors, which are a separate Zenodo series:
 
 > Seto, Y. (2026). *Atomic X-ray and first-Born electron scattering factors
 > f_x(s), f_e(s) for 86 neutral atoms (Z = 1–86), computed with Temari*
-> (Version 1.0.0) \[Data set\]. Zenodo.
-> <https://doi.org/10.5281/zenodo.22644248>
+> (Version 2.0.0) \[Data set\]. Zenodo.
+> <https://doi.org/10.5281/zenodo.22820415>
+
+If the numbers you used came from the v1.0.0 archive, cite
+`10.5281/zenodo.22644248` instead; `10.5281/zenodo.22644247` is the
+version-independent DOI of this series. The anions are a third series:
+
+> Seto, Y. (2026). *X-ray and electron scattering factors for 22
+> Watson-sphere-stabilised anions (N3-, O2-, P3-, S2-, As3-, Se2-, Sb3-, Te2-)
+> computed with Temari* (Version 1.0.0) \[Data set\]. Zenodo.
+> <https://doi.org/10.5281/zenodo.22820492>
 
 **The data is CC-BY-4.0; the bundled loader is MIT.** Attribution may be given
 by link, which is what makes it workable when the tables are embedded in a
@@ -483,6 +598,7 @@ Bote & Salvat (2008) and Bote et al. (2009) as well.
 ## References
 
 - Allen, L. J., D'Alfonso, A. J. & Findlay, S. D. (2015). Modelling the inelastic scattering of fast electrons. *Ultramicroscopy* **151**, 11–22.
+- Alsalman, M. A., Hezam, M. S., Alqahtani, S. M., Baloch, A. A. B. & Alharbi, F. H. (2024). Anions' radii — New data points calibrated to match Shannon's table. *Computational Materials Science* **247**, 113491.
 - Bote, D. & Salvat, F. (2008). Calculations of inner-shell ionization by electron impact with the distorted-wave and plane-wave Born approximations. *Physical Review A* **77**, 042701.
 - Bote, D., Salvat, F., Jablonski, A. & Powell, C. J. (2009). Cross sections for ionization of K, L and M shells of atoms by impact of electrons and positrons with energies up to 1 GeV: Analytical formulas. *Atomic Data and Nuclear Data Tables* **95**, 871–909. Erratum: **97** (2011), 186.
 - Doyle, P. A. & Turner, P. S. (1968). Relativistic Hartree–Fock X-ray and electron scattering factors. *Acta Crystallographica A* **24**, 390–397.
@@ -492,4 +608,5 @@ Bote & Salvat (2008) and Bote et al. (2009) as well.
 - Oxley, M. P. & Allen, L. J. (2000). Atomic scattering factors for K-shell and L-shell ionization by fast electrons. *Acta Crystallographica A* **56**, 470–490.
 - Peng, L.-M., Ren, G., Dudarev, S. L. & Whelan, M. J. (1996). Robust parameterization of elastic and absorptive electron atomic scattering factors. *Acta Crystallographica A* **52**, 257–276.
 - Waasmaier, D. & Kirfel, A. (1995). New analytical scattering-factor functions for free atoms and ions. *Acta Crystallographica A* **51**, 416–431.
+- Watson, R. E. (1958). Analytic Hartree–Fock solutions for O²⁻. *Physical Review* **111**, 1108–1110.
 - Zhang, Z., Lobato, I., Jannis, D., Verbeeck, J., Van Aert, S. & Nellist, P. (2023). Generalised oscillator strength for core-shell electron excitation by fast electrons based on Dirac solutions [Data set]. Zenodo. doi:10.5281/zenodo.7729585

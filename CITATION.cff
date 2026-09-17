@@ -84,19 +84,46 @@ references:
       - family-names: Seto
         given-names: Yusuke
         orcid: "https://orcid.org/0000-0002-5423-2136"
-    version: "1.0.0"
+    version: "2.0.0"
     year: 2026
-    doi: "10.5281/zenodo.22644248"
+    doi: "10.5281/zenodo.22820415"
     license: CC-BY-4.0
     notes: >-
-      dataset-factors v1.0.0, released separately from this software and from the
+      dataset-factors v2.0.0, released separately from this software and from the
       F(s, E0) dataset, under CC-BY-4.0. Cite this version DOI for
-      reproducibility -- it guarantees the files have not changed. This family is
-      its own Zenodo series, concept DOI 10.5281/zenodo.22644247, deliberately
-      separate from the F(s, E0) series so that neither resolves to the other. A
+      reproducibility -- it guarantees the files have not changed; if the numbers
+      you used came from v1.0.0, cite 10.5281/zenodo.22644248 instead. This
+      family is its own Zenodo series, concept DOI 10.5281/zenodo.22644247,
+      deliberately separate from the F(s, E0) series so that neither resolves to
+      the other. No file carries a certified error bound: every table declares
+      itself computed / not_certified, and the stopping-error bound stated for
+      v1.0.0 was withdrawn on 2026-09-13 (not a statement that the numbers are
+      wrong; v1.0.0 is not retracted). A DOI identifies the archived release for
+      citation and preservation; it does not assert certification. A
       byte-identical mirror is attached to the GitHub release
-      dataset-factors-v1.0.0. The archive is self-contained (schema, manifest,
+      dataset-factors-v2.0.0. The archive is self-contained (schema, manifest,
       golden vectors and an executable reference loader).
+  # 260918Cl: 荷電種の散乱因子 (別 family = 別の Zenodo 系列、作者決定 I42)。
+  - type: data
+    title: >-
+      X-ray and electron scattering factors for 22 Watson-sphere-stabilised
+      anions (N3-, O2-, P3-, S2-, As3-, Se2-, Sb3-, Te2-) computed with Temari
+    authors:
+      - family-names: Seto
+        given-names: Yusuke
+        orcid: "https://orcid.org/0000-0002-5423-2136"
+    version: "1.0.0"
+    year: 2026
+    doi: "10.5281/zenodo.22820492"
+    license: CC-BY-4.0
+    notes: >-
+      dataset-factors-ion 1.0.0, a separate family from the neutral scattering
+      factors with its own Zenodo series (concept DOI 10.5281/zenodo.22820491).
+      Cite this version DOI for reproducibility. No file carries a certified
+      error bound: every table declares itself computed / not_certified. The
+      Watson-sphere stabilisation is a model choice, not an error bar, and
+      coordination number is part of the species identity. A byte-identical
+      mirror is attached to the GitHub release dataset-factors-ion-v1.0.0.
   # ⚠ 260811Cl 訂正: 題名・巻号・DOI がまとめて誤っていた。
   #   正しくは ADNDT **95**(6), 871-909 (2009), doi 10.1016/j.adt.2009.08.001 (出版社の書誌で照合)。
   #   旧記載の doi 10.1016/j.adt.2010.06.001 は**バリウム同位体の発見**という無関係な論文を指す。

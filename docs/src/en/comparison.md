@@ -20,7 +20,7 @@ Three quantities, from the two published datasets:
 | --- | --- | --- | --- |
 | X-ray scattering factor $f_x(s)$ | dataset-factors v1.0.0 | OFFV1 (Olukayode et al., 2023); Waasmaier & Kirfel (1995); Cromer & Mann (1968) | one computed table, two fits |
 | Electron scattering factor $f_e(s)$ | dataset-factors v1.0.0 | OFFV1 through Mott–Bethe; Kirkland (2010); Peng et al. (1996) | one computed table, two fits |
-| Ionization form factor $F(s, E_0)$ | dataset v5.0.0 | Oxley & Allen (2000); the µSTEM shape factors (Allen et al., 2015) | two computed shape tables |
+| Ionization form factor $F(s, E_0)$ | dataset v5.0.0 (the version current when this comparison was run) | Oxley & Allen (2000); the µSTEM shape factors (Allen et al., 2015) | two computed shape tables |
 
 Two things to hold on to before looking at any panel:
 
@@ -203,7 +203,7 @@ the 0.16 % above.
 
 ## 3. Inner-shell ionization form factor F(s) { #f-s }
 
-**Dataset v5.0.0** (κ-resolved Dirac continuum, relaxed core-hole final state)
+**Dataset v5.0.0** (κ-resolved Dirac continuum, relaxed core-hole final state; the version current when this comparison was run — v7.0.0 changed only the nucleus model, see the [Data page](data.md))
 against the two references that exist for this quantity: the tables of Oxley &
 Allen (2000) and the shape factors distributed with the µSTEM code (Allen et
 al., 2015). Both references share a Hartree–Slater atomic potential and a

@@ -1,7 +1,7 @@
 # Temari
 
 [![Documentation](https://img.shields.io/badge/%F0%9F%93%96_Documentation-blue)](https://seto77.github.io/Temari/)
-[![Dataset DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21872050.svg)](https://doi.org/10.5281/zenodo.21872050)
+[![Dataset DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22643468.svg)](https://doi.org/10.5281/zenodo.22643468)
 [![CI](https://github.com/seto77/Temari/actions/workflows/ci.yml/badge.svg)](https://github.com/seto77/Temari/actions/workflows/ci.yml)
 [![Software: MIT](https://img.shields.io/badge/software-MIT-green)](LICENSE)
 [![Data: CC BY 4.0](https://img.shields.io/badge/data-CC--BY--4.0-lightgrey)](licenses/README.md)
@@ -20,8 +20,14 @@ orientation-dependent characteristic X-ray yields; Temari supplies the
 off-diagonal ionization shape factors used by the downstream Bloch-wave
 simulation, and does not perform the occupancy refinement itself. **525
 channels (K, L1–L3, M1–M5), 14,796 rows, s ≤ 16 Å⁻¹**, published as
-[dataset v5.0.0](https://doi.org/10.5281/zenodo.21872050) under CC-BY-4.0, with
+[dataset v7.0.0](https://doi.org/10.5281/zenodo.22643468) under CC-BY-4.0, with
 an executable data contract. Using the tables does not require Julia.
+
+> **Erratum (2026-09-07).** Datasets v4.0.0 through v6.0.0 described their
+> nucleus as a finite sphere but were computed with a point nucleus. v7.0.0 is
+> the first release computed with a finite nucleus throughout, and ships a
+> point-nucleus control set so the effect can be recomputed. Details on the
+> [Data page](https://seto77.github.io/Temari/data/).
 
 > F(s, E₀) is a normalized **shape**, not an absolute cross section. The
 > absolute σ(E₀) shipped beside it comes from the Bote–Salvat analytic
@@ -49,8 +55,8 @@ recorded on the
 
 ![Coverage: 525 channels over Z and subshell](docs/src/assets/figures/coverage.svg)
 
-You do not need to run anything. Dataset v5.0.0 is mirrored byte-identically at
-[release `dataset-v5.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-v5.0.0).
+You do not need to run anything. Dataset v7.0.0 is mirrored byte-identically at
+[release `dataset-v7.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-v7.0.0).
 
 - **Is my element and edge in there?** —
   [`tables/channels.csv`](tables/channels.csv), 525 rows, rendered as a
@@ -65,7 +71,7 @@ You do not need to run anything. Dataset v5.0.0 is mirrored byte-identically at
   import sys; sys.path.insert(0, "tools")
   from temari_contract import load_channel, f_at
   value, bound, region = f_at(load_channel("F_K_Z26.json"), 200.0, 1.25)
-  # -> 0.6877601086513626, 0.0, 'tabulated'
+  # -> 0.6877590692528429, 0.0, 'tabulated'   (v7.0.0 table)
   ```
 
   `region` says which side of `s_cert` you are on, so you never test it
@@ -76,13 +82,31 @@ You do not need to run anything. Dataset v5.0.0 is mirrored byte-identically at
 The **atomic scattering factors f_x(s), f_e(s)** are published too — 86 neutral
 atoms (Z = 1–86), s ≤ 6 Å⁻¹ on 7681 nodes, full-Dirac SCF with the
 exchange-only KLI approximation to the optimized effective potential — as a
-separate dataset family, **dataset-factors v1.0.0** (CC-BY-4.0), at
-[release `dataset-factors-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0)
-(no DOI yet). Two things will bite you: the s grid is not stored (reconstruct
+separate dataset family, **dataset-factors v2.0.0** (CC-BY-4.0), at
+[release `dataset-factors-v2.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v2.0.0)
+and on Zenodo as [10.5281/zenodo.22820415](https://doi.org/10.5281/zenodo.22820415).
+No file carries a certified error bound: every table declares itself `computed`,
+and the stopping-error bound stated for v1.0.0 was withdrawn (this is not a
+statement that the numbers are wrong).
+Two things will bite you: the s grid is not stored (reconstruct
 s_i = 6i/7680 and check its SHA-256), and the interpolation convention is part
 of the contract (f_x: cubic in s, clamped left / not-a-knot right; f_e: cubic in
 t = s²). The archive ships an executable contract that checks both. Details on
 the [Data page](https://seto77.github.io/Temari/data/#factors).
+
+A third family, **dataset-factors-ion 1.0.0** (the same two factors for 22
+multiply charged anions stabilized by a Watson sphere), is at
+[release `dataset-factors-ion-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-ion-v1.0.0)
+and on Zenodo as [10.5281/zenodo.22820492](https://doi.org/10.5281/zenodo.22820492),
+in its own Zenodo series. It is published as **computed, not certified**: every
+file says `artifact_role = "computed"`, and no file carries a certified error
+bound. 1.0.0 fixes what the tables describe, the verification the release has
+passed and the terms of use; it does not mean "certified". The Watson sphere is
+a model choice, not an error bar, and coordination number is part of the species
+identity. Details on the
+[Data page](https://seto77.github.io/Temari/data/#factors-ion). The earlier
+[`dataset-factors-ion-v0.1.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-ion-v0.1.0)
+(older external-field numerics, no DOI) stays published as it was.
 
 The dataset and the software carry independent version lines and are never
 mixed in the same release.

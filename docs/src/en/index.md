@@ -13,7 +13,7 @@ quantitative STEM-EDX and ALCHEMI need: the normalized off-diagonal shape
 obtained by contracting the mixed dynamic form factor over the ejected
 electron's energy and direction, for two Bloch waves separated by
 $K = 4\pi s\,a_0$ — the off-diagonal response needed to model how an EDX map
-depends on crystal orientation. Dataset v5.0.0 covers 525 channels
+depends on crystal orientation. Dataset v7.0.0 covers 525 channels
 from K to M5, carries a DOI, and fixes its conventions, its golden vectors and
 an executable data contract. Using the published tables does not require Julia.
 
@@ -37,7 +37,9 @@ they are reproducible and why the family can grow.
     - **Inner-shell ionization form factors** $F(s, E_0)$ for STEM-EDX —
       525 channels (K through M5), with a DOI.
     - **X-ray and electron atomic scattering factors** $f_x(s)$, $f_e(s)$ for
-      the neutral atoms Z = 1–86 (dataset-factors v1.0.0).
+      the neutral atoms Z = 1–86 (dataset-factors v2.0.0), and for 22
+      Watson-sphere-stabilised anions (dataset-factors-ion 1.0.0). Both are
+      published as computed values; no file carries a certified error bound.
 
     See **[Data](data.md)** — and read its contract before using the numbers.
 

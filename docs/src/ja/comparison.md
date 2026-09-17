@@ -20,7 +20,7 @@ description: >-
 | --- | --- | --- | --- |
 | X 線散乱因子 $f_x(s)$ | dataset-factors v1.0.0 | OFFV1 (Olukayode et al., 2023)、Waasmaier & Kirfel (1995)、Cromer & Mann (1968) | 計算表 1 つ、フィット 2 つ |
 | 電子散乱因子 $f_e(s)$ | dataset-factors v1.0.0 | OFFV1 から Mott–Bethe 経由、Kirkland (2010)、Peng et al. (1996) | 計算表 1 つ、フィット 2 つ |
-| イオン化形状因子 $F(s, E_0)$ | dataset v5.0.0 | Oxley & Allen (2000)、µSTEM の形状因子 (Allen et al., 2015) | 計算された形状表 2 つ |
+| イオン化形状因子 $F(s, E_0)$ | dataset v5.0.0 (比較を行った時点の現行版) | Oxley & Allen (2000)、µSTEM の形状因子 (Allen et al., 2015) | 計算された形状表 2 つ |
 
 パネルを見る前に、押さえておきたいことが 2 つあります。
 
@@ -191,7 +191,7 @@ $s \ge 0.4$ Å⁻¹ で d ブロックが 0.16 % 以内・$s \ge 0.5$ から先�
 ## 3. 内殻イオン化形状因子 F(s) { #f-s }
 
 **Dataset v5.0.0** (κ 分解 Dirac 連続状態、緩和 core-hole (内殻空孔を開けて再収束した
-イオン) の終状態) を、この量について存在する 2 つの参照 — Oxley & Allen (2000) の表と、
+イオン) の終状態。比較を行った時点の現行版で、v7.0.0 で変わったのは核の模型だけです — [Data ページ](data.md)) を、この量について存在する 2 つの参照 — Oxley & Allen (2000) の表と、
 µSTEM コードに同梱して配布される形状因子 (Allen et al., 2015) — と比べます。両参照は
 Hartree–Slater 原子ポテンシャルと、放出電子の 1 成分 (Schrödinger) 連続波を共有して
 います。

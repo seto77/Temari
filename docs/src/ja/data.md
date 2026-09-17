@@ -1,19 +1,20 @@
 ---
 description: >-
-  公開している 2 つのデータセットの入手先と、その数値に付いてくる仕様。F は符号付き、運動量の規約は q = 4πs、各行の s_cert より先は物理ではなく埋め草です。
+  公開しているデータセットの入手先と、その数値に付いてくる仕様。F は符号付き、運動量の規約は q = 4πs、各行の s_cert より先は物理ではなく埋め草です。
 ---
 
 # データ
 
-2 つのデータセットを、**それ自体として独立に公開**しています。それぞれが独自の版の
+3 つのデータセットを、**それ自体として独立に公開**しています。それぞれが独自の版の
 系列を持ちます。何かを実行する必要はなく、Julia も要りません。
 
 | | データセット | 版 | 入手先 |
 |---|---|---|---|
 | **F(s, E₀)** | STEM-EDX 用の内殻イオン化形状因子、525 チャネル | dataset **7.0.0** | Zenodo [10.5281/zenodo.22643468](https://doi.org/10.5281/zenodo.22643468) · GitHub release [`dataset-v7.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-v7.0.0) |
-| **f_x(s), f_e(s)** | X 線・電子線の原子散乱因子、中性原子 86 種 | dataset-factors **1.0.0** | Zenodo [10.5281/zenodo.22644248](https://doi.org/10.5281/zenodo.22644248) · GitHub release [`dataset-factors-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0) — [後述](#factors) |
+| **f_x(s), f_e(s)** | X 線・電子線の原子散乱因子、中性原子 86 種 | dataset-factors **2.0.0** | Zenodo [10.5281/zenodo.22820415](https://doi.org/10.5281/zenodo.22820415) · GitHub release [`dataset-factors-v2.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v2.0.0) — [後述](#factors) |
+| **f_x(s), f_e(s)、陰イオン** | 同じ 2 つの散乱因子、Watson 球で安定化した陰イオン 22 種 | dataset-factors-ion **1.0.0** | Zenodo [10.5281/zenodo.22820492](https://doi.org/10.5281/zenodo.22820492) · GitHub release [`dataset-factors-ion-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-ion-v1.0.0) — [後述](#factors-ion) |
 
-この 2 つは、別の系統の数値です。$F(s, E_0)$ は、ある元素・ある副殻・あるビーム
+F と散乱因子は、別の系統の数値です。$F(s, E_0)$ は、ある元素・ある副殻・あるビーム
 エネルギーについて、*内殻イオン化*が運動量移行にどう分布するかを記述するもので、
 STEM-EDX や ALCHEMI のシミュレーションが必要とする量です。$f_x(s)$ と $f_e(s)$ は、
 X 線結晶学・電子線結晶学で普通に使われる*弾性*散乱の原子散乱因子 —
@@ -269,18 +270,39 @@ E₀ 方向の補間も、出荷している利用側と同じ座標で行われ
 
 何が・どのように検査されているかは[検証](verification.md)を参照してください。
 
-## 原子散乱因子 f_x(s), f_e(s) — dataset-factors v1.0.0 { #factors }
+## 原子散乱因子 f_x(s), f_e(s) — dataset-factors v2.0.0 { #factors }
 
 **中性原子 86 種 (Z = 1–86)** の X 線原子散乱因子 $f_x(s)$ [electrons] と
 第一 Born の電子散乱因子 $f_e(s)$ [Å] を、KLI 交換 — Krieger et al. (1992) の
 最適化有効ポテンシャル (OEP) に対する交換のみの KLI 近似 — を用いた完全相対論的
 (Dirac) な自己無撞着場 (SCF) から求めたものです。これは F(s, E₀) とは*別のデータセット
 系統*で、E₀ 軸を持たず、独立した版の系列と独自の release
-[`dataset-factors-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0)
-(データは CC-BY-4.0、同梱 loader は MIT) を持ちます。独自の DOI
-[10.5281/zenodo.22644248](https://doi.org/10.5281/zenodo.22644248) を
-2026-09-07 に発行しました。⚠ これは F(s, E₀) とは**別の Zenodo 系列**であって、
-F の新しい版ではありません。
+[`dataset-factors-v2.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-v2.0.0)
+(データは CC-BY-4.0、同梱 loader は MIT) を持ちます。版 DOI は
+[10.5281/zenodo.22820415](https://doi.org/10.5281/zenodo.22820415) です。
+⚠ これは F(s, E₀) とは**別の Zenodo 系列**です (系列 DOI
+[10.5281/zenodo.22644247](https://doi.org/10.5281/zenodo.22644247)。その時点の
+最新版に解決されます)。DOI は、保存された release を引用と保存のために識別する
+ものであって、認証や誤差上界を主張するものではありません。
+
+!!! warning "誤差上界の保証を持つファイルはありません"
+    v2.0.0 のすべての表は `artifact_role = "computed"` と
+    `certification_status = "not_certified"` を自分で名乗ります。v1.0.0 が述べていた
+    停止誤差の上界は **2026-09-13 に撤回しました**。根拠が条件つきだったためです —
+    より厳しい (τ/10) 参照解の残差に対する**仮定した**余裕に依っており、その仮定を
+    τ/100 と照らして確かめたのは H、He、Ne、Na だけでした。
+    **これは数値が誤っているという表明ではありません**。v1.0.0
+    ([10.5281/zenodo.22644248](https://doi.org/10.5281/zenodo.22644248)) は
+    取り下げていません。v1.0.0 が述べた保証にも同じ限界が当てはまります。
+    2026-08 の格子の認証の結果は、保証としてではなく履歴として、各ファイルの
+    `certification_history` に残しています。
+
+    v1.0.0 から変わったのは、各ファイルが自分について述べる内容であって、処方では
+    ありません。ファイルは schema 2 に従い、$f_x$ と $f_e$ は 84 元素で v1.0.0 と
+    ビット同一です。Ba と Ta は、収録した最後の桁が違います ($f_x$ で最大 1.0e-9
+    electrons、$f_e$ で最大 4.0e-9 Å。SCF の停止の許容の約 10 分の 1 です。固有値と
+    モーメントも動いています)。表を再生成したときに、SCF が停止許容の内側の別の
+    反復で止まったためです。
 
 !!! warning "v1.0.0 アーカイブへの正誤表 (2026-08-19)"
     アーカイブに同梱した `README.md` の中に、いま読むと事実と合わない記述が 2 つあります。
@@ -298,7 +320,7 @@ F の新しい版ではありません。
       後述の [表は KLI であって Dirac–Hartree–Fock ではない](#tables-are-kli-not-dhf)
       を参照してください。
 
-    どちらも次の dataset-factors の release で修正します。同じ正誤表を
+    どちらも v2.0.0 の `README.md` で修正しました。同じ正誤表を
     [release ページ](https://github.com/seto77/Temari/releases/tag/dataset-factors-v1.0.0)
     にも掲載しています。
 
@@ -306,10 +328,12 @@ F の新しい版ではありません。
 
 原子ごとに 1 ファイル、計 86 ファイル `SF_Z<zzz>.json` で、それぞれ固定格子
 s_i = 6 i / 7680 (i = 0..7680、7681 節点、0 ≤ s ≤ 6 Å⁻¹) 上の f_x と f_e を、
-10 進で有効数字 11 桁に丸めて収めています。ほかに動径モーメント M₂、M₄、M₆、M₈、
-処方、生成時のゲート台帳、来歴 (生成器の commit とソース指紋) を持ちます。モデルは
-`DHFS-KLI-DTM1-dt16-neutral-v1`、schema 1、Julia 1.12.6 上の Temari で生成しました
-(アーカイブの `MANIFEST.md` にピン留め)。γ (入射電子の相対論因子) は f_e に
+10 進で有効数字 11 桁に丸めて収めています。ほかに動径モーメント M₂、M₄、M₆、M₈、M₁₀、
+処方、生成時のゲート台帳、ファイル自身の状態 (`artifact_role`、`certification_status` と
+その理由、`certification_history`)、来歴 (生成器の commit とソース指紋) を持ちます。モデルは
+`DHFS-KLI-DTM1-dt16-neutral-v1`、schema 2、Julia 1.12.6 上の Temari で生成しました
+(アーカイブの `MANIFEST.md` にピン留め)。固有値と 4 次より上のモーメントは計算した値を
+そのまま収めたもので、精度は評価していません。γ (入射電子の相対論因子) は f_e に
 **含まれていません** — Doyle & Turner (1968) や Peng et al. (1996) と同じ第一 Born
 の規約で、γ は結晶ポテンシャルのコードが自分で掛けます。
 
@@ -358,38 +382,50 @@ t = s² の変数変換、定義域)。もう 1 つは**同一性**です — �
 精度検査は素通りします — で、相対では 1.5×10⁻⁹ です。
 
 ```bash
-tar -xzf temari-factors-v1.0.0.tar.gz && cd temari-factors-v1.0.0
+tar -xzf temari-factors-v2.0.0.tar.gz && cd temari-factors-v2.0.0
 python tools/temari_factors_contract.py . --negative     # exits non-zero on failure
 python tools/temari_factors_contract.py . --values-from ALT --negative   # 適合だけ
 ```
 
-(`--values-from` は v1.0.0 のアーカイブより新しい機能です。次のデータリリースで
-梱包し直すまでは、`temari_factors_contract.py` はリポジトリのものを使ってください。)
-
 ### 数値はどこまで信じてよいか
 
 リリースの許容は T_comp = 1e-7 electrons (f_x) と T_comp,e = 1e-7 Å (f_e) です。
-これらは**受け入れの許容**です — 測定した差と保守的な配分に支えられたもので、事前の
-誤差定理によるものではありません:
+これらは**受け入れの許容**です — 数値をどこまで抑えたかの目安で、測定した差と保守的な
+配分に支えられたものです。**誤差定理によるものではなく、誤差上界の保証を持つファイルは
+ありません**。測定したものは次のとおりです:
 
-- 動径格子 dt/16 は元素ごとに認証しました (密度の L¹ 上界、最悪 0.58 × B_grid)。
+- 動径格子 dt/16 を、より粗い格子・より細かい格子と、元素ごとに比べました (2026-08。
+  `certification_history` に残した分類はこの手続きの結果です)。
 - 出荷したすべての解について、SCF の停止誤差を τ/10 の参照に対して測定しました
-  (最悪 0.39 × B_scf)。
+  (f_x で最悪 0.39 × B_scf)。この値は、参照解の残差に対する**仮定した** 0.10 の余裕を
+  含みます — 撤回した上界が依っていた仮定です。
 - 補間 + 丸めの誤差を、封印した中点で 86 元素すべてについて測定しました
   (最悪 f_x で 0.16 × B_repr、f_e で 0.34 × B_repr,e)。
 - 試した動径格子の端点延長に対する感度は B_grid の 0.9 % 以下でした
   (観測された感度であって、無限領域の上界ではありません)。
 
+v2.0.0 の 86 表はすべて、単一の commit で空のキャッシュから再生成し、走行の前に固定した
+規則で検収しました: 事前に凍結した目録に対する構造と同一性、各表の品質検査、基準の表との
+差が SCF の停止の許容の内側にあること (今回の差はゼロ) です。出荷したバイト列は検収した
+バイト列です — 各表の SHA-256 を生成の台帳と検収の結果に結び付けています。
+**検収は誤差上界ではありません**。何が合否を決め、何が記録だけで、検収が何を示さないかは、
+アーカイブの `README.md` に書いてあります。
+
 **表のバイト列の再生成は保証しません**。SCF はプロセス間で別の反復で止まることが
-あり (散発的に観測、停止許容の範囲内)、公開したアーカイブのバイト列とその
-SHA-256 が正本です。中性原子のみです。
+あり (散発的に観測、停止許容の範囲内。Ba と Ta が v1.0.0 と違う理由です)、公開した
+アーカイブのバイト列とその SHA-256 が正本です。中性原子のみです — 荷電種は
+[下の別の系統](#factors-ion)で、この表からは導けません。
 
 #### 表は KLI であって Dirac–Hartree–Fock ではない { #tables-are-kli-not-dhf }
 
 $f_x$ は OFFV1 (Olukayode et al., 2023) の DHF 値と 8 元素で比較し (0–6 Å⁻¹ での
 最大相対差 0.07–0.26 %、軽元素で最大)、C、Si、Fe、Au については s ≤ 2 Å⁻¹ で
 相対 RMS 0.03–0.15 % で一致します — これは Waasmaier–Kirfel のフィット自身が
-OFFV1 と一致する水準です。しかし処方は**KLI 近似での**交換のみであり、それが
+OFFV1 と一致する水準です。v2.0.0 では、この比較を 2 つの表に共通する 85 元素
+(He–Rn。OFFV1 は He から始まります) について、2 つの格子が厳密に共有する節点で、検収の基準としてではなく報告として走らせました:
+最大の相対差は 1.1 % (He、s = 5 Å⁻¹)、最大の絶対差は 0.043 electrons (Yb、s = 0.3 Å⁻¹)
+です。2 つの表は別の模型から来ており、この比較は模型の差とどちらかの表の数値誤差とを
+分離しません。処方は**KLI 近似での**交換のみであり、それが
 現れる唯一の場所が $s \to 0$ での $f_e$ です: DHF (Mott–Bethe を通したもの) に
 対して、出荷した $f_e$ は $s = 0.02$ Å⁻¹ で d ブロックでは最大 2 %、Cr と Cu では
 4 % 低く、一方で希ガスでは差がゼロで、$s \ge 0.5$ Å⁻¹ の $f_e$ はすべての元素で
@@ -401,11 +437,61 @@ OFFV1 と一致する水準です。しかし処方は**KLI 近似での**交換
 $f_x$ への影響は、すべての d ブロック元素で 0.22 % 以下です。曲線と Z 掃引は
 [比較ページ](comparison.md#fe-s0-deficit)にあります。
 
+## 陰イオンの散乱因子 — dataset-factors-ion 1.0.0 { #factors-ion }
+
+**荷電種 22 種**の $f_x(s)$ と $f_e(s)$ です。陰イオン N³⁻、O²⁻、P³⁻、S²⁻、As³⁻、Se²⁻、
+Sb³⁻、Te²⁻ を、Alsalman et al. (2024) が陰イオン半径を表にしている配位数ごとに収めて
+います。処方、s 格子 (7681 節点、0 ≤ s ≤ 6 Å⁻¹)、補間の規約は中性の系統と同じですが、
+**独自の版の系列と独自の Zenodo 系列を持つ別の系統**です: release
+[`dataset-factors-ion-v1.0.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-ion-v1.0.0)、
+版 DOI [10.5281/zenodo.22820492](https://doi.org/10.5281/zenodo.22820492)、系列 DOI
+[10.5281/zenodo.22820491](https://doi.org/10.5281/zenodo.22820491)
+(データは CC-BY-4.0、同梱 loader は MIT)。荷電種は中性の表からは導けません。
+
+!!! warning "誤差上界の保証を持つファイルはありません"
+    すべての表は `artifact_role = "computed"` と
+    `certification_status = "not_certified"` を自分で名乗ります。以前の事前登録つきの
+    認証は **2026-09-13 に撤回しました**。停止の項が依っていた仮定を 22 種すべてで
+    直接試したところ、全種で成り立たなかったためです。
+    **これは数値が誤っているという表明ではありません**。事後の再解析による分類は、
+    保証としてではなく履歴として、各ファイルの `certification_history` に残しています。
+
+この系統に固有のことが 3 つあります。詳細はアーカイブの `README.md` にあります。
+
+1. **模型の選択は誤差棒ではありません**。多価の陰イオンは、この処方では自由イオンと
+   しては束縛しません。Watson 球 — 半径 R (上の陰イオン半径) に電荷 Q を一様に載せた
+   球殻 — で安定化しています。球は自己無撞着場には入りますが、散乱源には**含めません**。
+   O²⁻ (R = 1.40 Å) で、Q を Watson (1958) が計算した 2 つの値の間で切り替えると、
+   $f_e$ の正則部は小さい s で 16–20 % 変わります (測った 1 例であって、全種に対する
+   幅ではありません)。s ≈ 0.5 Å⁻¹ より上では変化は 1e-4 未満です。半径とその出典は、
+   ファイルごとに `external_field_spec` に記録しています。
+2. **配位数は種の同一性の一部です**。同じイオンでも配位数が違えば別のファイルです
+   (`SF_Z<zzz>_<16-hex>.json`。16 進の部分は電子配置と外場の要約です)。結晶学的な
+   サイトは利用者が知っていることで、表が知っていることではないからです。
+3. **$f_e$ は全体としては収めていません**。正味の電荷があると s → 0 で発散するためです。
+   ファイルは、閉じた形の単極子の係数 C (`monopole_coefficient_A_inv`) と、どこでも
+   有限な正則部を持ちます: $f_e(s) = C/s^2 + f_{e,\mathrm{regular}}(s)$。全体から単極子を
+   引いて正則部を作り直さないでください — s = 0 の近くでは両方が発散し、差の桁が
+   すべて失われます。`f_e_regular_A` は中性の $f_e$ と同じ補間 (t = s² の 3 次、両端
+   not-a-knot)、$f_x$ は中性の $f_x$ と同じ補間です。
+
+1.0.0 は、この系統で初めて、表が何を記述するか・release が通った検証 (出荷した
+バイト列に結び付けたもの)・利用の規約 (全表 computed、厳密な誤差上界は主張しない) の
+3 つを固定した release です。22 表はすべて、単一の commit で空のキャッシュから再生成し、
+走行の前に固定した規則で検収しました。**検収は誤差上界ではなく**、Watson 球の模型の
+選択については何も述べません。O²⁻ の表の $f_x$ を Waasmaier & Kirfel (1995) の解析的な
+パラメータ化と比べる診断も走らせました (最大の相対差は s = 2 Å⁻¹ までで約 1.2 %、
+s = 6 Å⁻¹ では 3.3 % 低い)。これは模型がどこに位置するかを示すもので、数値の検証では
+ありません。この系統でこれより前に公開した release は
+[`dataset-factors-ion-v0.1.0`](https://github.com/seto77/Temari/releases/tag/dataset-factors-ion-v0.1.0)
+(2026-09-09、外場の旧い数値処理、DOI なし) だけです。
+
 ## 版管理
 
 データセットとソフトウェアは**独立した版の系列**を持ちます。F(s, E₀) データセットの
 release は `dataset-vX.Y.Z`、散乱因子データセットの release は
-`dataset-factors-vX.Y.Z`、ソフトウェアの release は `vX.Y.Z` とタグ付けします。
+`dataset-factors-vX.Y.Z` (中性原子) と `dataset-factors-ion-vX.Y.Z` (荷電種)、
+ソフトウェアの release は `vX.Y.Z` とタグ付けします。
 同じ release に混ぜることはありません。
 
 新しいデータセット世代の生成は、[再現性の規律](reproducibility.md)が「宣言すべき
@@ -430,8 +516,17 @@ DOI で、その時点の最新版に解決されます。これが欲しいの�
 
 > Seto, Y. (2026). *Atomic X-ray and first-Born electron scattering factors
 > f_x(s), f_e(s) for 86 neutral atoms (Z = 1–86), computed with Temari*
-> (Version 1.0.0) \[Data set\]. Zenodo.
-> <https://doi.org/10.5281/zenodo.22644248>
+> (Version 2.0.0) \[Data set\]. Zenodo.
+> <https://doi.org/10.5281/zenodo.22820415>
+
+使った数値が v1.0.0 のアーカイブのものなら、代わりに `10.5281/zenodo.22644248` を
+引用してください。`10.5281/zenodo.22644247` はこの系列の、版に依存しない DOI です。
+陰イオンは 3 つめの系列です:
+
+> Seto, Y. (2026). *X-ray and electron scattering factors for 22
+> Watson-sphere-stabilised anions (N3-, O2-, P3-, S2-, As3-, Se2-, Sb3-, Te2-)
+> computed with Temari* (Version 1.0.0) \[Data set\]. Zenodo.
+> <https://doi.org/10.5281/zenodo.22820492>
 
 **データは CC-BY-4.0 で同梱 loader は MIT です**。帰属表示はリンクで構いません。
 表をファイルとしてではなくバイナリリソースに埋め込んで配る場合でも運用できるのは
@@ -445,6 +540,7 @@ Bote et al. (2009) も引用してください。
 ## 参考文献
 
 - Allen, L. J., D'Alfonso, A. J. & Findlay, S. D. (2015). Modelling the inelastic scattering of fast electrons. *Ultramicroscopy* **151**, 11–22.
+- Alsalman, M. A., Hezam, M. S., Alqahtani, S. M., Baloch, A. A. B. & Alharbi, F. H. (2024). Anions' radii — New data points calibrated to match Shannon's table. *Computational Materials Science* **247**, 113491.
 - Bote, D. & Salvat, F. (2008). Calculations of inner-shell ionization by electron impact with the distorted-wave and plane-wave Born approximations. *Physical Review A* **77**, 042701.
 - Bote, D., Salvat, F., Jablonski, A. & Powell, C. J. (2009). Cross sections for ionization of K, L and M shells of atoms by impact of electrons and positrons with energies up to 1 GeV: Analytical formulas. *Atomic Data and Nuclear Data Tables* **95**, 871–909. Erratum: **97** (2011), 186.
 - Doyle, P. A. & Turner, P. S. (1968). Relativistic Hartree–Fock X-ray and electron scattering factors. *Acta Crystallographica A* **24**, 390–397.
@@ -454,4 +550,5 @@ Bote et al. (2009) も引用してください。
 - Oxley, M. P. & Allen, L. J. (2000). Atomic scattering factors for K-shell and L-shell ionization by fast electrons. *Acta Crystallographica A* **56**, 470–490.
 - Peng, L.-M., Ren, G., Dudarev, S. L. & Whelan, M. J. (1996). Robust parameterization of elastic and absorptive electron atomic scattering factors. *Acta Crystallographica A* **52**, 257–276.
 - Waasmaier, D. & Kirfel, A. (1995). New analytical scattering-factor functions for free atoms and ions. *Acta Crystallographica A* **51**, 416–431.
+- Watson, R. E. (1958). Analytic Hartree–Fock solutions for O²⁻. *Physical Review* **111**, 1108–1110.
 - Zhang, Z., Lobato, I., Jannis, D., Verbeeck, J., Van Aert, S. & Nellist, P. (2023). Generalised oscillator strength for core-shell electron excitation by fast electrons based on Dirac solutions [Data set]. Zenodo. doi:10.5281/zenodo.7729585

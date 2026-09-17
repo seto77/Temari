@@ -56,13 +56,124 @@
     },
     "dataset_version": {
       "type": "string",
-      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-dev)?$",
+      "pattern": "^((0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)|0\\.0\\.0-dev)$",
       "description": "Semantic version of the DATA (dataset-factors family), independent of the software version and of the F(s,E0) dataset. '0.0.0-dev' means a prescription or grid outside the shipping contract and MUST NOT be packed for release."
     },
     "artifact_role": {
       "type": "string",
-      "enum": ["certified", "computed", "control"],
-      "description": "Which loader entry point may read this table. 'certified' is the audited shipping table read by the ordinary entry point; 'computed' was produced by the same prescription but has NOT been certified, and only the research entry point reads it; 'control' is a comparison artifact (e.g. the point-nucleus B set) that the ordinary entry point must refuse. REQUIRED from schema v2 onward. Schema v1 files predate the field: a v1 file without it is read as 'certified', which is why the field is required here rather than defaulted -- a v2 file that omitted it would otherwise claim certification silently."
+      "enum": [
+        "certified",
+        "computed",
+        "control"
+      ],
+      "description": "Which loader entry point may read this table. From the 2026-09-14 generation onward every shipping table is 'computed' (author decisions I35 / I36: the stopping-error bound claim was withdrawn, so no table carries a certified error bound), and the ordinary entry point reads a table only when it belongs to a release listed in the loader's trusted release registry (author decision I43), never on the strength of this field alone. 'certified' stays in the enum only for tables generated before 2026-09-14 (ion v0.3.0 / v0.4.0); a current loader does not treat that self-declaration as certification. 'control' is a comparison artifact (e.g. the point-nucleus B set) that the ordinary entry point must refuse. REQUIRED from schema v2 onward, rather than defaulted, so that a v2 file cannot claim a role silently. Schema v1 files predate the field, and a current loader does not read a v1 file as certified either."
+    },
+    "certification_status_reason": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Why the table has the certification_status it has (from the 2026-09-14 generation onward). For 'not_certified' it states that the stopping-error bound claim was withdrawn (author decision I34, 2026-09-13) and that no table carries a certified error bound."
+    },
+    "certification_history": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "series",
+        "key",
+        "classification",
+        "raw_status",
+        "rule",
+        "record",
+        "meaning"
+      ],
+      "properties": {
+        "series": {
+          "type": "string",
+          "enum": [
+            "neutral",
+            "ion_series2"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "certified",
+            "uncertifiable_low_signal",
+            "uncertifiable",
+            "model_violated",
+            "box_violated",
+            "uncertifiable_scf",
+            "tool_error"
+          ]
+        },
+        "raw_status": {
+          "type": "string",
+          "enum": [
+            "certified",
+            "uncertifiable_low_signal",
+            "uncertifiable",
+            "model_violated",
+            "box_violated",
+            "uncertifiable_scf",
+            "tool_error"
+          ]
+        },
+        "rule": {
+          "type": "string"
+        },
+        "record": {
+          "type": "string"
+        },
+        "meaning": {
+          "type": "string"
+        },
+        "override": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "from",
+            "to",
+            "decision"
+          ],
+          "properties": {
+            "from": {
+              "type": "string"
+            },
+            "to": {
+              "type": "string"
+            },
+            "decision": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "description": "Provenance of the earlier classification of this species (from the 2026-09-14 generation onward), or null for a table outside both shipping families. classification is the value the machine-readable record assigned after a post-hoc reanalysis with supplementary measurements and rule changes (author decision I37); raw_status is the verdict in the run record before any author override, and override names the author decision that changed it. It is kept for provenance and is NOT a certification: a consumer must not read classification = 'certified' as a current guarantee."
+    },
+    "certification_status": {
+      "type": "string",
+      "enum": [
+        "not_certified",
+        "certified",
+        "uncertifiable_low_signal",
+        "uncertifiable",
+        "model_violated",
+        "box_violated",
+        "uncertifiable_scf",
+        "tool_error",
+        "not_a_shipping_species"
+      ],
+      "description": "The CURRENT certification state of this table. From the 2026-09-14 generation onward every shipping table has 'not_certified' together with certification_status_reason and certification_history (author decisions I35 / I36); the classification an earlier post-hoc reanalysis returned (certified, uncertifiable_low_signal, ...) is kept in certification_history.classification as provenance and is not a certification. The other values appear only in tables generated from 2026-09-12 to 2026-09-13 (author decision I12): there the field was the classification the pre-registered grid/stopping/box certification returned, 'certified' was the only value that could accompany artifact_role = 'certified', and every other value meant the registered proof could not decide for that species (NOT a statement that the numbers are wrong). 'not_a_shipping_species' marks a table that is outside both shipping families. Schema v2 files generated before 2026-09-12 predate the field; a reader that finds artifact_role = 'certified' without this field must refuse it."
+    },
+    "certification_record_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "sha256 of the machine-readable certification record (src/certification_status.json in the source repository) that decided artifact_role and certification_status for this table. REQUIRED from the 2026-09-12 generation onward. A consumer that has the record must compare this digest with it: the field names the evidence, and naming it is not the same as being bound to it."
     },
     "model_id": {
       "type": "string",
@@ -270,7 +381,8 @@
         "applies_to": {
           "const": [
             "f_x",
-            "f_e_A"
+            "f_e_A",
+            "f_e_regular_A"
           ]
         },
         "rule": {
@@ -301,7 +413,11 @@
         },
         "f_e_A": {
           "type": "string",
-          "pattern": "t = s\\^2|t_i = s_i\\^2"
+          "enum": [
+            "t_i = s_i^2 (non-uniform; do NOT replace by a uniform t grid); unique C^2 not-a-knot cubic in t at both ends through (t_i, f_e_i); evaluate at t = s^2 (route D)",
+            "DO NOT interpolate this array for a charged species: element 0 is null (f_e diverges as K^-2 at s = 0) and the array is provided for checking, not for evaluation. Interpolate f_e_regular_A instead, under the same rule the neutral f_e uses, and add the closed-form monopole: f_e(s) = monopole_coefficient_A_inv/s^2 + f_e_regular(s)."
+          ],
+          "description": "How f_e_A may be interpolated. Two texts are allowed and they are NOT interchangeable: the first applies to a neutral species, the second forbids interpolating the array for a charged species (element 0 is null) and points at f_e_regular_A instead.  (260912Cl: the v1-era `pattern` was dropped — it matched only the neutral wording, so every charged table failed it; the two-entry enum above is strictly stronger.)"
         },
         "domain": {
           "type": "string"
@@ -419,18 +535,24 @@
       "type": "object",
       "required": [
         "G0_cfg_matches_recipe",
-        "G0_neutral",
+        "G0_configuration",
+        "G0_electron_count",
+        "G0_external_field",
         "G0_s_grid_sha256",
         "G1_scf_converged",
         "G2_deficit_vs_mott_bethe",
+        "G2_monopole_closed_form",
+        "G2_monopole_plus_regular",
         "G3_small_s_expansion",
+        "G3_truncation_budget",
         "G4_sanity",
         "G5_normalization_bias"
       ],
-      "description": "Generation-time gate ledger: every gate with value, threshold, rule and pass. A shipped file has pass == true everywhere (the generator refuses to write otherwise)."
+      "description": "Generation-time gate ledger: every gate with value, threshold, rule and pass. A shipped file has pass == true everywhere (the generator refuses to write otherwise).  REQUIRED set is what both families emit; a charged species additionally carries the G6_* bound-subshell gates."
     },
     "gates_version": {
-      "const": 1
+      "const": 2,
+      "description": "Version of the gate ledger. v2 tables carry 2 (the G0 set became configuration / electron count / external field, and the G2 monopole gates and G3 truncation budget were added)."
     },
     "budget": {
       "type": "object",
@@ -492,5 +614,102 @@
       ],
       "description": "Uncertainty from the choice of model rather than from numerics, or null when the species has no model knobs. For a species stabilised by an external field the shell charge Q and radius R are conventions taken from ionic-radius tables, and the low-s values depend on them far more than on any numerical tolerance; certified_domain_s_min_A_inv records which domain is to be certified, which is not a claim that certification has been run."
     }
-  }
+  },
+  "allOf": [
+    {
+      "description": "260914 (review of step 4b): the requirements are tied to the dataset version, not to the table's own status claim. Every version except 0.0.0-dev and the legacy ion versions 0.1.0 to 0.4.0 (which predate these fields) must be computed / not_certified and carry the reason, the history and the record digest - including ion 1.0.0, neutral 2.0.0 (author decisions I40 / I45) and a later 0.x.y such as 0.5.0 (revised 260914 after the confirmation round: the exemption used to cover every 0.x.y).",
+      "if": {
+        "properties": {
+          "dataset_version": {
+            "not": {
+              "enum": [
+                "0.0.0-dev",
+                "0.1.0",
+                "0.2.0",
+                "0.3.0",
+                "0.4.0"
+              ]
+            }
+          }
+        },
+        "required": [
+          "dataset_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "certification_status",
+          "certification_status_reason",
+          "certification_history",
+          "certification_record_sha256"
+        ],
+        "properties": {
+          "certification_status": {
+            "const": "not_certified"
+          },
+          "artifact_role": {
+            "const": "computed"
+          },
+          "certification_history": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "description": "260914: a development table (0.0.0-dev) written by the current generator is computed / not_a_shipping_species with a reason and the record digest.",
+      "if": {
+        "properties": {
+          "dataset_version": {
+            "const": "0.0.0-dev"
+          }
+        },
+        "required": [
+          "dataset_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "certification_status",
+          "certification_status_reason",
+          "certification_record_sha256"
+        ],
+        "properties": {
+          "certification_status": {
+            "const": "not_a_shipping_species"
+          },
+          "artifact_role": {
+            "const": "computed"
+          }
+        }
+      }
+    },
+    {
+      "description": "From the 2026-09-14 generation onward (author decisions I35 / I36): a table whose certification_status is 'not_certified' is 'computed' and must carry the reason and the history of the earlier classification.",
+      "if": {
+        "properties": {
+          "certification_status": {
+            "const": "not_certified"
+          }
+        },
+        "required": [
+          "certification_status"
+        ]
+      },
+      "then": {
+        "required": [
+          "certification_status_reason",
+          "certification_history"
+        ],
+        "properties": {
+          "artifact_role": {
+            "const": "computed"
+          },
+          "certification_history": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  ]
 }

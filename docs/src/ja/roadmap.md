@@ -34,12 +34,12 @@ description: >-
 
 | 出口 | 量 | コマンド | 状態 |
 | --- | --- | --- | --- |
-| EDX | $F(s, E_0)$、K, L1–L3, M1–M5 | `<Z> <channel> <E0>` | 出荷中 (dataset v5.0.0) |
+| EDX | $F(s, E_0)$、K, L1–L3, M1–M5 | `<Z> <channel> <E0>` | 出荷中 (dataset v7.0.0) |
 | EELS | 内殻損失 $\mathrm{d}\sigma/\mathrm{d}\Delta E$ と、阻止能への内殻の寄与 | `edge` | done |
 | GOS | $\mathrm{d}f/\mathrm{d}\Delta E(Q)$、Bethe 曲面 | `gos` | done |
 | 弾性位相 | 中性原子の静的場での $\delta_l$ | `phase` | done |
 | Mott 弾性 | $\mathrm{d}\sigma/\mathrm{d}\Omega$、$\sigma_\text{el}$、$\sigma_\text{tr}$、Sherman 関数 | `mott` | done |
-| 散乱因子 | $f_x(s)$、$f_e(s)$ | `fx` | 出荷中 (dataset-factors v1.0.0) |
+| 散乱因子 | $f_x(s)$、$f_e(s)$ | `fx` | 出荷中 (dataset-factors v2.0.0。陰イオンは dataset-factors-ion 1.0.0) |
 
 ## 既に計算して捨てていたもの { #already-computed-and-thrown-away }
 

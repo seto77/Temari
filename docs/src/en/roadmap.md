@@ -37,12 +37,12 @@ Six exits are implemented. The rest of this page is what remains.
 
 | Exit | Quantity | Command | Status |
 | --- | --- | --- | --- |
-| EDX | $F(s, E_0)$, K, L1–L3, M1–M5 | `<Z> <channel> <E0>` | shipping (dataset v5.0.0) |
+| EDX | $F(s, E_0)$, K, L1–L3, M1–M5 | `<Z> <channel> <E0>` | shipping (dataset v7.0.0) |
 | EELS | core-loss $\mathrm{d}\sigma/\mathrm{d}\Delta E$ and the inner-shell stopping-power contribution | `edge` | done |
 | GOS | $\mathrm{d}f/\mathrm{d}\Delta E(Q)$, the Bethe surface | `gos` | done |
 | Elastic phases | $\delta_l$ in the neutral atom's static field | `phase` | done |
 | Mott elastic | $\mathrm{d}\sigma/\mathrm{d}\Omega$, $\sigma_\text{el}$, $\sigma_\text{tr}$, Sherman function | `mott` | done |
-| Scattering factors | $f_x(s)$, $f_e(s)$ | `fx` | shipping (dataset-factors v1.0.0) |
+| Scattering factors | $f_x(s)$, $f_e(s)$ | `fx` | shipping (dataset-factors v2.0.0; anions: dataset-factors-ion 1.0.0) |
 
 ## Already computed and thrown away
 
