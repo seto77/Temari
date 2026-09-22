@@ -1,0 +1,7 @@
+{
+ "by_exit": {},
+ "default": 1e-12,
+ "note": "s = max(10 x max scaled spread over 5 conditions vs Julia 1.11.9 threads 4, 1e-12); docs/notes/lc_e3_golden_plan_2026-09-22.md section 3.1",
+ "rule": "scaled",
+ "tolerance_version": 1
+}

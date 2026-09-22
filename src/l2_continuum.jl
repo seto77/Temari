@@ -79,6 +79,55 @@ const ATOMIC_A = [
 "一様帯電球の核半径 [a0] (1 a0 = 52917.72109 fm)"
 rnuc_a0(z::Int) = 1.2 * ATOMIC_A[z]^(1.0 / 3.0) / 52917.7210903
 
+"260829Cl: κ 分解 Dirac 経路用の一様帯電球 `NucleusSpec` (半径の正本 = `ATOMIC_A`)"
+# ⚠⚠ 260830Cl (B7、Sol 指摘): `rnuc_a0` は**旧 scalar-relativistic `RelCont` と共有**している。
+#   次世代 (dataset F v7) の半径を実験電荷半径にするとき、ここを**置き換えてはいけない** —
+#   dataset F v3 系の値まで動く。半径の出所は `NUCLEUS_RADIUS_SOURCE` で明示的に選び、
+#   旧 formula 関数 `rnuc_a0` は legacy 用に**凍結**する。
+"""半径の出所 (作者決定 S1a = 実験電荷半径)。⚠ `:experimental_rms` は**表がまだ無い**ので
+未実装 — 呼ぶと fail-closed で落ちる (黙って formula へ落ちない)。
+
+  :formula_1p2A13   R = 1.2·A^(1/3) fm、A = ATOMIC_A[Z]  (監査 1 と legacy が使った式)
+  :experimental_rms R = √(5/3)·r_rms、r_rms は実験電荷半径の表から (S1a。⚠ 未実装)
+"""
+const NUCLEUS_RADIUS_SOURCES = (:formula_1p2A13, :experimental_rms)
+# ⚠ RMS_TO_SPHERE と実験半径の解決器は `l1_nucleus_radius.jl` へ移した (260830Cl)
+
+"""Z と半径の出所から `NucleusSpec` を作る (来歴つき)。⚠ **v7 生成経路はこれだけを使う** —
+`rnuc_a0` を直接呼ぶ経路は legacy (`RelCont`) 用に凍結。"""
+function uniform_sphere_nucleus(z::Int; source::Symbol=:formula_1p2A13)
+    source in NUCLEUS_RADIUS_SOURCES ||
+        error("nucleus radius source は $(NUCLEUS_RADIUS_SOURCES) のいずれか ($source)")
+    if source === :formula_1p2A13
+        return NucleusSpec(:uniform_sphere; radius_a0=rnuc_a0(z),
+                           radius_source="R = 1.2*A^(1/3) fm, A = ATOMIC_A[Z] (CIAAW rounded, src/l2_continuum.jl)")
+    end
+    # :experimental_rms — 実験電荷半径から (作者決定 S1a)。⚠ Tc/Pm/At は published な半径が
+    #   無いので式へ落ちる。**明示的に許可**し、来歴 (source_class) に残す
+    e = element_sphere_radius(z; allow_formula_fallback=true)
+    # ⚠ 260830Cl (Sol 2 巡目): 先頭の「R = sqrt(5/3)*r_rms」は**式へ落ちた元素では嘘**だった
+    #   (Tc/Pm/At は外縁半径そのものなので換算しない)。分類で言い分けること
+    src = (e.source_class === :formula ?
+           "R = 1.2*A^(1/3) fm (no published charge radius; already an outer radius, no sqrt(5/3))" :
+           "r_rms from IAEA (Angeli-Marinova); R = sqrt(5/3)*r_rms") *
+          "; class=$(e.source_class); policy=$(e.policy)" *
+          (isempty(e.note) ? "" : "; $(e.note)")
+    return NucleusSpec(:uniform_sphere; radius_a0=e.R_a0, radius_source=src)
+end
+"""半径の出所 → model_id の接尾辞に足す 1 文字。⚠ **式と実験半径は別の物理**なので、
+同じ `-FNUS` で名乗らせない (B2、260830Cl)。`:formula_1p2A13` が空文字なのは監査 1 の記録との
+互換のため — あれは式で走ったので `-FNUS` のままでなければならない。"""
+nucleus_source_code(source::Symbol) =
+    source === :formula_1p2A13 ? "" :
+    source === :experimental_rms ? "X" :
+    error("未知の核半径の出所 $source — model_id を名乗れない (fail-closed)")
+
+"シンボル → NucleusSpec (:point | :uniform_sphere)。半径の出所は既定 = 監査 1 と同じ式"
+resolve_nucleus(z::Int, sym::Symbol; source::Symbol=:formula_1p2A13) =
+    sym === :point ? POINT_NUCLEUS :
+    sym === :uniform_sphere ? uniform_sphere_nucleus(z; source=source) :
+    error("nucleus は :point | :uniform_sphere ($sym)")
+
 """相対論的連続状態の設定。c をパラメータ化するのは c→∞ 極限テスト (T8) で
 非相対論経路との一致を機械検証するため。darwin=false で Darwin 項を落とすと
 Klein–Gordon 型 (質量増大のみ) になる — 効果の内訳を測る診断用。"""
@@ -230,7 +279,8 @@ function ContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
                       r_match::Float64; q_resolve::Float64=0.0,
                       dt_log::Float64=CONT_DT_LOG, ppw::Float64=CONT_PPW,
                       eta_bessel::Float64=ETA_BESSEL, z_asym::Float64=1.0,
-                      rel::Union{Nothing,RelCont}=nothing)
+                      rel::Union{Nothing,RelCont}=nothing,
+                      n_fit::Int=N_FIT)                # 260919Cl (R2): Coulomb マッチ窓の点数を引数で受ける (既定は従来の定数)
     # rel: 260804Cl スカラー相対論経路 (第 3.5 章)。nothing = 従来の非相対論
     kappa = rel === nothing ? sqrt(2.0 * eps) : krel(eps, rel.c)
     wcf = rel === nothing ? (r::Float64 -> 2.0 * (pot_V(r) - eps)) :
@@ -309,7 +359,7 @@ function ContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
     uC = numerov(wC, drC * drC, uC01[1], uC01[2])
 
     # ---- エネルギー規格化: 末尾 N_FIT 点を (F_l, G_l) にフィット ----
-    r_fit = rC[end-N_FIT+1:end]
+    r_fit = rC[end-n_fit+1:end]
     # Sommerfeld パラメータ (引力で負)。相対論: η_rel = −z_a(1+ε/c²)/k_rel
     eta = rel === nothing ? -z_asym / kappa :
           -z_asym * (1.0 + eps / (rel.c * rel.c)) / kappa
@@ -321,8 +371,8 @@ function ContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
     use_bessel = abs(eta) < eta_bessel
     jl_buf = zeros(l_max + 1)
     yl_buf = zeros(l_max + 1)
-    Fb = zeros(N_FIT, nL)
-    Gb = zeros(N_FIT, nL)
+    Fb = zeros(n_fit, nL)
+    Gb = zeros(n_fit, nL)
     if use_bessel                              # ほぼ中性場 (テスト経路)
         for (i, x) in enumerate(x_fit)
             sph_jl_all!(jl_buf, l_max, x)
@@ -332,17 +382,18 @@ function ContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
         end
     else                                       # 本番: Steed 法 + 窓内伝播
         for li in 1:nL
-            # 相対論: 非整数次数 λ(λ+1) = l(l+1) − z_a²/c² でマッチ
-            lamL = rel === nothing ? Float64(li - 1) :
-                   (-1.0 + sqrt((2.0 * (li - 1) + 1.0)^2 -
-                                4.0 * z_asym^2 / (rel.c * rel.c))) / 2.0
-            Fw, Gw = coulomb_fg_window(lamL, eta, x_fit)
+            # 相対論: 非整数次数 λ(λ+1) = l(l+1) − z_a²/c² でマッチ。
+            # ⚠ 260921Cl: z_asym > c/2 の l=0 では λ が複素になる。`CoulombOrder` が
+            #   λ(λ+1) (常に実) を主に持ち、`coulomb_fg_window` がその枝を選ぶ
+            ordL = rel === nothing ? CoulombOrder(Float64(li - 1)) :
+                   coulomb_order_rel(li - 1, z_asym, rel.c)
+            Fw, Gw = coulomb_fg_window(ordL, eta, x_fit)
             Fb[:, li] = Fw
             Gb[:, li] = Gw
         end
     end
     for li in 1:nL
-        ufit = uC[li, end-N_FIT+1:end]
+        ufit = uC[li, end-n_fit+1:end]
         fmax = maximum(abs.(ufit))
         if fmax == 0.0 || !isfinite(fmax)
             ok[li] = false
@@ -458,7 +509,9 @@ struct DiracContinuumSet
     ls::Vector{Int}                  # κ に対応する軌道角運動量 l
     tjs::Vector{Int}                 # 2j (= 2|κ| − 1)
     r_int::Vector{Float64}
-    G_int::Matrix{Float64}           # (nch × n_int)
+    G_int::Matrix{Float64}           # (n_int × nch) ⚠ 260828Cl に転置 (旧: nch × n_int)。
+                                     #   ODE の書き込み・直交化・RlTable の gw 構築がすべて
+                                     #   r 方向連続になり、ストライド読み (1 要素/64B 行) が消える
     F_int::Matrix{Float64}
     w_int::Vector{Float64}
     match_resid::Vector{Float64}
@@ -507,12 +560,64 @@ end
             F0 + h / 6.0 * (k1F + 2k2F + 2k3F + k4F))
 end
 
+# ★260830Cl: 連続状態 RK4 の **C 区間 (r_core → r_match) の区間内分割数**の既定。A/B 区間は 4 のまま。
+#   ppw 感度の機構 = C 区間の RK4 輸送誤差 (docs/notes/ppw_mechanism_2026-08-30.md)。既定 4 = v5/v6 出荷と同値。
+#   settings の `n_sub_c` 欄で上書きできる (欄が無ければこの値)。⚠ l0_numerics.jl に置かないのは、l0/l1 が
+#   SCF キャッシュの指紋 (CACHE_SOURCE_FINGERPRINT) に入っていて、触ると全 SCF が失効するため。
+const CONT_N_SUB_C = 4
+
+# 260830Cl: 漸近フィットの入力の既定 (監査 2、作者決定 2026-08-30)。dataset F v4/v5/v6 は `:raw_g` で作られた。
+#   ⚠ **既定が承認時の値から動いたので、版の名乗りの fail-closed (gen_production.jl SPEC_IMPLICIT_SETTINGS /
+#   check_tables.jl V6_IMPLICIT_SETTINGS) はこの欄を見る**。settings に `tail_fit` を置けば上書きできる。
+#   ⚠ l0_numerics.jl に置かないのは CONT_N_SUB_C と同じ理由 (SCF 指紋)。
+const CONT_TAIL_FIT = :transformed_g
+
+"""`settings_dict` (l0) + 連続状態の C 区間分割数 `n_sub_c` を**解決済みの値で**明示した Dict。出荷 JSON・
+生成文脈・単発出口の `settings` はこちらを書く (欄が無い settings でも既定値が残るので、後から既定を変えても
+どの値で作ったか分かる)。⚠ 承認済み spec (v6.0.0) にこの欄は無い — 6.0.0 を名乗るには承認時の暗黙値 4
+でなければならない (`gen_production.jl` SPEC_IMPLICIT_SETTINGS / `check_tables.jl` C16b)。"""
+function settings_dict_full(settings)
+    d = settings_dict(settings)
+    get!(d, "n_sub_c", Int(get(settings, :n_sub_c, CONT_N_SUB_C)))
+    # 260830Cl: 規格化の参照関数の切替 |η| < eta_bessel (球ベッセル) / それ以外 Coulomb。0.0 = 常に Coulomb 参照。
+    #   ε_c (|η| = 0.02 ⇔ ε = 37.8 keV) の切替が σ(β,Δ) を窓水準で 3e-8〜1.3e-7 動かす (ppw_mechanism_2026-08-30.md §4)
+    get!(d, "eta_bessel", Float64(get(settings, :eta_bessel, ETA_BESSEL)))
+    # 260830Cl: A–B の継ぎ目の求積 (false = 台形 1 枚 (v5/v6)、true = B′ の複合 Simpson に繋ぐ)
+    get!(d, "gap_join", Bool(get(settings, :gap_join, false)))
+    # 260830Cl: 漸近フィットの入力。⚠ 既定が承認時の値 (:raw_g) から動いたので、**解決済みの値を必ず記録する** —
+    #   記録しないと「欄が無い = 承認時の値」という版の名乗りの前提が崩れる (SPEC_IMPLICIT_SETTINGS の穴)
+    # ⚠⚠ 260831Cl: `get!` ではなく**代入**。settings の NamedTuple が `tail_fit` を持つと
+    #   (v6/v7 の組は持つ) `settings_dict` が **Symbol のまま**写してしまい、出荷 JSON にも
+    #   照合にも Symbol が漏れる (実測: v7 が `settings.tail_fit が spec と違う` で名乗れなかった)。
+    #   ここで必ず文字列へ正規化する
+    d["tail_fit"] = String(Symbol(get(settings, :tail_fit, CONT_TAIL_FIT)))
+    return d
+end
+
 function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
                            r_match::Float64, z::Int;
                            q_resolve::Float64=0.0, dt_log::Float64=CONT_DT_LOG,
                            ppw::Float64=CONT_PPW, eta_bessel::Float64=ETA_BESSEL,
                            z_asym::Float64=1.0, c::Float64=C_LIGHT,
-                           n_sub::Int=4, store_int::Bool=true)
+                           n_sub::Int=4, n_sub_C::Int=n_sub, store_int::Bool=true,
+                           gap_join::Bool=false, nucleus::NucleusSpec=POINT_NUCLEUS,
+                           tail_fit::Symbol=CONT_TAIL_FIT,
+                           tail_diag::Union{Nothing,Dict{String,Any}}=nothing,
+                           n_fit::Int=N_FIT)                # 260919Cl (R2): Coulomb マッチ窓の点数を引数で受ける (既定は従来の定数)
+    # 260829Cl / 260830Cl (監査 2 = docs/notes/dirac_tail_rmatch_preregistration_2026-08-29.md):
+    #   `tail_fit` は漸近フィットの**入力だけ**を選ぶ。
+    #     :transformed_g  ★既定 (2026-08-30、作者決定)。G̃ = G·√(B∞/B) をフィット (B = 2c + (ε−V)/c、B∞ = 2c + ε/c)
+    #     :raw_g          v4/v5/v6 出荷の処方 (伝播した大成分 G をそのまま scalar Coulomb 対へ)。回帰用スイッチ
+    #   純 Coulomb 尾では G = √B·y、y は scalar Coulomb 方程式に残差 Δ_κ = [a(κ+1)r + a²(κ+¼)]/[r²(r+a)²]、
+    #   a = z_asym/(2c²+ε) を残して従う (sympy で検算済、κ = −1 では 1/r³ 項が消える)。⇒ raw を直接
+    #   フィットすると √(B/B∞) − 1 ≈ a/(2r) の有限半径の振幅差が残る。**最小二乗・位相・共通 scale の
+    #   適用先はどちらも同じ** (変えるのは M \ gfit の gfit だけ)。
+    #   ⚠ 既定を変えたので **出荷値が動く**: N₀ と σ_own が +9.3e-7 相対 (raw は Cl を a/(2 r_fit) だけ
+    #   過大評価していた)。**F(s) = N(K)/N(0) は 2e-9 で免疫** (同じ ε の scale が厳密に相殺する)。
+    #   独立な厳密 Dirac–Coulomb spinor との照合 = 同事前登録 §7.3 (transformed 5.1e-11 / raw −1.1e-7)、
+    #   end-to-end の R→4R = §7.4。⚠ v4/v5/v6 を再現するには `tail_fit = :raw_g` を明示する。
+    tail_fit in (:raw_g, :transformed_g) ||
+        error("tail_fit は :raw_g | :transformed_g ($tail_fit)")
     k = krel(eps, c)
     # ---- グリッド: ContinuumSet と同一の 3 セグメント構成 ----
     # A だけ RK4 の増幅率のために刻みを絞る (章頭参照)。l_max が小さいときは
@@ -549,26 +654,38 @@ function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
     #   ビットが違いうるので、書き換えてはいけない。
     # ⚠ `ns` は κ に依存する (障壁中の増大率) ので、`ns != n_sub` の区間だけは
     #   従来どおり直接引く。そちらも pb → 次の pa の重複を消して 3→2 にした
-    nsv = 2 * n_sub + 1
+    # ★260830Cl: 区間 i (r[i] → r[i+1]) の RK4 分割数は**区間種別で決める** — A・B (i < nA+nB) は n_sub、
+    #   C (i ≥ nA+nB。r[nA+nB] = rB[end] → rC[1] から r_match まで) は n_sub_C。`ppw` 30→60 で σ(β,Δ) が
+    #   相対 3.2e-6 動く機構が **C 区間の RK4 輸送誤差** (格子・求積重み・フィット点を動かさず C の分割だけ
+    #   4→8 で FULL60 の 0.98〜0.99 を再現、次数 p ≈ 5) と分かったので (tools/ppw_mechanism_probe.jl、
+    #   docs/notes/ppw_mechanism_2026-08-30.md)、C の RK4 だけを細かくできるようにした。
+    #   B の格子 (= 行列要素の Simpson 格子) も規格化のフィット点も変わらない。n_sub_C == n_sub なら
+    #   旧コードとビット同一 (同じ h、同じ評価点の式)。
+    nsub_of(i) = i < nA + nB ? n_sub : n_sub_C
+    nsub_max = max(n_sub, n_sub_C)
+    nsv = 2 * nsub_max + 1
     vsub = Matrix{Float64}(undef, nsv, max(n - 1, 0))
     @inbounds for i in 1:n-1
         ra, rb = r[i], r[i+1]
-        h = (rb - ra) / n_sub
-        for j in 1:n_sub
+        ns_i = nsub_of(i)
+        h = (rb - ra) / ns_i
+        for j in 1:ns_i
             pa = ra + h * (j - 1)
             pb = ra + h * j
             vsub[2j-1, i] = pot_V(pa)          # = 次の刻みの pa でもある
             vsub[2j, i] = pot_V((pa + pb) / 2.0)
         end
-        vsub[nsv, i] = pot_V(ra + h * n_sub)   # ⚠ ra+h*n_sub ≠ rb (丸め)。式を保つ
+        vsub[2 * ns_i + 1, i] = pot_V(ra + h * ns_i)   # ⚠ ra+h*ns_i ≠ rb (丸め)。式を保つ
     end
     # `store_int=false` は Mott 出口 (δ_κ しか要らない) 用。l_max が数百になると
     # (nch × n) が数億要素になるので、そこだけ落とせるようにしてある
-    Gall = zeros(nch, store_int ? n : 0)
-    Fall = zeros(nch, store_int ? n : 0)
-    tailG = zeros(nch, N_FIT)                  # 漸近フィット窓 (常に保持)
-    tailF = zeros(nch, N_FIT)
-    i_tail0 = n - N_FIT + 1
+    # 260828Cl: (n × nch) に転置 + undef 確保。RK4 は [i0..n, ic] を必ず書くので、
+    #   明示的に零にするのは種より内側 [1..i0-1, ic] だけでよい (memset 1 パス削減)。
+    Gall = Matrix{Float64}(undef, store_int ? n : 0, nch)
+    Fall = Matrix{Float64}(undef, store_int ? n : 0, nch)
+    tailG = zeros(nch, n_fit)                  # 漸近フィット窓 (常に保持)
+    tailF = zeros(nch, n_fit)
+    i_tail0 = n - n_fit + 1
     zf = Float64(z)
     for (ic, kap) in enumerate(kappas)
         kapf = Float64(kap)
@@ -578,12 +695,24 @@ function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
         i0 = clamp(searchsortedfirst(r, exp(-60.0 / (lp + 1))), 1, n - 2)
         rs = r[i0]
         # 指数は領域で選ぶ: Coulomb 支配 (r ≪ Z/2c²) なら γ、遠心力支配なら l+1
-        s = rs < zf / (2.0 * c * c) ? gam : Float64(lp + 1)
         g = 1e-30
-        f = (s + kapf) * g / (rs * (2.0 * c + (eps - v[i0]) / c))
+        local f::Float64
+        if is_point(nucleus) || rs >= nucleus.radius_a0
+            s = rs < zf / (2.0 * c * c) ? gam : Float64(lp + 1)
+            f = (s + kapf) * g / (rs * (2.0 * c + (eps - v[i0]) / c))
+        else
+            # 260829Cl: 有限核の内側 — 有限ポテンシャルの正則級数 (点核 γ は使えない)。
+            #   κ>0 は上の式の s=l+1 と同じ (2κ+1)/(B₀r)、κ<0 は次の次数 −C₀r/(2k+1)
+            B0 = 2.0 * c + (eps - v[i0]) / c
+            C0 = (eps - v[i0]) / c
+            f = kap > 0 ? (2.0 * kapf + 1.0) * g / (B0 * rs) :
+                          -C0 * rs * g / (2.0 * (-kapf) + 1.0)
+        end
         if store_int
-            Gall[ic, i0] = g
-            Fall[ic, i0] = f
+            fill!(view(Gall, 1:i0-1, ic), 0.0)     # 種より内側は厳密に 0 (旧 zeros と同値)
+            fill!(view(Fall, 1:i0-1, ic), 0.0)
+            Gall[i0, ic] = g
+            Fall[i0, ic] = f
         end
         if i0 >= i_tail0
             tailG[ic, i0-i_tail0+1] = g
@@ -602,9 +731,10 @@ function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
             #   Mott 出口は l が数百に達するのでここが効く (固定 4 分割では不足)。
             #   振動域では k_loc·Δr ≈ 2π/ppw なので既定の n_sub に落ち着く
             expo = (rb - ra) * (abs(kapf) / ra + sqrt(abs(2.0 * (eps - v[i]))))
-            ns = clamp(ceil(Int, expo / 0.25), n_sub, 512)
+            ns_i = nsub_of(i)                  # 260830Cl: 区間種別ごとの分割数 (A/B = n_sub、C = n_sub_C)
+            ns = clamp(ceil(Int, expo / 0.25), ns_i, 512)
             h = (rb - ra) / ns
-            if ns == n_sub                     # 260808Cl: 表を引く (大多数はこちら)
+            if ns == ns_i                      # 260808Cl: 表を引く (大多数はこちら)
                 for j in 1:ns
                     pa = ra + h * (j - 1)
                     pb = ra + h * j
@@ -628,15 +758,15 @@ function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
                 g *= sc
                 f *= sc
                 if store_int
-                    @views Gall[ic, i0:i] .*= sc
-                    @views Fall[ic, i0:i] .*= sc
+                    @views Gall[i0:i, ic] .*= sc   # 260828Cl: 転置後は連続 view
+                    @views Fall[i0:i, ic] .*= sc
                 end
                 @views tailG[ic, :] .*= sc
                 @views tailF[ic, :] .*= sc
             end
             if store_int
-                Gall[ic, i+1] = g
-                Fall[ic, i+1] = f
+                Gall[i+1, ic] = g                  # 260828Cl: 転置後は i 連続書き込み
+                Fall[i+1, ic] = f
             end
             if i + 1 >= i_tail0
                 tailG[ic, i+2-i_tail0] = g
@@ -654,10 +784,11 @@ function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
     resid = zeros(nch)
     delta = zeros(nch)
     use_bessel = abs(eta) < eta_bessel
+    n_lam_complex = 0                      # 260921Cl: 複素次数で組んだ l の数 (記録用)
     jl_buf = zeros(l_max + 1)
     yl_buf = zeros(l_max + 1)
-    Fb = zeros(N_FIT, l_max + 1)
-    Gb = zeros(N_FIT, l_max + 1)
+    Fb = zeros(n_fit, l_max + 1)
+    Gb = zeros(n_fit, l_max + 1)
     if use_bessel                              # 中性場 (z_asym = 0) / 試験経路
         for (i, x) in enumerate(x_fit)
             sph_jl_all!(jl_buf, l_max, x)
@@ -667,16 +798,24 @@ function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
         end
     else
         for li in 1:l_max+1                    # 非整数次数は第 3.5 章と同じ
-            lamL = (-1.0 + sqrt((2.0 * (li - 1) + 1.0)^2 -
-                                4.0 * z_asym^2 / (c * c))) / 2.0
-            Fw, Gw = coulomb_fg_window(lamL, eta, x_fit)
+            # ⚠ 260921Cl: これ以前はここで λ を直接作っており、**z_asym ≥ 69 の l=0 で
+            #   √ の引数が負になって DomainError で落ちていた** (2·z_asym/c > 1。H6 の梯子が
+            #   Au⁷⁸⁺ に届かなかった理由)。方程式の係数は λ(λ+1) だけで、それは複素次数でも
+            #   実なので、`CoulombOrder` がそれを主に持ち、出発点だけ CF2 で組む
+            ordL = coulomb_order_rel(li - 1, z_asym, c)
+            ordL.real_order || (n_lam_complex += 1)
+            Fw, Gw = coulomb_fg_window(ordL, eta, x_fit)
             Fb[:, li] = Fw
             Gb[:, li] = Gw
         end
     end
+    # 260829Cl: transformed-G はフィット点の**実ポテンシャル**を使う (v_fit)。:raw_g では触らない
+    v_fit = @view v[i_tail0:end]        # 既に評価済みの v = pot_V.(r) を切る (再評価しない)
+    binf = 2.0 * c + eps / c
     for ic in 1:nch
         li = kappa_l(kappas[ic]) + 1
-        gfit = tailG[ic, :]
+        gfit = tail_fit === :raw_g ? tailG[ic, :] :
+               tailG[ic, :] .* sqrt.(binf ./ (2.0 * c .+ (eps .- v_fit) ./ c))
         fmax = maximum(abs.(gfit))
         if fmax == 0.0 || !isfinite(fmax)
             ok[ic] = false
@@ -693,24 +832,59 @@ function DiracContinuumSet(pot_V, eps::Float64, l_max::Int, r_core::Float64,
     ok .&= Cl .> 0
     # 2 成分エネルギー規格化 (章頭の導出)。c→∞ で √(2/πk) に戻る
     amp = sqrt(2.0 / (pi * k) * (1.0 + eps / (2.0 * c * c)))
+    if tail_diag !== nothing        # 260829Cl: 監査 2 の記録 (fit 窓の実半径・係数・残差・参照枝)
+        tail_diag["fit_mode"] = String(tail_fit)
+        tail_diag["reference_pair"] = use_bessel ? "riccati_bessel" : "coulomb"
+        # 260921Cl: 0 でなければ λ が複素の l が居る (z_asym > c/2 の l=0)。δ はその l で
+        #   定数 −λπ/2 + σ_λ だけずれる (振幅 Cl は不変。`coulomb_fg_point_complex` の注)
+        tail_diag["n_lam_complex"] = n_lam_complex
+        tail_diag["eta"] = eta
+        tail_diag["r_fit_first"] = r_fit[1]
+        tail_diag["r_fit_last"] = r_fit[end]
+        tail_diag["n_fit"] = n_fit
+        tail_diag["r_match_requested"] = r_match
+        tail_diag["kappas"] = collect(kappas)
+        tail_diag["Cl"] = copy(Cl)
+        tail_diag["delta_mod_pi"] = [mod(d, pi) for d in delta]
+        tail_diag["resid_G"] = copy(resid)
+        tail_diag["n_sub_C"] = n_sub_C
+        tail_diag["eta_bessel"] = eta_bessel
+    end
     scale = [ok[ic] ? amp / Cl[ic] : 0.0 for ic in 1:nch]
+    tail_diag === nothing || (tail_diag["scale"] = copy(scale))
 
     # ---- 行列要素用の格子 (r ≤ r_core) と Simpson 重み (ContinuumSet と同一) ----
     nA_keep = store_int ? count(<=(r_core), rA) : 0
     nB_keep = store_int ? count(<=(r_core + 1e-12), rB) : 0
     r_int = vcat(rA[1:nA_keep], rB[1:nB_keep])
     idx = vcat(1:nA_keep, nA+1:nA+nB_keep)
-    G_int = store_int ? Gall[:, idx] .* scale : zeros(nch, 0)
-    F_int = store_int ? Fall[:, idx] .* scale : zeros(nch, 0)
+    # 260828Cl: 転置後は行が r・列が κ′。scale (κ′ ごと) は行ベクトルとして掛ける
+    G_int = store_int ? Gall[idx, :] .* scale' : zeros(0, nch)
+    F_int = store_int ? Fall[idx, :] .* scale' : zeros(0, nch)
     w_int = Float64[]
     if store_int
         wtA = simpson_weights(nA_keep, dtA) .* rA[1:nA_keep]
-        wtB = simpson_weights(nB_keep, drB)
-        w_int = vcat(wtA, wtB)
-        if nA_keep > 0 && nB_keep > 0
-            gap = rB[1] - rA[nA_keep]
-            w_int[nA_keep] += gap / 2.0
-            w_int[nA_keep+1] += gap / 2.0
+        # 260827Cl (codex): gap_join=true なのに継ぎ目が組めない格子では**黙って台形へ落とさない** (fail-closed。probe と同じ)。
+        #   nA_keep == nA は rA1 ≤ r_core/2 で常に成立、nB_keep > 0 は B の最初の点が r_core 以内にあること
+        gap_join && !(nA_keep == nA && nB_keep > 0) &&
+            error("gap_join: A–B の継ぎ目が r_core の内側に組めない (nA_keep=$nA_keep, nA=$nA, nB_keep=$nB_keep, r_core=$r_core, drB=$drB) — 台形へは落とさない")
+        if gap_join
+            # ★260830Cl: A–B の継ぎ目 [rA[end], rB[1]] (幅 drB) を 1 枚の台形則で繋ぐ誤差 (∝ gap³·f″/12) が、継ぎ目が
+            #   束縛軌道の中に来る行 (rA1 が r_core/2 の cap から外れる M 殻・高 ε) で σ(β,Δ) を 1e-7 級動かす
+            #   (docs/notes/ppw_mechanism_2026-08-30.md §6–§7)。rB[j] = rA[end] + j·drB なので B′ = [rA[end]; rB[1:nB_keep]]
+            #   は等間隔 drB — 1 つの複合 Simpson で覆い、点 rA[end] で A の Simpson と重みを足す (台形パネルが消える)。
+            #   既定 false = 従来の台形 (v5/v6 出荷とビット同一)
+            wtB2 = simpson_weights(nB_keep + 1, drB)
+            w_int = vcat(wtA, wtB2[2:end])
+            w_int[nA_keep] += wtB2[1]
+        else
+            wtB = simpson_weights(nB_keep, drB)
+            w_int = vcat(wtA, wtB)
+            if nA_keep > 0 && nB_keep > 0
+                gap = rB[1] - rA[nA_keep]
+                w_int[nA_keep] += gap / 2.0
+                w_int[nA_keep+1] += gap / 2.0
+            end
         end
     end
     return DiracContinuumSet(eps, k, c, kappas, kappa_l.(kappas), kappa_tj.(kappas),
@@ -727,10 +901,11 @@ function orthogonalize_dirac!(cont::DiracContinuumSet, r_b, G_b, F_b, kap::Int)
     gb = u_on_grid(r_b, G_b, cont.r_int)
     fb = u_on_grid(r_b, F_b, cont.r_int)
     ov(g, f) = sum(cont.w_int .* (gb .* g .+ fb .* f))
-    cc = ov(view(cont.G_int, ic, :), view(cont.F_int, ic, :))
-    cont.G_int[ic, :] .-= cc .* gb
-    cont.F_int[ic, :] .-= cc .* fb
-    return cc, ov(view(cont.G_int, ic, :), view(cont.F_int, ic, :))
+    # 260828Cl: 転置 (n × nch) 後はチャネル = 列。view も引き算も連続アクセスになった
+    cc = ov(view(cont.G_int, :, ic), view(cont.F_int, :, ic))
+    cont.G_int[:, ic] .-= cc .* gb
+    cont.F_int[:, ic] .-= cc .* fb
+    return cc, ov(view(cont.G_int, :, ic), view(cont.F_int, :, ic))
 end
 
 "束縛軌道 u(r) を別グリッドへ log-spline 補間 (定義域外は 0、Python 版 _u_on_grid)"

@@ -66,14 +66,44 @@ const LEGACY_V5_CUTOFF = get(ENV, "TEMARI_LEGACY_V5_CUTOFF", "0") == "1"
 #   正本 = docs/notes/eps_nodes_threshold_2026-08-20.md。全行一律 (Z 閾値を仕様に書かない)。
 # ⚠ profile は**組ごと**に切り替える (v5 の規則に n1=40 のような混成を ENV では作れない)。
 #   手で組んだ settings は「custom」で、出荷版を名乗れない (gen_production.jl `presc_dataset_version`)。
+# ⚠⚠ 260831Cl: `tail_fit` を**旧世代の組にも明示する**。src 既定が :transformed_g へ動いた (作者決定
+#   2026-08-30) ので、書かないと HIGH_SETTINGS が「v6 の求積 + v7 の尾フィット」という**どの世代でも
+#   ない混成**になる。出荷済み v5 / v6 は :raw_g で生成したので、その事実を組に書く。
+#   ⇒ `--profile v6_high` は今も dataset F v6.0.0 を再現できる (再現性の担保)
 const HIGH_SETTINGS_V5 = (n1=20, n2=56, n3=20, l_cap=128, n_x=96,  n_phi=48, n_q=360,
-                          sig_thresh=1e-13, ppw=30.0, dt_log=1.0e-3)   # dataset v5.0.0 の HIGH (凍結)
+                          sig_thresh=1e-13, ppw=30.0, dt_log=1.0e-3,
+                          tail_fit=:raw_g)                             # dataset F v5.0.0 の HIGH (凍結)
 const HIGH_SETTINGS_V6 = (n1=40, n2=56, n3=20, l_cap=256, n_x=192, n_phi=96, n_q=720,
-                          sig_thresh=1e-13, ppw=30.0, dt_log=1.0e-3)   # dataset v6 の HIGH
+                          sig_thresh=1e-13, ppw=30.0, dt_log=1.0e-3,
+                          tail_fit=:raw_g)                             # dataset F v6.0.0 の HIGH (凍結)
 const HIGH_SETTINGS = LEGACY_V5_CUTOFF ? HIGH_SETTINGS_V5 : HIGH_SETTINGS_V6
+# ★★★ 260831Cl (作者決定 2026-08-31): dataset F v7 の数値設定。**v6 に対して求積の 4 つのつまみを直す。**
+#   v7 が加える物理 (有限核) と、v6 に残っている数値誤差を同じ尺度で並べると:
+#     有限核の効果 [実測、tools/nucleus_signal_probe.jl]  C K @400 max|ΔF| 1.51e-08 / Au L3 @200 1.51e-05
+#     C 区間の RK4 輸送誤差 (n_sub_c = 4 の残差)          C K @400 ≈ 9.2e-08   / Au L3 @400 ≈ 5.6e-07
+#     尾のフィットの系統 (tail_fit = :raw_g)              F(s) 軽元素 8.1e-09、**N0 は +1.10e-06 (C K@100)**
+#   ⇒ **軽元素では、加えようとしている物理より既知の数値誤差のほうが大きい** (F で 6 倍、N0 で 8 倍)。
+#   その状態で「有限核を入れた」と名乗るのは筋が通らないので、v7 では 4 つとも直した値で生成する。
+#   n_sub_c 16    : C 区間 (r_core→r_match) の RK4 分割。p = 5.0 で 4→16 は 5 桁。残差は Au L3 で 5e-10
+#   eta_bessel 0.0: 規格化の参照関数を常に Coulomb に (ε_c = 37.8 keV の球ベッセルへの切替をやめる)
+#   gap_join true : A–B の継ぎ目を台形 1 枚から B′ の複合 Simpson へ (F では ≤ 1.2e-9 だが σ では 1e-7 級)
+#   tail_fit      : 漸近フィットの入力を G̃ = G·√(B∞/B) に (独立な厳密 Dirac–Coulomb spinor と 5.1e-11 で一致)
+#   正本 = docs/notes/ppw_mechanism_2026-08-30.md §7c–7d / dirac_tail_rmatch_preregistration_2026-08-29.md §7.3–7.5
+#   ⚠ 4 つとも **settings に明示する** — src 既定に委ねると、既定が動いた瞬間に v7 が黙って別物になる (F14)
+const HIGH_SETTINGS_V7 = (; HIGH_SETTINGS_V6...,
+                          n_sub_c=16, eta_bessel=0.0, gap_join=true, tail_fit=:transformed_g)
 "解決済みの設定がどの profile か (JSON の provenance 用)。手で組んだ設定は custom"
-settings_profile(settings) = settings == HIGH_SETTINGS_V6 ? "v6_high" :
-                            settings == HIGH_SETTINGS_V5 ? "v5_legacy" : "custom"
+# 260919Cl (R2): **解決済みの値の一致**で決める (NamedTuple の等値は欄の順序と有無まで見るので、同じ値を明示した
+#   settings (例: G4 の道具が記録から組む NamedTuple、`r_match_scale = 1.0` を書いた settings) が "custom" に落ちていた)。
+#   HIGH_SETTINGS_V7 そのものは従来どおり "v7_high" (settings_dict_core が同じ)
+const SETTINGS_PROFILES = ("v7_high" => HIGH_SETTINGS_V7, "v6_high" => HIGH_SETTINGS_V6, "v5_legacy" => HIGH_SETTINGS_V5)
+function settings_profile(settings)
+    d = settings_dict_core(settings)
+    for (name, p) in SETTINGS_PROFILES
+        settings_dict_core(p) == d && return name
+    end
+    return "custom"
+end
 
 # 単発出口の JSON 仕様。model_id は物理処方を表すが、求積プリセットは意図的に
 # 含めないため、再現に必要な数値設定を別フィールドで必ず保存する。
@@ -84,16 +114,34 @@ settings_preset(settings) = settings == QUICK_SETTINGS ? "quick" :
                             settings == PROD_SETTINGS  ? "prod"  :
                             settings == HIGH_SETTINGS  ? "high"  : "custom"
 
-"求積設定を JSON 化できる Dict にし、暗黙の連続状態設定も明示する。"
-function settings_dict(settings)
+"求積設定を JSON 化できる Dict にし、暗黙の連続状態設定も明示する (profile を除く。profile の判定がこれを使う)。"
+function settings_dict_core(settings)
     d = Dict{String,Any}(String(k) => v for (k, v) in pairs(settings))
     get!(d, "ppw", CONT_PPW)
     get!(d, "dt_log", CONT_DT_LOG)
     # 260820Cl: 部分波打ち切りの規則も明示する (LKIN_RULE は ENV で戻せるので、出力に残さないと区別できない)
-    get!(d, "lkin_rule", string(LKIN_RULE))
+    # 260919Cl (R2): settings が `lkin_rule` / `tail_fit` を Symbol で持っていても**文字列に正規化**する (profile の判定が
+    #   この Dict の等値なので、Symbol と文字列の違いで "custom" に落ちないように)
+    d["lkin_rule"] = string(get(settings, :lkin_rule, LKIN_RULE))
+    d["tail_fit"] = String(Symbol(get(settings, :tail_fit, CONT_TAIL_FIT)))
     get!(d, "lkin_radius_frac", LKIN_RULE === :v6 ? Float64(get(settings, :lkin_frac, LKIN_RADIUS_FRAC)) : nothing)
     get!(d, "lkin_margin", LKIN_RULE === :v6 ? Int(get(settings, :lkin_margin, LKIN_MARGIN)) : 12)
-    get!(d, "profile", settings_profile(settings))   # 260820Cl: v6_high / v5_legacy / custom
+    # 260919Cl (R2): マッチ半径の倍率と上限 (eps_setup の `r_match_scale` / `r_match_cap`)。settings に無ければ src の定数 =
+    #   出荷 (1.0 / 400.0)。**解決済みの値を必ず記録する** (以前は compute_channel が既定で埋めて記録しなかった)
+    get!(d, "r_match_scale", Float64(get(settings, :r_match_scale, CONT_R_MATCH_SCALE)))
+    get!(d, "r_match_cap", Float64(get(settings, :r_match_cap, CONT_R_MATCH_CAP)))
+    # ⚠ NamedTuple の `lkin_frac` (引数名) は `lkin_radius_frac` (記録名) として上で写した。両方あると別名の二重記録になる
+    # ⚠ 260919Cl (codex 3 巡目 #2 を再現して修正): settings に**記録名** `lkin_radius_frac` を書くと、記録には載るが計算は
+    #   `lkin_frac` (引数名) しか読まない = 記録と計算が黙って食い違う (実測: 記録 0.9 / 計算 0.999)。引数名でしか受けない
+    haskey(settings, :lkin_radius_frac) &&
+        error("settings に lkin_radius_frac (記録名) は書けない — 引数名 lkin_frac で渡す (記録と計算が食い違うため)")
+    haskey(d, "lkin_frac") && (d["lkin_radius_frac"] = Float64(d["lkin_frac"]); delete!(d, "lkin_frac"))
+    return d
+end
+"求積設定を JSON 化できる Dict にし、暗黙の連続状態設定も明示する。"
+function settings_dict(settings)
+    d = settings_dict_core(settings)
+    d["profile"] = settings_profile(settings)   # 260820Cl: v6_high / v5_legacy / custom
     return d
 end
 
@@ -107,6 +155,12 @@ const SCF_TOL_RHO = 1e-8     # SCF 収束判定: 密度変化の L1 ノルム [�
 const SCF_TOL_E = 1e-9       # SCF 収束判定: 固有値の相対変化
 const SCF_MAX_ITER = 120     # SCF 反復上限
 const SCF_RETRY = (beta=0.08, max_iter=400)   # 未収束時の再試行
+# 260919Cl (R2): SCF の予算 (混合係数・反復上限・再試行・固有値の許容) を 1 つの NamedTuple に。生成器はこれを**引数で渡して**
+#   指紋の欄 `scf_numerics` に記録する。既定 (= 従来の定数) のときはキャッシュ鍵を変えない (`scf_budget_tag`)
+const SCF_BUDGET = (beta=SCF_BETA, max_iter=SCF_MAX_ITER, retry_beta=SCF_RETRY.beta, retry_max_iter=SCF_RETRY.max_iter,
+                    eig_tol=EIG_TOL)
+scf_budget_tag(b) = string("beta=", repr(Float64(b.beta)), ";mi=", Int(b.max_iter), ";rb=", repr(Float64(b.retry_beta)),
+                           ";rmi=", Int(b.retry_max_iter), ";et=", repr(Float64(b.eig_tol)))
 
 const CONT_DT_LOG = 2e-3     # 連続状態 log セグメントの刻み
 const CONT_PPW = 25.0        # 1 波長あたりの点数
@@ -127,6 +181,14 @@ const LKIN_MARGIN = 12
 #   ⚠ Dirac 経路の含有半径は 2 成分密度 G²+F² で測る (行列要素が G_aG_b+F_aF_b なので。codex 2026-08-20)。
 #   非相対論 / SRC 経路は u_b²。`lkin_partial_waves` (l5_channel.jl)
 const N_FIT = 8              # Coulomb マッチ窓の点数
+# 260919Cl (R2、事前登録 fingerprint_preregistration_2026-09-19.md §2.2 / §7 の 1): 連続状態の残りのリテラルと関数既定を
+#   名前つきの定数にし、生成器が**引数で渡して記録する** (指紋の欄 `continuum_numerics` / `constants` / `settings.r_match_*`)。
+#   値は従来のリテラルと同一 = ビット同一 (bitident_snapshot の前後で確認)
+const R_MATCH_TOL = 1e-7         # r_match_for: |r·V + z_asym| < tol となる最小半径を探す許容
+const R_MATCH_RMAX_CAP = 90.0    # r_match_for: Coulomb 尾が見つからないときの上限 [a0]
+const CONT_R_MATCH_SCALE = 1.0   # eps_setup: マッチ半径の倍率 (監査 2 gate 3 の R→4R は診断用。出荷は 1.0)
+const CONT_R_MATCH_CAP = 400.0   # eps_setup: マッチ半径の上限 [a0]
+const CONT_EXCHANGE_COEFF = 2.0 / 3.0   # 終状態 (緩和イオン) の場に足す Slater 交換の係数 (KS の 2/3。SCF 側の X_ALPHA とは独立)
 # ⚠ 260818Cl 訂正: 下の「(テスト用)」は成り立たない。phase / mott 出口は中性場 (z_asym = 0) で
 #   走るのでこの枝が本番経路になる。参照ペアが Riccati-Bessel になり δ_l の全体符号が一意に
 #   決まるのはその帰結 (l5_exit_phase.jl 冒頭 / l2_continuum.jl の δ_l コメント)。
@@ -447,7 +509,7 @@ end
 # で同時に流すと同じレイテンシで 8 点処理できる (AVX-512 zmm。実測 3.5-4.2 倍)。
 #
 # ★ビット同一性の設計 (スカラー版 sph_jl_all! と演算列を完全に一致させる):
-#   - 漸化は c/X*jc - jp の順 (div→mul→sub)。muladd/fma は丸めが変わるので不可
+#   - 漸化は逆数化 + muladd (260828Cl に規律解除で変更。旧: div→mul→sub で fma 不可)
 #   - リスケールはレーン別マスク乗算。非該当レーンは ×1.0 = 恒等 (丸め誤差ゼロ)
 #   - 規格化はレーンごとに `_jl_miller_scale` を呼ぶ (スカラー版と同一の関数。
 #     j_0 ≈ 0 の窓での j_1 乗り換えもレーン独立に同じ判定で起きる)
@@ -458,8 +520,15 @@ end
 #   必ず引数渡しの @inline ヘルパを経由する。
 const _T8 = NTuple{8,Float64}
 
-@inline _rec8(c::Float64, X::_T8, jc::_T8, jp::_T8) =
-    ntuple(j -> c / X[j] * jc[j] - jp[j], Val(8))
+# (260828Cl: 旧 `_rec8` = `c/X*jc - jp` の除算版は全経路が `_rec8i` へ移行したため削除)
+# 260828Cl 高速化 (作者指示でビット同一の規律を解除): 逆数を前計算して漸化を
+# `muladd(c·invX, jc, −jp)` にする。除算 (レイテンシ ~13-20 cyc、依存連鎖上) が
+# 乗算 + fma に変わり、連鎖長が ~1/4 になる。⚠ 丸めが変わる (div ≠ mul-by-recip、
+# fma は中間丸め無し) — 相対 ~1e-16/step 級。レーン値が同乗レーンに依存しない
+# 性質は不変 (invX もレーン独立)。
+@inline _inv8(X::_T8) = ntuple(j -> 1.0 / X[j], Val(8))
+@inline _rec8i(c::Float64, invX::_T8, jc::_T8, jp::_T8) =
+    ntuple(j -> muladd(c * invX[j], jc[j], -jp[j]), Val(8))
 @inline _mul8(a::_T8, f::_T8) = ntuple(j -> a[j] * f[j], Val(8))
 @inline _st8(p::Ptr{Float64}, v::_T8) = unsafe_store!(Ptr{_T8}(p), v)
 @inline _ld8(p::Ptr{Float64}) = unsafe_load(Ptr{_T8}(p))
@@ -486,7 +555,8 @@ const _T8 = NTuple{8,Float64}
 @inline _xq8(q::Vector{Float64}, iq0::Int, r::Float64) =
     ntuple(k -> q[iq0+k-1] * r, Val(8))
 @inline _acc8(a::_T8, g::Float64, v::_T8) =
-    ntuple(k -> a[k] + g * v[k], Val(8))       # 乗算→加算の 2 命令 (muladd/fma 不可)
+    ntuple(k -> muladd(g, v[k], a[k]), Val(8)) # 260828Cl: fma 化 (規律解除。旧: 乗算→加算の 2 命令)
+@inline _add8(a::_T8, b::_T8) = ntuple(k -> a[k] + b[k], Val(8))   # 260828Cl: 複数累算器の畳み込み用
 @inline _min8(X::_T8) = min(min(min(X[1], X[2]), min(X[3], X[4])),
                             min(min(X[5], X[6]), min(X[7], X[8])))
 @inline _max8(X::_T8) = max(max(max(X[1], X[2]), max(X[3], X[4])),
@@ -506,11 +576,12 @@ function _jl8_miller!(tab::Vector{Float64}, tile::Int, off::Int, lmax::Int, X::_
     M = lmax + 20 + ceil(Int, sqrt(40.0 * (lmax + 1)))
     jp = ntuple(_ -> 0.0, Val(8))
     jc = ntuple(_ -> 1e-30, Val(8))
+    invX = _inv8(X)                            # 260828Cl: 除算を漸化の外へ (規律解除)
     GC.@preserve tab begin
         p0 = pointer(tab) + off * 8            # off は 0-based 開始位置
         st = tile * 8                          # λ 方向のバイトストライド
         for l in M:-1:1
-            jm = _rec8(Float64(2l + 1), X, jc, jp)
+            jm = _rec8i(Float64(2l + 1), invX, jc, jp)
             jp = jc
             jc = jm
             l - 1 <= lmax && _st8(p0 + (l - 1) * st, jm)
@@ -535,6 +606,62 @@ function _jl8_miller!(tab::Vector{Float64}, tile::Int, off::Int, lmax::Int, X::_
     return nothing
 end
 
+"""Miller 下方漸化の **2 本 interleave** 版 (260828Cl、規律解除後の追加)。
+
+`_jl8_miller!` の漸化は `muladd` の依存連鎖 (レイテンシ ~4-5 cyc/step) に律速される。
+2 つの r 点 (同じ 8 q) の漸化は互いに独立なので、1 つのループで交互に進めると
+2 本の連鎖が実行ポートを埋め合い、スループットが ~2 倍になる。
+リスケール判定・規格化はチェーンごとに独立 (レーン別マスクも従来どおり)。
+⚠ 各チェーンの演算列は `_jl8_miller!` 単体と同一 — 値も同一 (interleave は順序だけ)。"""
+function _jl8_miller2!(tab::Vector{Float64}, tile::Int, off1::Int, off2::Int,
+                       lmax::Int, X1::_T8, X2::_T8)
+    M = lmax + 20 + ceil(Int, sqrt(40.0 * (lmax + 1)))
+    jp1 = ntuple(_ -> 0.0, Val(8)); jc1 = ntuple(_ -> 1e-30, Val(8))
+    jp2 = ntuple(_ -> 0.0, Val(8)); jc2 = ntuple(_ -> 1e-30, Val(8))
+    inv1 = _inv8(X1); inv2 = _inv8(X2)
+    GC.@preserve tab begin
+        p1 = pointer(tab) + off1 * 8
+        p2 = pointer(tab) + off2 * 8
+        st = tile * 8
+        for l in M:-1:1
+            c = Float64(2l + 1)
+            jm1 = _rec8i(c, inv1, jc1, jp1)
+            jm2 = _rec8i(c, inv2, jc2, jp2)
+            jp1 = jc1; jc1 = jm1
+            jp2 = jc2; jc2 = jm2
+            if l - 1 <= lmax
+                _st8(p1 + (l - 1) * st, jm1)
+                _st8(p2 + (l - 1) * st, jm2)
+            end
+            if _absgt8(jc1, 1e250)
+                f = _mask8(jc1)
+                jc1 = _mul8(jc1, f); jp1 = _mul8(jp1, f)
+                for k in l:lmax+1
+                    qp = p1 + (k - 1) * st
+                    _st8(qp, _mul8(_ld8(qp), f))
+                end
+            end
+            if _absgt8(jc2, 1e250)
+                f = _mask8(jc2)
+                jc2 = _mul8(jc2, f); jp2 = _mul8(jp2, f)
+                for k in l:lmax+1
+                    qp = p2 + (k - 1) * st
+                    _st8(qp, _mul8(_ld8(qp), f))
+                end
+            end
+        end
+        s1 = _scale8(X1, _ld8(p1), jp1)
+        s2 = _scale8(X2, _ld8(p2), jp2)
+        for k in 1:lmax+1
+            qp = p1 + (k - 1) * st
+            _st8(qp, _mul8(_ld8(qp), s1))
+            qp2 = p2 + (k - 1) * st
+            _st8(qp2, _mul8(_ld8(qp2), s2))
+        end
+    end
+    return nothing
+end
+
 "上方漸化 (x > lmax+10) の 8 点同時版。演算列はスカラー版と同一。"
 function _jl8_upward!(tab::Vector{Float64}, tile::Int, off::Int, lmax::Int, X::_T8)
     GC.@preserve tab begin
@@ -545,8 +672,9 @@ function _jl8_upward!(tab::Vector{Float64}, tile::Int, off::Int, lmax::Int, X::_
         if lmax >= 1
             jc = _j1_8(X)
             _st8(p0 + st, jc)
+            invX = _inv8(X)                    # 260828Cl: 逆数化 (規律解除。Miller と同じ)
             for l in 1:lmax-1
-                jn = _rec8(Float64(2l + 1), X, jc, jm)
+                jn = _rec8i(Float64(2l + 1), invX, jc, jm)
                 jm = jc
                 jc = jn
                 _st8(p0 + (l + 1) * st, jc)
@@ -618,6 +746,82 @@ function sph_yl_all!(out::AbstractVector, lmax::Int, x::Float64)
     return out
 end
 
+"""Coulomb 参照対の次数 — **実の λ(λ+1) が主、λ 自身は従**。
+
+相対論の尾 (第 3.5 章) では λ(λ+1) = l(l+1) − (z_asym/c)²。判別式
+(2l+1)² − 4(z_asym/c)² は **l=0 かつ z_asym > c/2 (≈ 68.5) で負**になり、λ は
+複素 λ = −1/2 + iμ/2 になる。⚠ しかし参照対が従う方程式
+
+    u'' = (λ(λ+1)/x² + 2η/x − 1) u
+
+の**係数は λ(λ+1) だけ**で、複素次数でもこれは実 (= (判別式 − 1)/4)。
+⇒ 参照対は実の 2 解として作れる。`lam` は `real_order` が真のときだけ意味を持つ
+(偽のときは `NaN`。CF1 が使えない印)。
+
+260921Cl: これ以前は λ を直接持っていたので **z_asym ≥ 69 の l=0 で `sqrt` が
+`DomainError` を投げて計算そのものが落ちていた** (H6 の梯子が Au⁷⁸⁺ に届かなかった)。
+"""
+struct CoulombOrder
+    lam2::Float64         # λ(λ+1) — 常に実
+    lam::Float64          # 実の λ。real_order == false では NaN (使ってはならない)
+    real_order::Bool      # false = 複素次数 (Re λ = −1/2)
+end
+CoulombOrder(lam::Real) = (lm = Float64(lam); CoulombOrder(lm * (lm + 1.0), lm, true))
+
+"""λ(λ+1) = l(l+1) − (z_asym/c)² の次数 (相対論の Coulomb 尾)。
+
+判別式が負 = 複素次数。そのとき λ(λ+1) = ((−1+i√−D)/2)((1+i√−D)/2) = (D − 1)/4
+(D = 判別式) で、これは l(l+1) − (z_asym/c)² に等しい。
+"""
+function coulomb_order_rel(l::Integer, z_asym::Float64, c::Float64)
+    disc = (2.0 * Float64(l) + 1.0)^2 - 4.0 * z_asym^2 / (c * c)
+    disc >= 0.0 && return CoulombOrder((-1.0 + sqrt(disc)) / 2.0)
+    return CoulombOrder((disc - 1.0) / 4.0, NaN, false)
+end
+
+"""CF2 (Steed の複素連分数) — `H⁺'/H⁺ = p + iq`、`H⁺ = G + iF`。
+
+    CF = a₁/(b₁ + a₂/(b₂ + …)),  aₙ = (iη−λ+n−1)(iη+λ+n),  bₙ = 2(x−η+in)
+
+⭐ `aₙ = (iη+n)(iη+n−1) − λ(λ+1)` と展開できるので、**CF2 は λ 自身ではなく
+λ(λ+1) にしか依らない** ⇒ 複素次数でもそのまま回る。次数を `ComplexF64` で
+受けるのはそのため。⚠ 実次数を `complex(λ)` で渡したときの演算は切り出し前と
+同じ順序・同じ型なので**ビット同一**。
+"""
+function _coulomb_cf2(l::ComplexF64, eta::Float64, x::Float64)
+    tiny = 1e-300
+    ie = im * eta
+    b0c = complex(2.0 * (x - eta), 2.0)
+    hC = b0c == 0 ? complex(tiny) : b0c
+    Cc = hC
+    Dc = complex(0.0)
+    n = 1
+    cf = complex(0.0)
+    while n < 100000
+        an = (ie - l + (n - 1)) * (ie + l + n)
+        bn = n == 1 ? b0c : complex(2.0 * (x - eta), 2.0 * n)
+        if n == 1
+            # Lentz 初期化: CF = a₁/b₁ から
+            Cc = bn + an / tiny
+            Dc = 1.0 / bn
+            cf = an * Dc
+            hC = cf
+        else
+            Dc = bn + an * Dc
+            abs(Dc) < tiny && (Dc = complex(tiny))
+            Cc = bn + an / Cc
+            abs(Cc) < tiny && (Cc = complex(tiny))
+            Dc = 1.0 / Dc
+            delta = Cc * Dc
+            hC *= delta
+            abs(delta - 1.0) < 1e-15 && break
+        end
+        n += 1
+    end
+    pq = im * (1.0 - eta / x) + im / x * hC
+    return real(pq), imag(pq)
+end
+
 """Coulomb 関数の対数微分と (F, G) — Steed の連分数法 [B1]。
 
 CF1: f = F'_l/F_l  (実数連分数、modified Lentz)
@@ -657,38 +861,9 @@ function coulomb_fg_point(l::Real, eta::Float64, x::Float64)
         k += 1
     end
     f = fC
-    # ---- CF2 (複素 Lentz): H⁺'/H⁺ = i(1−η/x) + (i/x)·CF ----
-    #     CF = a₁/(b₁ + a₂/(b₂ + …)),  aₙ = (iη−l+n−1)(iη+l+n),  bₙ = 2(x−η+in)
-    ie = im * eta
-    b0c = complex(2.0 * (x - eta), 2.0)
-    hC = b0c == 0 ? complex(tiny) : b0c
-    Cc = hC
-    Dc = complex(0.0)
-    n = 1
-    cf = complex(0.0)
-    while n < 100000
-        an = (ie - l + (n - 1)) * (ie + l + n)
-        bn = n == 1 ? b0c : complex(2.0 * (x - eta), 2.0 * n)
-        if n == 1
-            # Lentz 初期化: CF = a₁/b₁ から
-            Cc = bn + an / tiny
-            Dc = 1.0 / bn
-            cf = an * Dc
-            hC = cf
-        else
-            Dc = bn + an * Dc
-            abs(Dc) < tiny && (Dc = complex(tiny))
-            Cc = bn + an / Cc
-            abs(Cc) < tiny && (Cc = complex(tiny))
-            Dc = 1.0 / Dc
-            delta = Cc * Dc
-            hC *= delta
-            abs(delta - 1.0) < 1e-15 && break
-        end
-        n += 1
-    end
-    pq = im * (1.0 - eta / x) + im / x * hC
-    p, q = real(pq), imag(pq)
+    # ---- CF2 ---- 260921Cl: 複素次数と共有するため `_coulomb_cf2` に切り出した。
+    #   演算の順序と型は切り出し前と同じ (実次数は `complex(l)` で渡す) = ビット同一
+    p, q = _coulomb_cf2(complex(l), eta, x)
     # ---- Steed の組み立て ----
     F = sqrt(q / ((f - p)^2 + q^2))        # 全体符号は不定 (docstring 参照)
     G = F * (f - p) / q
@@ -696,6 +871,57 @@ function coulomb_fg_point(l::Real, eta::Float64, x::Float64)
     Gp = p * G - q * F
     return F, G, Fp, Gp
 end
+
+"""複素次数 (λ = −1/2 + iμ/2) の参照対を 1 点で組む — **CF2 だけ**で足りる。
+
+**なぜ CF1 が要らないか。** Steed の 2 本の連分数のうち
+
+* **CF2** の係数は λ(λ+1) にしか依らない (`_coulomb_cf2` の注) ⇒ 複素次数でも回る。
+* **CF1** (`f = F'/F`) は λ 自身に依るが、決めているのは **H⁺ = G + iF の偏角だけ**
+  である。`F = A sin θ`, `G = A cos θ` (A = |H⁺|, θ = arg H⁺) と置くと
+  `p = A'/A`, `q = θ'` で、Wronskian `F'G − FG' = A²θ' = 1` ⇒ **A = 1/√q**。
+  振幅は CF2 だけで決まり、θ の原点は CF2 に現れない。
+  (実次数でも成り立つ: 上の Steed 解は F² + G² = 1/q を満たす。`tools/coulomb_order_test.jl` の C1)
+
+⇒ θ の原点はここでは **θ₀ = x − η ln 2x** (漸近位相から定数 −λπ/2 + σ_λ を落とした形) に取る。
+参照対を定数 φ だけ回すのは (F, G) の**直交変換**なので
+
+* Wronskian F'G − FG' = 1 は不変
+* 最小二乗 u ≈ aF + bG の**振幅 √(a²+b²) = C_l は不変** — エネルギー規格化が使うのはこれだけ
+* 位相 δ = atan2(b, a) は **φ だけずれる**。Coulomb 参照の δ はもともと mod π・全体符号
+  不定 (`l2_continuum.jl` の δ_l の注) なので、この枝では「定数だけずれた短距離位相」と読む
+"""
+function coulomb_fg_point_cf2(lamc::ComplexF64, eta::Float64, x::Float64)
+    p, q = _coulomb_cf2(lamc, eta, x)
+    # A = 1/√q は Wronskian から。q ≤ 0 は「x が転回点の内側」= CF2 の収束条件を外れた印
+    q > 0.0 || error("coulomb_fg_point_cf2: CF2 が q = $q ≤ 0 を返した " *
+                     "(x = $x が転回点の内側?  lam = $lamc, eta = $eta)")
+    A = 1.0 / sqrt(q)
+    th = x - eta * log(2.0 * x)
+    F = A * sin(th)
+    G = A * cos(th)
+    return F, G, q * G + p * F, p * G - q * F
+end
+
+"""λ(λ+1) = `lam2` を満たす λ。判別式 (2λ+1)² = 4·lam2 + 1 が負なら λ = −1/2 + iμ/2。
+
+CF2 は λ(λ+1) にしか依らないので、2 根 λ と −1−λ のどちらを返しても同じ。
+"""
+function coulomb_lam_complex(lam2::Float64)
+    d = 4.0 * lam2 + 1.0
+    return d >= 0.0 ? complex((-1.0 + sqrt(d)) / 2.0, 0.0) : complex(-0.5, 0.5 * sqrt(-d))
+end
+
+"""次数の型で分配する点関数 (実次数は従来どおり Steed の 2 連分数)。
+
+⚠ **実次数でも CF2 枝は動く** — `CoulombOrder(lam2, lam, false)` を渡せば実の λ で
+CF2 枝を通せる。その等価性 (振幅が Steed と一致し、対は定数回転しか違わない) を
+測るのが `tools/coulomb_order_test.jl` の C1〜C4。実次数を既定で Steed に流すのは
+**出荷値のビット同一を保つため**であって、精度の理由ではない。
+"""
+coulomb_fg_point(ord::CoulombOrder, eta::Float64, x::Float64) =
+    ord.real_order ? coulomb_fg_point(ord.lam, eta, x) :
+                     coulomb_fg_point_cf2(coulomb_lam_complex(ord.lam2), eta, x)
 
 """フィット窓 (等間隔 x グリッド) 上の Coulomb 関数 F, G。
 
@@ -705,19 +931,25 @@ end
 
 ⚠ 260818Cl 訂正: 旧記述の「細分 Numerov」は実装と食い違っていた。下の伝播は
 初版から 4 次 Runge–Kutta で、1 窓刻みを nsub = 40 に細分している。
+
+260921Cl: 次数は `CoulombOrder` で受ける。伝播の係数に入るのは λ(λ+1) だけなので、
+λ が複素になる枝 (z_asym > c/2 の l=0) でも**この関数は 1 つも変わらない** —
+変わるのは出発点の作り方 (`coulomb_fg_point_cf2`) だけ。
 """
-function coulomb_fg_window(l::Real, eta::Float64, xs::AbstractVector)
-    l = Float64(l)                         # 260804Cl 非整数 λ 対応 (点関数と同様)
+coulomb_fg_window(l::Real, eta::Float64, xs::AbstractVector) =   # 260804Cl 非整数 λ 対応
+    coulomb_fg_window(CoulombOrder(l), eta, xs)
+
+function coulomb_fg_window(ord::CoulombOrder, eta::Float64, xs::AbstractVector)
     nw = length(xs)
     F = zeros(nw); G = zeros(nw)
     x0 = xs[end]
-    F0, G0, Fp0, Gp0 = coulomb_fg_point(l, eta, x0)
+    F0, G0, Fp0, Gp0 = coulomb_fg_point(ord, eta, x0)
     F[end], G[end] = F0, G0
     nw == 1 && return F, G
     dxw = xs[2] - xs[1]
     nsub = 40                              # 1 窓刻みを 40 細分 (誤差 O(h⁴) ≪ 1e-12)
     h = -dxw / nsub                        # 内向き
-    w_of(t) = l * (l + 1) / t^2 + 2.0 * eta / t - 1.0
+    w_of(t) = ord.lam2 / t^2 + 2.0 * eta / t - 1.0   # 260921Cl: 係数は λ(λ+1) だけ (複素次数でも実)
     # RK4 で (u, u') を伝播しつつ各窓点で記録
     uF, dF = F0, Fp0
     uG, dG = G0, Gp0

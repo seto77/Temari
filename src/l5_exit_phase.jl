@@ -38,14 +38,25 @@
 
 `:static` は純静電、`:fm` は Furness–McCarthy 局所交換、`:xalpha` は比較用の
 旧処方。`exchange` は標的 SCF の処方であり、飛来電子の散乱場とは区別する。"""
-function elastic_scattering_potential(a::SCFAtom, eps::Float64, scat_pot::Symbol)
+function elastic_scattering_potential(a::SCFAtom, eps::Float64, scat_pot::Symbol;
+                                      nucleus::NucleusSpec=a.nucleus)
     scat_pot in (:static, :fm, :xalpha) ||
         error("scat_pot は :static / :fm / :xalpha")
+    # 260920Cl (Mott M3): 核は**飛来電子が感じる場にも効く**。既定は SCF と同じ核なので、
+    #   点核の SCF (従来の呼び出し) ではビット同一。⚠ 密度側だけ有限核にして散乱場を点核のまま
+    #   にすると「核を入れた」と言いながら電子は −z/r を見る — 2×2 の片側だけ配線した事故の型
+    # ⚠⚠ 260908Cl: `ext=NO_EXT_FIELD` を**明示的に**渡す。外部場 (Watson 球) は
+    #   電子が感じる場であって**飛来電子の散乱場ではない**。既定 (`a.ext`) のままだと
+    #   安定化場が散乱場へ黙って漏れる (codex2 が同定した経路)。
     scat_pot === :xalpha &&
-        return V_bound_callable(a; latter_charge=0.0, local_exchange=true)
+        return V_bound_callable(a; latter_charge=0.0, local_exchange=true,
+                                nucleus=nucleus, ext=NO_EXT_FIELD)
 
     vh = hartree(a.r, a.rho)
     vst = -a.z ./ a.r .+ vh
+    # ⚠ 有限核の補正は **Furness–McCarthy の前**に加える。FM は局所運動エネルギー q = ε − V_static の
+    #   関数なので、V_static に核の補正が入っていなければ核の内側で別の交換項になる
+    add_dV_nuc!(vst, nucleus, a.z, a.r)
     if scat_pot === :fm
         @inbounds for i in eachindex(vst)
             q = eps - vst[i]

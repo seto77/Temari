@@ -67,27 +67,45 @@ using Serialization
 using Printf
 # ⚠ 260818Cl 訂正: 下の「E8 休眠計装のみ」は古い — atom_cache のソース指紋と包
 #   (l5_channel.jl)、gen_production.jl のチェックポイントも sha256 を使う (どちらも自前の using を持たない)
+# 260922Cl (M2): 層は module Temari の中へ移ったが、この 4 行は Main 側にも残す — gen_production.jl と
+#   tools は自前の using を持たずにこれらの名前 (`@printf`・`sha256`・`serialize`・`norm` など) を使う
 using SHA                      # 260806Cl E8 休眠計装のみが使用 (標準ライブラリ)
 
 # ==== 層構成 (docs/architecture.md) ==================================
-# 読み込み順 = 依存順。module は導入せずフラットな名前空間のままなので、
-# tools/*.jl や gen_production.jl は従来どおり本ファイルを include すれば
-# 全ての名前がそのまま見える。単一ファイルへ戻したいときは、この順に
-# 連結すればよい。
-include(joinpath(@__DIR__, "l0_numerics.jl"))
-include(joinpath(@__DIR__, "l0_json.jl"))
-include(joinpath(@__DIR__, "l1_atomic.jl"))
-include(joinpath(@__DIR__, "l2_continuum.jl"))
-include(joinpath(@__DIR__, "l3_radial.jl"))
-include(joinpath(@__DIR__, "l4_angular.jl"))
-include(joinpath(@__DIR__, "l5_channel.jl"))    # 出口に依らない基盤
-include(joinpath(@__DIR__, "l5_exit_edx.jl"))   # 出口: F(s, E0)
-include(joinpath(@__DIR__, "l5_exit_eels.jl"))  # 出口: dσ/dΔE と阻止能寄与
-include(joinpath(@__DIR__, "l5_exit_phase.jl")) # 出口: 弾性散乱位相シフト δ_l
-include(joinpath(@__DIR__, "l5_exit_mott.jl"))  # 出口: Mott 弾性断面積 (P4)
-include(joinpath(@__DIR__, "l5_exit_gos.jl"))   # 出口: 一般化振動子強度 (E0 非依存)
-include(joinpath(@__DIR__, "l5_exit_fx.jl"))    # 出口: 原子散乱因子 f_x(s) / f_e(s)
-include(joinpath(@__DIR__, "selftest.jl"))
+# 260922Cl (R2 の M2、作者決定 I61): 層 l0〜l5 と selftest.jl は `Temari.jl` の `module Temari` の中にある
+# (読み込み順 = 依存順はそちら)。下で**全部の名前を include した側 (ふつうは Main) へ import** するので、
+# tools/*.jl や gen_production.jl は従来どおり本ファイルを include すれば全ての名前がそのまま見える
+# (上書き・`isdefined(Main, …)`・既存の atom_cache の `Main.SCFAtom` の読み込みが flat のときと同じに働く)。
+# ⚠ 同じ過程で 2 回 include されても module を作り直さない — ionization.jl の後に gen_production.jl
+#   (それがまた本ファイルを読む) を読む道具が 5 本あり、作り直すと型が 2 系統に分かれる。
+#   ⚠ **別の木**の Temari が既に読まれていたら error (flat では後の木が黙って上書きしていた)。
+# ⚠ 既に include した側で定義されている名前は import できない (Julia が「衝突、無視」と警告する)。
+#   その名前は 1 行にまとめて stderr に出す (黙って flat と違う見え方にしない)。
+if isdefined(@__MODULE__, :Temari)
+    realpath(Temari.TEMARI_SRC_DIR) == realpath(@__DIR__) ||
+        error("別の木の Temari が既にこの過程で読まれている: $(Temari.TEMARI_SRC_DIR) " *
+              "(いま読もうとしたのは $(@__DIR__))。1 つの過程で読める木は 1 つだけ")
+else
+    include(joinpath(@__DIR__, "Temari.jl"))
+    # `names(m; all=true)` は m が自分で持つ名前だけを返し、束縛の解決を起こさない (`isdefined` / `binding_module` は
+    # using 経由の名前を解決してしまい、後の import を衝突させうる)
+    let owned = Set(names(@__MODULE__; all=true)), skipped = Symbol[]
+        for n in names(Temari; all=true)
+            s = string(n)
+            n in (:Temari, :eval, :include, :TEMARI_SRC_DIR) && continue
+            (startswith(s, "#") || !(Base.isidentifier(n) || Base.isoperator(n))) && continue   # 生成名
+            n in owned && (push!(skipped, n); continue)
+            Core.eval(@__MODULE__, Expr(:import, Expr(:(:), Expr(:., :., :Temari), Expr(:., n))))
+        end
+        isempty(skipped) ||
+            println(stderr, "ionization.jl: Temari から import しなかった名前 (既に $(@__MODULE__) で定義済み): ",
+                    join(skipped, ", "))
+    end
+end
+
+# 260922Cl (L-C の E1、作者決定 I65): `--json` の共通 envelope (予約キー `temari_envelope`)。CLI の層なので
+#   module Temari の外 (include した側) に置く。`compute_*` の Dict と `write_json` は変えない
+include(joinpath(@__DIR__, "cli_envelope.jl"))
 
 # ====================================================================
 # 第 10 章  コマンドライン
@@ -228,9 +246,7 @@ function main_fx(args)
     println("密度: ", o["density"])
     println("注意: ", o["note"])
     if json_path !== nothing
-        open(json_path, "w") do io
-            write_json(io, o); println(io)
-        end
+        write_cli_json(json_path, o, ["fx"; args])   # 260922Cl (E1): envelope つき・一時ファイル + rename
         println("\n$json_path に保存しました")
     end
     return 0
@@ -298,9 +314,7 @@ function main_gos(args)
     @printf("\n診断: match_resid=%.2e / badL=%d / l_used_max=%d\n",
             d["max_match_resid"], d["bad_significant_l"], d["l_used_max"])
     if json_path !== nothing
-        open(json_path, "w") do io
-            write_json(io, o); println(io)
-        end
+        write_cli_json(json_path, o, ["gos"; args])   # 260922Cl (E1): envelope つき・一時ファイル + rename
         println("\n$json_path に保存しました")
     end
     return 0
@@ -352,9 +366,7 @@ function main_mott(args)
                     "静電 + 標的 Xα 交換 (⚠ 飛来電子の場としては誤り。比較用)")
     println("注意: ", o["note"])
     if json_path !== nothing
-        open(json_path, "w") do io
-            write_json(io, o); println(io)
-        end
+        write_cli_json(json_path, o, ["mott"; args])   # 260922Cl (E1): envelope つき・一時ファイル + rename
         println("\n$json_path に保存しました")
     end
     # JSON は診断込みで保存するが、未収束結果をバッチが成功扱いしないよう非 0 を返す。
@@ -394,9 +406,7 @@ function main_phase(args)
             " / SCF交換: ", o["scf_exchange"])
     println("注意: ", o["note"], "。スピン分解が要るなら mott 出口")
     if json_path !== nothing
-        open(json_path, "w") do io
-            write_json(io, o); println(io)
-        end
+        write_cli_json(json_path, o, ["phase"; args])   # 260922Cl (E1): envelope つき・一時ファイル + rename
         println("\n$json_path に保存しました")
     end
     return 0
@@ -487,10 +497,7 @@ function main_(args)
     @printf("\n診断: match_resid=%.2e (ゲート<1e-4) / r_tail=%.2e (<1e-4) / badL=%d (=0)\n",
             d["max_match_resid"], d["r_tail_max"], d["bad_significant_l"])
     if json_path !== nothing
-        open(json_path, "w") do io
-            write_json(io, o)
-            println(io)
-        end
+        write_cli_json(json_path, o, edge_mode ? ["edge"; args] : args)   # 260922Cl (E1): envelope つき・一時ファイル + rename
         println("\n$json_path に保存しました")
     end
     return 0

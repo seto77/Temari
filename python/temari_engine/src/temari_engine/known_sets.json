@@ -1,0 +1,48 @@
+{
+  "known_sets_version": 1,
+  "note": "Compatibility table (L-C E1-3, author decision I65 / N4-(i)). The published v7.0.0 archive cannot carry artifact_role, so its two manifests are bound here by digest. factors releases delegate to the loader shipped inside each archive; its sha256 is pinned here.",
+  "f_dataset": [
+    {
+      "dataset": "temari-dataset",
+      "set": "release",
+      "dataset_version": "7.0.0",
+      "artifact_role": "computed",
+      "manifest_path": "manifest.json",
+      "manifest_sha256": "003874179bc05194a549499596b024b6d71b9835cc3a873472076189de6e25cc",
+      "digest_sha256": "cead107ff602643aff8278c512a9efefd536fd1cfed5619e457af64cc6491577",
+      "files": 525,
+      "rows_total": 14796,
+      "model_id": "DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4-DSCF-FNUSX",
+      "archive_sha256": "1e80b1d13e014c95a28c7f3487f2e45c430a8563f42093971892affa599f96b8",
+      "doi": "10.5281/zenodo.22643468"
+    },
+    {
+      "dataset": "temari-dataset",
+      "set": "control_point_nucleus",
+      "dataset_version": "0.0.0-dev",
+      "artifact_role": "control",
+      "manifest_path": "control_point_nucleus/manifest.json",
+      "manifest_sha256": "f416da59555c0aa2881802a8d73b4a92c292fca4fe634da1a69bd3396a34dd6e",
+      "digest_sha256": "79300d2a54289d04d05b74b2227ecd41d28f0497de5744ebb7458fefc5d5361d",
+      "files": 525,
+      "rows_total": 14796,
+      "model_id": "DHFS-KS23-DiracB-KDIRAC2C-jsplit-fullrange-sym-v4-DSCF",
+      "archive_sha256": "1e80b1d13e014c95a28c7f3487f2e45c430a8563f42093971892affa599f96b8",
+      "doi": null
+    }
+  ],
+  "factors_loaders": [
+    {
+      "release": "dataset-factors 2.0.0",
+      "manifest_sha256": "d43230df627065fd5bcc872c4f19926d0a92caa4a147edbd9179ecda9ca68c5c",
+      "loader_path": "tools/temari_factors_contract.py",
+      "loader_sha256": "cc72d3a7a6cf9afa586921cb9645869bf3b1e474306adf8a9f85087566fd1267"
+    },
+    {
+      "release": "dataset-factors-ion 1.0.0",
+      "manifest_sha256": "461b747eec30a502ebef78178d6ba0081249b75bed6f8818865fe57d036e5ef2",
+      "loader_path": "tools/temari_factors_contract.py",
+      "loader_sha256": "cc72d3a7a6cf9afa586921cb9645869bf3b1e474306adf8a9f85087566fd1267"
+    }
+  ]
+}

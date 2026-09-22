@@ -90,7 +90,10 @@ function compute_edge(z::Int, tag::String, e0_keV::Float64;
                          ppw=Float64(get(settings, :ppw, CONT_PPW)),
                          dt_log=Float64(get(settings, :dt_log, CONT_DT_LOG)),
                          l_init=ch.l_b, occ_init=ch.occ_init, progress=verbose,
-                         rel=ch.rel, dirac=ch.dirac, transverse=transverse)
+                         rel=ch.rel, dirac=ch.dirac, transverse=transverse,
+                         n_sub_C=Int(get(settings, :n_sub_c, CONT_N_SUB_C)),   # 260830Cl
+                         eta_bessel=Float64(get(settings, :eta_bessel, ETA_BESSEL)),
+                         gap_join=Bool(get(settings, :gap_join, false)))
     e = eels_from_NK(N, diag, ch.E_th, ch.T0)
     return Dict{String,Any}(
         "schema_version" => SINGLE_RUN_SCHEMA_VERSION,
@@ -99,7 +102,7 @@ function compute_edge(z::Int, tag::String, e0_keV::Float64;
                                   exchange, final_state, transverse,
                                   dirac_continuum),
         "quadrature_preset" => settings_preset(settings),
-        "settings" => settings_dict(settings),
+        "settings" => settings_dict_full(settings),
         "physics" => Dict{String,Any}(
             "continuum" => ch.dirac !== nothing ? "dirac-kappa-2c" :
                            (ch.rel !== nothing ? "scalar-relativistic" : "nonrelativistic"),

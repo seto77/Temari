@@ -85,12 +85,23 @@ function RlTable(cont::ContinuumSet, r_b, u_b, q_lo::Float64, q_hi::Float64,
         for iq0 in 1:8:nq8
             for j0 in 1:jchunk:m
                 mc = min(j0 + jchunk - 1, m) - j0 + 1
+                # 260828Cl (規律解除): Miller 該当の jj を先に分類し、**2 本ずつ
+                # interleave** して流す (依存連鎖を実行ポートで重ねる)。各チェーンの
+                # 演算列は単体版と同一なので、分類しても値は変わらない。
+                pend = 0                       # 保留中の Miller jj (0 = なし)
+                pend_X = ntuple(_ -> 0.0, Val(8))
                 for jj in 1:mc                 # j_λ(q_k·r_j) を 8 q レーンで評価
                     X = _xq8(q, iq0, cont.r_int[i0+j0+jj-2])
                     xlo = _min8(X)
                     xhi = _max8(X)
                     if xlo >= 1e-12 && xhi <= thr
-                        _jl8_miller!(jl_tab8, jc8, (jj - 1) * 8, lam_max, X)
+                        if pend == 0
+                            pend = jj; pend_X = X
+                        else
+                            _jl8_miller2!(jl_tab8, jc8, (pend - 1) * 8, (jj - 1) * 8,
+                                          lam_max, pend_X, X)
+                            pend = 0
+                        end
                     elseif xlo > thr
                         _jl8_upward!(jl_tab8, jc8, (jj - 1) * 8, lam_max, X)
                     else                       # 混在境界・δ 域: レーン別スカラー
@@ -102,6 +113,7 @@ function RlTable(cont::ContinuumSet, r_b, u_b, q_lo::Float64, q_hi::Float64,
                         end
                     end
                 end
+                pend != 0 && _jl8_miller!(jl_tab8, jc8, (pend - 1) * 8, lam_max, pend_X)
                 GC.@preserve jl_tab8 begin
                     p00 = pointer(jl_tab8)
                     @inbounds for (ic, (lp, lam, _)) in enumerate(channels)
@@ -253,10 +265,11 @@ function RlTable(cont::DiracContinuumSet, r_b, G_b, F_b, q_lo::Float64,
     #   要素 1 個ごとにキャッシュラインを 1 本触っていた。転置すると連続読みで
     #   1 ライン 8 要素になる。**加算順は 1 つも変えていない** (j 昇順のまま)
     n_int = length(cont.r_int)
-    gw = zeros(n_int, nch_c)
+    gw = Matrix{Float64}(undef, n_int, nch_c)  # 260828Cl: 全要素を書くので undef で十分
     @inbounds for ic in 1:nch_c, i in 1:n_int
+        # 260828Cl: G_int/F_int は (n_int × nch) に転置済 ⇒ 読み書きとも i 連続
         gw[i, ic] = cont.w_int[i] *
-                    (gb[i] * cont.G_int[ic, i] + fb[i] * cont.F_int[ic, i])
+                    (gb[i] * cont.G_int[i, ic] + fb[i] * cont.F_int[i, ic])
     end
     # ★260808Cl 高速化 (ビット同一、監査書 P2-2): gw の**厳密ゼロの前置部**を飛ばす。
     #   連続波は r^{l+1} が e^{−60} になる半径から種を蒔くので、κ の l が大きいほど
@@ -297,12 +310,26 @@ function RlTable(cont::DiracContinuumSet, r_b, G_b, F_b, q_lo::Float64,
         for iq0 in 1:8:nq8
             for j0 in 1:jchunk:m
                 mc = min(j0 + jchunk - 1, m) - j0 + 1
+                # 260828Cl (規律解除): Miller 該当の jj を 2 本ずつ interleave
+                # (`_jl8_miller2!`)。fma 連鎖 (レイテンシ律速) を実行ポートで重ねる。
+                # 各チェーンの演算列は単体版と同一なので、対にしても値は変わらない。
+                # ⚠ 実測の系譜: 単体 1.39x → 2 本直接ペア **1.61x** → 4 本 (miller4) 1.27x
+                #   (レジスタ溢れで逆効果) → 分類配列経由の 2 本 1.46x (tuple の店回し分遅い)。
+                #   ⇒ **2 本・直接ペア**が最適。
+                pend = 0
+                pend_X = ntuple(_ -> 0.0, Val(8))
                 for jj in 1:mc                 # j_λ(q_k·r_j) を 8 q レーンで評価
                     X = _xq8(q, iq0, cont.r_int[i0+j0+jj-2])
                     xlo = _min8(X)
                     xhi = _max8(X)
                     if xlo >= 1e-12 && xhi <= thr
-                        _jl8_miller!(jl_tab8, jc8, (jj - 1) * 8, lam_max, X)
+                        if pend == 0
+                            pend = jj; pend_X = X
+                        else
+                            _jl8_miller2!(jl_tab8, jc8, (pend - 1) * 8, (jj - 1) * 8,
+                                          lam_max, pend_X, X)
+                            pend = 0
+                        end
                     elseif xlo > thr
                         _jl8_upward!(jl_tab8, jc8, (jj - 1) * 8, lam_max, X)
                     else                       # 混在境界・δ 域: レーン別スカラー
@@ -314,6 +341,7 @@ function RlTable(cont::DiracContinuumSet, r_b, G_b, F_b, q_lo::Float64,
                         end
                     end
                 end
+                pend != 0 && _jl8_miller!(jl_tab8, jc8, (pend - 1) * 8, lam_max, pend_X)
                 GC.@preserve jl_tab8 begin
                     p00 = pointer(jl_tab8)
                     @inbounds for (ic, (_, lam, _)) in enumerate(channels)
@@ -321,13 +349,39 @@ function RlTable(cont::DiracContinuumSet, r_b, G_b, F_b, q_lo::Float64,
                         # gw の添字 = i0+j0+jj-2。厳密ゼロの前置部を飛ばす (P2-2)
                         js = max(1, i_supp0[row] - i0 - j0 + 2)
                         js > mc && continue     # このチャンクは全部ゼロ加算 = 恒等
-                        acc = _ldrow8(R, ic, iq0)   # 8 q 分の累算器 = 1 zmm
+                        # 260828Cl 高速化 (規律解除): 累算器を 4 本に分けて fma の
+                        # 依存連鎖を 1/4 にする (1 本鎖はレイテンシ律速 ~4 cyc/要素)。
+                        # ⚠ 総和順序が変わる (jj 昇順 → 4-interleave) — 丸め ~1e-16 級。
                         p = p00 + lam * jc8 * 8 + (js - 1) * 64
                         col = (row - 1) * n_int + i0 + j0 - 2   # gw の線形添字
-                        for jj in js:mc
-                            acc = _acc8(acc, gw[col+jj], _ld8(p))
-                            p += 64
+                        nacc = mc - js + 1
+                        acc0 = _ldrow8(R, ic, iq0)   # 8 q 分の累算器 = 1 zmm
+                        if nacc >= 8
+                            acc1 = ntuple(_ -> 0.0, Val(8))
+                            acc2 = ntuple(_ -> 0.0, Val(8))
+                            acc3 = ntuple(_ -> 0.0, Val(8))
+                            jj = js
+                            while jj + 3 <= mc
+                                acc0 = _acc8(acc0, gw[col+jj], _ld8(p))
+                                acc1 = _acc8(acc1, gw[col+jj+1], _ld8(p + 64))
+                                acc2 = _acc8(acc2, gw[col+jj+2], _ld8(p + 128))
+                                acc3 = _acc8(acc3, gw[col+jj+3], _ld8(p + 192))
+                                p += 256
+                                jj += 4
+                            end
+                            while jj <= mc
+                                acc0 = _acc8(acc0, gw[col+jj], _ld8(p))
+                                p += 64
+                                jj += 1
+                            end
+                            acc0 = _add8(_add8(acc0, acc1), _add8(acc2, acc3))
+                        else
+                            for jj in js:mc
+                                acc0 = _acc8(acc0, gw[col+jj], _ld8(p))
+                                p += 64
+                            end
                         end
+                        acc = acc0
                         _strow8!(R, ic, iq0, acc)
                     end
                 end

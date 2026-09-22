@@ -1,0 +1,50 @@
+# Reproduce the Temari benchmark from a clean checkout (reproduce/README.md):
+# the 170 values of dataset F v7.0.0 at 200 keV, recomputed from an empty cache
+# and compared with tables/F_200keV_preview.csv (gate 1e-5, 6-decimal CSV).
+#
+# Manual and on a published release only. Temari pushes a public commit only
+# at a release, and one run costs about 9 minutes with 4 threads on the
+# author's machine (2026-09-22) -- the timeout is five times that, since the
+# hosted runner's speed is not measured yet.
+#
+# This is the same code recomputing its own reference, run on a machine the
+# author does not control. It is not an independent verification.
+name: Reproduce
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    name: benchmark from an empty cache (Julia 1.11.9)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.11.9"
+
+      # Fetches the two IAEA tables (checked against the approved sha256; a
+      # table updated by IAEA stops the run with exit 2), then exits
+      # 0 pass / 1 fail / 2 inputs / 3 no verdict.
+      - name: reproduce
+        run: bash reproduce/run.sh "$RUNNER_TEMP/reproduce"
+
+      - name: keep the output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproduce-output
+          path: |
+            ${{ runner.temp }}/reproduce/summary.txt
+            ${{ runner.temp }}/reproduce/result.jsonl
+            ${{ runner.temp }}/reproduce/log.txt
+            ${{ runner.temp }}/reproduce/err.txt
+          if-no-files-found: warn

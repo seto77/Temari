@@ -173,6 +173,16 @@ GUI はこれ以外を読みません。
 比 σ_own/σ_Bote が印字されます。過電圧 u = 2 を下回ると比が 0.3 程度まで落ちる
 のは正常で、コンソールもそう言います。
 
+`--json` を取る出口 (F(s)・`edge`・`gos`・`mott`・`phase`・`fx`) はどれも、上のキーに
+加えて予約キー `temari_envelope` を 1 つ書きます。ファイルのそれ以外は変わりません。
+中身はそのファイルの作られ方です: envelope の版、出口、`provenance: "single_run"`、
+エンジンの源指紋とその対象のファイル、git の commit (repository の外では `null`)、
+Julia の版と thread 数、出力先のパスを `<json>` に置き換えたコマンド行、トップの
+数値のキーそれぞれの単位。厳密な JSON には Inf や NaN が無いので、そうした値は
+`null` と書き、元の値とともに `nonfinite` に列挙します。単発の実行は
+`artifact_role` を名乗りません — それを与えるのはリリースの manifest だけです。
+schema は `schema/temari_envelope_v1.schema.json` です。
+
 ### `edge` 出口 { #the-edge-exit }
 
 ```bash

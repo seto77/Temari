@@ -54,6 +54,35 @@
 #   * 孤立中性原子。固体中の遮蔽・化学状態は対象外
 #   * 位相シフトは有限個の l で打ち切る。前方 (θ→0) は収束が最も遅い
 
+"""Mott (弾性散乱) 出口の処方 ID の**唯一の組み立て口**。
+
+`l5_channel.jl` の `model_id_of` と同じ掟 — 表示も JSON も必ずここを通す。
+⚠ 260921Cl 追加。それまで `tools/mott_cdf.jl` が自前で
+`"MOTT-" * scat_pot * "-KDIRAC-DSCF"` を連結しており、**交換処方も核も入っていなかった**ので、
+σ_el が 4.5 % (`:kli` 対 `:xalpha`) / 1.9e-4 (有限核) 違う走行が同じ ID を名乗れた。
+
+接尾辞は出荷側 (`model_id_of`) の規約に合わせる:
+
+| 軸 | 既定 | 非既定 |
+|---|---|---|
+| `scat_pot` | `static` / `fm` を本体に持つ | — |
+| `dirac_scf` | `true` ⇒ `-DSCF` | `false` は無印 |
+| `exchange` | `:xalpha` は無印 | `:kli` ⇒ `-KLI` |
+| `nucleus` | `:point` は無印 | `:uniform_sphere` ⇒ `-FNUSX` |
+| `pot_tag` | 無し (自分の SCF の場) | 外から場を与えたら ⇒ `-EXT<名札>` |
+
+⚠ 既定の組 (static / dirac_scf / xalpha / point) は従来と同じ
+`MOTT-static-KDIRAC-DSCF` = **ビット同一**。
+⚠ 2026-09-20 の M3 有限核の走行は接尾辞が付く前のもので、`-FNUSX` を持たない
+(`docs/notes/data/mott_m3_2026-09-20/`)。⇒ 以後の有限核の走行とは ID が違う。
+"""
+mott_model_id(scat_pot::Symbol, dirac_scf::Bool, exchange::Symbol, nucleus_kind::Symbol,
+              pot_tag::Union{Nothing,String}=nothing) =
+    "MOTT-" * String(scat_pot) * "-KDIRAC" * (dirac_scf ? "-DSCF" : "") *
+    (exchange === :kli ? "-KLI" : "") *
+    (nucleus_kind === :uniform_sphere ? "-FNUSX" : "") *
+    (pot_tag === nothing ? "" : "-EXT" * uppercase(pot_tag))
+
 """κ 分解位相シフト δ_κ から Mott の散乱振幅と断面積を組む (第 4 章相当)。
 
 `eps_eV`: 入射電子の運動エネルギー [eV]。`l_max` を省略すると、**位相シフトが
@@ -88,6 +117,16 @@ function compute_mott(z::Int, eps_eV::Float64;
                       ppw::Float64=CONT_PPW, dt_log::Float64=CONT_DT_LOG,
                       exchange::Symbol=:xalpha, scat_pot::Symbol=:static,
                       dirac_scf::Bool=true, c::Float64=C_LIGHT,
+                      # 260920Cl (M3 の帰属): 核模型。既定 `:point` = 従来の呼び出しとビット同一。
+                      #   ⚠ 半径の出所は**呼び出し側が明示する** (落とすと :uniform_sphere が黙って
+                      #   R = 1.2 A^(1/3) で走る。EDX 側で実測した事故の型)
+                      nucleus::Symbol=:point, nucleus_radius::Symbol=:experimental_rms,
+                      # 260921Cl (M3 の密度の軸、案 b): **外から与えた静電場**で走らせる口。
+                      #   ⚠ 名札 `pot_tag` が必須 — 無いと黙って別の物理を計算した走行が
+                      #   標準の走行と同じ ID を名乗れる。名札は model_id (`-EXT<名札>`) と
+                      #   physics の両方に出る。⚠ `scat_pot` は `:static` のみ
+                      #   (`:fm` は密度そのものを要るので、場だけ差し替えても意味を成さない)
+                      pot_override=nothing, pot_tag::Union{Nothing,String}=nothing,
                       verbose::Bool=true)
     # `c` はパラメータ化してある: c → ∞ でスピン軌道分裂が消え、g ≡ 0 かつ
     # Sherman 関数 ≡ 0 にならなければならない (T8 と同じ思想の構造検査 T24)
@@ -98,13 +137,22 @@ function compute_mott(z::Int, eps_eV::Float64;
     n_theta >= 2 || error("n_theta は 2 以上")
     eps = eps_eV / HARTREE_EV
     k = krel(eps, c)                            # 相対論的波数
+    # 核は 3 箇所に効く: (1) SCF 密度 (2) 飛来電子が感じる静電場 (3) 連続解の原点の種。
+    #   ⚠ 1 箇所でも落とすと「核を入れた」と言いながら別のものを計算する
+    ns = resolve_nucleus(z, nucleus; source=nucleus_radius)
     # 密度は既定で **完全 Dirac SCF** (エンジン全体の既定に揃える)。重元素では
     # 相対論的収縮が静電場に効くので、弾性散乱では無視できない
-    a = get_neutral(z; relativistic=dirac_scf, exchange=exchange)
+    a = get_neutral(z; relativistic=dirac_scf, exchange=exchange, nucleus=ns)   # (1)
     a.converged || error("Z=$z の中性 SCF が未収束")
     # 飛来電子が感じる場 (章頭 `scat_pot` 参照)。`exchange` は **SCF の交換処方**で、
     # 密度を通してしか効かない — 散乱ポテンシャルに足すかどうかは `scat_pot` の話
-    pot = elastic_scattering_potential(a, eps, scat_pot)
+    pot = elastic_scattering_potential(a, eps, scat_pot; nucleus=ns)            # (2)
+    if pot_override !== nothing
+        pot_tag === nothing && error("pot_override には pot_tag (名札) が要る")
+        scat_pot === :static || error("pot_override は scat_pot = :static のときだけ (:fm は密度が要る)")
+        occursin(r"^[A-Za-z0-9]{1,12}$", pot_tag) || error("pot_tag は英数 1-12 文字 ($pot_tag)")
+        pot = pot_override
+    end
 
     # ---- 部分波の上限: δ_κ が落ちるまで伸ばす ----
     lm = l_max === nothing ? clamp(ceil(Int, k * 6.0) + 12, 12, l_cap) : l_max
@@ -112,7 +160,7 @@ function compute_mott(z::Int, eps_eV::Float64;
     while true
         cont = DiracContinuumSet(pot, eps, lm, r_core, r_match, z;
                                  q_resolve=0.0, ppw=ppw, dt_log=dt_log,
-                                 z_asym=0.0, c=c, store_int=false)
+                                 z_asym=0.0, c=c, store_int=false, nucleus=ns)   # (3)
         nd = length(cont.delta)
         tail_range = max(1, nd - 7):nd
         dtail_raw = maximum(abs(cont.delta[ic]) for ic in tail_range)
@@ -216,9 +264,18 @@ function compute_mott(z::Int, eps_eV::Float64;
             "tol_delta" => tol_delta, "n_theta" => n_theta,
             "r_core" => r_core, "r_match" => r_match,
             "ppw" => ppw, "dt_log" => dt_log, "c_au" => c),
+        # 260921Cl: 処方 ID は `mott_model_id` が唯一の組み立て口 (道具が自前で連結しない)
+        "model_id" => mott_model_id(scat_pot, dirac_scf, exchange, ns.kind, pot_tag),
         "physics" => Dict{String,Any}(
             "dirac_scf" => dirac_scf, "scf_exchange" => String(exchange),
-            "x_alpha" => X_ALPHA, "scattering_potential" => String(scat_pot)),
+            # 260921Cl: 外から場を与えたか。⚠ 与えた場合、上の scf_exchange / nucleus は
+            #   **散乱場には効いていない** (密度の SCF を回した記録として残るだけ)
+            "external_potential" => (pot_tag === nothing ? nothing : pot_tag),
+            "x_alpha" => X_ALPHA, "scattering_potential" => String(scat_pot),
+            # 260920Cl: **解決済みの核**を書く (symbol だけだと半径の出所が復元できない)
+            "nucleus" => Dict{String,Any}("kind" => String(ns.kind), "radius_a0" => ns.radius_a0,
+                                          "radius_source" => ns.radius_source,
+                                          "radius_source_id" => String(nucleus_radius))),
         "k_a0inv" => k, "l_max" => nl - 1,
         "theta_deg" => th .* (180.0 / pi),
         "dcs_a0_2_sr" => dcs,

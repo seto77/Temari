@@ -1,0 +1,1155 @@
+{
+ "current_status_values": [
+  "not_certified"
+ ],
+ "generator": "tools/make_certification_record.py",
+ "history_status_values": [
+  "certified",
+  "uncertifiable_low_signal",
+  "uncertifiable",
+  "model_violated",
+  "box_violated",
+  "uncertifiable_scf",
+  "tool_error"
+ ],
+ "ion_series2": {
+  "cert_fp": {
+   "6d1b573e1a6ac0fe": "prereg v1.3",
+   "8f8c8872dec0b734": "prereg v1.1"
+  },
+  "entries": {
+   "Z=15,q=-3,R=1.8590": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -3,
+    "cn": 4,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000012.e001.jsonl",
+    "evidence_sha256": "f41e5ba49f1863b91b4a17276b046eb9904385484106dc8d887c599934a0836a",
+    "prereg": "prereg v1.1",
+    "radius_A": 1.859,
+    "raw_status": "certified",
+    "species": "P3- CN=4 R=1.8590",
+    "status": "certified",
+    "symbol": "P",
+    "tau_cert_fac": 0.03,
+    "z": 15
+   },
+   "Z=15,q=-3,R=1.8990": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -3,
+    "cn": 6,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000011.e001.jsonl",
+    "evidence_sha256": "c73d63a503bb2a475922e753ae2655f379752417d4d2c197033e7a0685336dda",
+    "prereg": "prereg v1.1",
+    "radius_A": 1.899,
+    "raw_status": "certified",
+    "species": "P3- CN=6 R=1.8990",
+    "status": "certified",
+    "symbol": "P",
+    "tau_cert_fac": 0.03,
+    "z": 15
+   },
+   "Z=16,q=-2,R=1.8450": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -2,
+    "cn": 6,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000010.e001.jsonl",
+    "evidence_sha256": "cd4852eb72f068b329e1403ae0c9579872f2a99a7f9aa26ea41dccdc022c93ac",
+    "prereg": "prereg v1.1",
+    "radius_A": 1.845,
+    "raw_status": "certified",
+    "species": "S2- CN=6 R=1.8450",
+    "status": "certified",
+    "symbol": "S",
+    "tau_cert_fac": 0.03,
+    "z": 16
+   },
+   "Z=16,q=-2,R=1.8680": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -2,
+    "cn": 8,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000009.e001.jsonl",
+    "evidence_sha256": "1e2acfa65e2b4fe50bf81489287cb2249734774031c1c7c8c3b60b093ac46d0a",
+    "override": {
+     "decision": "作者決定 2026-09-12 18:5x (D2) + 🔀-g (19:5x)",
+     "from": "certified",
+     "reason": "宣言域の対ごとの A = 0.944 / 0.632 / 1.400 で散りが 2.213 > 2.0。⚠ 理由は O²⁻ CN=3 と同じ (条件 5 の不成立)。⚠ 数値表は変わらない",
+     "record": "docs/notes/ion_aref_provenance_2026-09-12.md",
+     "to": "uncertifiable"
+    },
+    "prereg": "prereg v1.1",
+    "radius_A": 1.868,
+    "raw_status": "certified",
+    "species": "S2- CN=8 R=1.8680",
+    "status": "uncertifiable",
+    "symbol": "S",
+    "tau_cert_fac": 0.03,
+    "z": 16
+   },
+   "Z=33,q=-3,R=1.9670": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -3,
+    "cn": 4,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000008.e002.jsonl",
+    "evidence_sha256": "b31d3c508ee63eb7b33b309eae99d79e409b330b33bec2aedfda0053049aeb8f",
+    "prereg": "prereg v1.1",
+    "radius_A": 1.967,
+    "raw_status": "uncertifiable_low_signal",
+    "species": "As3- CN=4 R=1.9670",
+    "status": "uncertifiable_low_signal",
+    "symbol": "As",
+    "tau_cert_fac": 0.1,
+    "z": 33
+   },
+   "Z=33,q=-3,R=2.0080": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -3,
+    "cn": 6,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000007.e001.jsonl",
+    "evidence_sha256": "3a9fa0f6a3db401a6924f6be500cc4ee866d78b1fc87d3d8b526aa82e35c1bfc",
+    "prereg": "prereg v1.1",
+    "radius_A": 2.008,
+    "raw_status": "uncertifiable_low_signal",
+    "species": "As3- CN=6 R=2.0080",
+    "status": "uncertifiable_low_signal",
+    "symbol": "As",
+    "tau_cert_fac": 0.1,
+    "z": 33
+   },
+   "Z=34,q=-2,R=1.9620": {
+    "cert_fp": "6d1b573e1a6ac0fe",
+    "charge": -2,
+    "cn": 6,
+    "evidence": "docs/notes/data/ion_cert_v13_2026-09-11/ion_cert_series2_v13_20260911_000006.e001.jsonl",
+    "evidence_sha256": "b63d545b2fef91a14e869df6a27d87568cf45703db83d482282a2a724d63d3c6",
+    "prereg": "prereg v1.3",
+    "radius_A": 1.962,
+    "raw_status": "uncertifiable_low_signal",
+    "species": "Se2- CN=6 R=1.9620",
+    "status": "uncertifiable_low_signal",
+    "symbol": "Se",
+    "tau_cert_fac": 0.1,
+    "z": 34
+   },
+   "Z=34,q=-2,R=1.9810": {
+    "cert_fp": "6d1b573e1a6ac0fe",
+    "charge": -2,
+    "cn": 8,
+    "evidence": "docs/notes/data/ion_cert_v13_2026-09-11/ion_cert_series2_v13_20260911_000005.e001.jsonl",
+    "evidence_sha256": "80437a47582aa5c50c304a5416719c9ce36d22f522e9f07cd3b41dad891e8d7f",
+    "prereg": "prereg v1.3",
+    "radius_A": 1.981,
+    "raw_status": "uncertifiable_low_signal",
+    "species": "Se2- CN=8 R=1.9810",
+    "status": "uncertifiable_low_signal",
+    "symbol": "Se",
+    "tau_cert_fac": 0.1,
+    "z": 34
+   },
+   "Z=51,q=-3,R=2.1650": {
+    "cert_fp": "6d1b573e1a6ac0fe",
+    "charge": -3,
+    "cn": 4,
+    "evidence": "docs/notes/data/ion_cert_v13_2026-09-11/ion_cert_series2_v13_20260911_000004.e001.jsonl",
+    "evidence_sha256": "03a67a6975451a9cbff5e234f10a22231cb4b8577c2aa39633f444a9c0cf4f15",
+    "prereg": "prereg v1.3",
+    "radius_A": 2.165,
+    "raw_status": "certified",
+    "species": "Sb3- CN=4 R=2.1650",
+    "status": "certified",
+    "symbol": "Sb",
+    "tau_cert_fac": 0.1,
+    "z": 51
+   },
+   "Z=51,q=-3,R=2.2040": {
+    "cert_fp": "6d1b573e1a6ac0fe",
+    "charge": -3,
+    "cn": 6,
+    "evidence": "docs/notes/data/ion_cert_v13_2026-09-11/ion_cert_series2_v13_20260911_000003.e001.jsonl",
+    "evidence_sha256": "56af20f0b6e05478b8cb8fc3fc7edde7f102d12fa06e8b15de5d5fc16a807528",
+    "prereg": "prereg v1.3",
+    "radius_A": 2.204,
+    "raw_status": "certified",
+    "species": "Sb3- CN=6 R=2.2040",
+    "status": "certified",
+    "symbol": "Sb",
+    "tau_cert_fac": 0.1,
+    "z": 51
+   },
+   "Z=52,q=-2,R=2.1820": {
+    "cert_fp": "6d1b573e1a6ac0fe",
+    "charge": -2,
+    "cn": 6,
+    "evidence": "docs/notes/data/ion_cert_v13_2026-09-11/ion_cert_series2_v13_20260911_000002.e001.jsonl",
+    "evidence_sha256": "5dacc467159cb658bfbfda50aca6188e9344b84ef7ec6d3a191367982ad63f97",
+    "prereg": "prereg v1.3",
+    "radius_A": 2.182,
+    "raw_status": "certified",
+    "species": "Te2- CN=6 R=2.1820",
+    "status": "certified",
+    "symbol": "Te",
+    "tau_cert_fac": 0.1,
+    "z": 52
+   },
+   "Z=52,q=-2,R=2.2140": {
+    "cert_fp": "6d1b573e1a6ac0fe",
+    "charge": -2,
+    "cn": 8,
+    "evidence": "docs/notes/data/ion_cert_v13_2026-09-11/ion_cert_series2_v13_20260911_000001.e001.jsonl",
+    "evidence_sha256": "fe1f545ede04c39652d50192f9d7e19ec79568fc38770293db3dba89c7548972",
+    "prereg": "prereg v1.3",
+    "radius_A": 2.214,
+    "raw_status": "certified",
+    "species": "Te2- CN=8 R=2.2140",
+    "status": "certified",
+    "symbol": "Te",
+    "tau_cert_fac": 0.1,
+    "z": 52
+   },
+   "Z=7,q=-3,R=1.4350": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -3,
+    "cn": 2,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000022.e001.jsonl",
+    "evidence_sha256": "ee71c05d02d32229eb4ae1fa6d08daf3a3c5e19c9f4ca8b7af3afd0e347686e1",
+    "prereg": "prereg v1.1",
+    "radius_A": 1.435,
+    "raw_status": "certified",
+    "species": "N3- CN=2 R=1.4350",
+    "status": "certified",
+    "symbol": "N",
+    "tau_cert_fac": 0.03,
+    "z": 7
+   },
+   "Z=7,q=-3,R=1.4470": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -3,
+    "cn": 3,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000021.e001.jsonl",
+    "evidence_sha256": "cb7c21aa2134c14f7d684fdb4259b14448a4faa735193b2ea8a91bbcf66c83ac",
+    "prereg": "prereg v1.1",
+    "radius_A": 1.447,
+    "raw_status": "certified",
+    "species": "N3- CN=3 R=1.4470",
+    "status": "certified",
+    "symbol": "N",
+    "tau_cert_fac": 0.03,
+    "z": 7
+   },
+   "Z=7,q=-3,R=1.4600": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -3,
+    "cn": 4,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000020.e001.jsonl",
+    "evidence_sha256": "7fdddf8ecc6b71c063097b62ba762f2deff11e26f4396dba9c16b53dadee1d66",
+    "prereg": "prereg v1.1",
+    "radius_A": 1.46,
+    "raw_status": "certified",
+    "species": "N3- CN=4 R=1.4600",
+    "status": "certified",
+    "symbol": "N",
+    "tau_cert_fac": 0.03,
+    "z": 7
+   },
+   "Z=7,q=-3,R=1.4850": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -3,
+    "cn": 6,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000019.e001.jsonl",
+    "evidence_sha256": "86168b2c452b8c4d05b537b67fdd27cd66eec04cb230b2afab04deeaf383b9dd",
+    "prereg": "prereg v1.1",
+    "radius_A": 1.485,
+    "raw_status": "certified",
+    "species": "N3- CN=6 R=1.4850",
+    "status": "certified",
+    "symbol": "N",
+    "tau_cert_fac": 0.03,
+    "z": 7
+   },
+   "Z=7,q=-3,R=1.5100": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -3,
+    "cn": 8,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000018.e001.jsonl",
+    "evidence_sha256": "d914e5aade3521f27d3ba08ff8c2a1801aa275b866280f1ca43f384d318cf43d",
+    "prereg": "prereg v1.1",
+    "radius_A": 1.51,
+    "raw_status": "certified",
+    "species": "N3- CN=8 R=1.5100",
+    "status": "certified",
+    "symbol": "N",
+    "tau_cert_fac": 0.03,
+    "z": 7
+   },
+   "Z=8,q=-2,R=1.3500": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -2,
+    "cn": 2,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000017.e001.jsonl",
+    "evidence_sha256": "6cb6d637018f12674f31f82d68e7dc0c2e8118e5e39d233f2c73ab2c22678881",
+    "prereg": "prereg v1.1",
+    "radius_A": 1.35,
+    "raw_status": "certified",
+    "species": "O2- CN=2 R=1.3500",
+    "status": "certified",
+    "symbol": "O",
+    "tau_cert_fac": 0.03,
+    "z": 8
+   },
+   "Z=8,q=-2,R=1.3600": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -2,
+    "cn": 3,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000016.e001.jsonl",
+    "evidence_sha256": "df8587d3c806060a319b5005420bd5262a143b2c22cb3f3803f3862578e33f5e",
+    "override": {
+     "decision": "作者決定 2026-09-12 18:5x (D2) + 🔀-g (19:5x)",
+     "from": "certified",
+     "reason": "宣言域の対ごとの A = 0.788 / 1.117 / 0.526 で散りが 2.124 > 2.0。⚠ 増幅率 A を正当化する前提 (単一モードの幾何減衰なら A は段によらない) がこの種では観測で否定されている ⇒ 本規則の適用条件を満たさない。⚠ 数値表は変わらない。⚠ 「信号が小さい」とは言っていない",
+     "record": "docs/notes/ion_aref_provenance_2026-09-12.md",
+     "to": "uncertifiable"
+    },
+    "prereg": "prereg v1.1",
+    "radius_A": 1.36,
+    "raw_status": "certified",
+    "species": "O2- CN=3 R=1.3600",
+    "status": "uncertifiable",
+    "symbol": "O",
+    "tau_cert_fac": 0.03,
+    "z": 8
+   },
+   "Z=8,q=-2,R=1.3800": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -2,
+    "cn": 4,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000015.e001.jsonl",
+    "evidence_sha256": "69e8bbf7a0bae0c408279ac989a4097d6081248623d56605d890ad0928a086f3",
+    "prereg": "prereg v1.1",
+    "radius_A": 1.38,
+    "raw_status": "certified",
+    "species": "O2- CN=4 R=1.3800",
+    "status": "certified",
+    "symbol": "O",
+    "tau_cert_fac": 0.03,
+    "z": 8
+   },
+   "Z=8,q=-2,R=1.4000": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -2,
+    "cn": 6,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000014.e001.jsonl",
+    "evidence_sha256": "b67df8319271a2301b3dce52455a66fae7d410560c4d82df79acc9eb8d396abb",
+    "prereg": "prereg v1.1",
+    "radius_A": 1.4,
+    "raw_status": "certified",
+    "species": "O2- CN=6 R=1.4000",
+    "status": "certified",
+    "symbol": "O",
+    "tau_cert_fac": 0.03,
+    "z": 8
+   },
+   "Z=8,q=-2,R=1.4200": {
+    "cert_fp": "8f8c8872dec0b734",
+    "charge": -2,
+    "cn": 8,
+    "evidence": "docs/notes/data/ion_cert_v11_2026-09-10/ion_cert_series2_v11_20260910_000013.e001.jsonl",
+    "evidence_sha256": "4eea36bb1a99d0f6712aea827d5aad07839a6341439861c4298c17fd90468982",
+    "override": {
+     "decision": "作者決定 2026-09-12 18:5x (D1 = 17/5 で組み直す)",
+     "from": "certified",
+     "reason": "事前登録が定めていた [0.1τ, 0.03τ] の増幅率 A の測り直し (2026-09-12) で A = 1.30 → 2.0151 となり、cond1 が 0.191644 → 0.303342 で門 0.2 を外れた。⚠ この種の A_max は 1.3545 で、実測は 48.8 % 超過。⚠ 数値表は変わらない — 「登録した証明では認証不能」であって「誤り」ではない",
+     "record": "docs/notes/ion_aref_provenance_2026-09-12.md",
+     "to": "uncertifiable_low_signal"
+    },
+    "prereg": "prereg v1.1",
+    "radius_A": 1.42,
+    "raw_status": "certified",
+    "species": "O2- CN=8 R=1.4200",
+    "status": "uncertifiable_low_signal",
+    "symbol": "O",
+    "tau_cert_fac": 0.03,
+    "z": 8
+   }
+  },
+  "evidence_dirs": [
+   "docs/notes/data/ion_cert_v11_2026-09-10",
+   "docs/notes/data/ion_cert_v13_2026-09-11"
+  ],
+  "expected": {
+   "certified": 15,
+   "uncertifiable": 2,
+   "uncertifiable_low_signal": 5
+  },
+  "prereg": [
+   "docs/notes/ion_certification_preregistration_v1.1_2026-09-10.md",
+   "docs/notes/ion_certification_preregistration_v1.3_2026-09-11.md"
+  ],
+  "record": "docs/notes/ion_certification_run1_2026-09-10.md",
+  "species_list": "refs/data/anion_watson_radii_cmdml_2026-09-08.csv",
+  "tally": {
+   "certified": 15,
+   "uncertifiable": 2,
+   "uncertifiable_low_signal": 5
+  }
+ },
+ "neutral": {
+  "entries": {
+   "1": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z001.json",
+    "evidence_sha256": "17b2c45817642eb6e63ea6147562c49291a766209a836f3631f468f2de2e3a10",
+    "raw_status": "uncertifiable_low_signal",
+    "status": "uncertifiable_low_signal",
+    "tau_cert_fac": 0.1,
+    "z": 1
+   },
+   "10": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z010.json",
+    "evidence_sha256": "69b2c2c075100124909876e10d6ded0be49f67610e956847fb1b32323ae2743c",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 10
+   },
+   "11": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z011.json",
+    "evidence_sha256": "89c36ad016f4fd0ada56cc1cc56e1c79bfe2b7ea0c95672950afa23eff5ece30",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 11
+   },
+   "12": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z012.json",
+    "evidence_sha256": "d6eda85930ee671b8b1c65c233b1c9dc1424749dd27283af1885791b5e5cb6e2",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 12
+   },
+   "13": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z013.json",
+    "evidence_sha256": "34fd4ff9e862c8197a6f8a0df6b4b2bca23e4de3234e24528be004f989ec6f9b",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 13
+   },
+   "14": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z014.json",
+    "evidence_sha256": "5e95b3d215188684dc28dce54082c12937ce5ed189449cf3a92a38333a1a32be",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 14
+   },
+   "15": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z015.json",
+    "evidence_sha256": "3a9fb96cea4d4741cec20b265bc963efb0929a69b4b08631c5d1b97109e03dd0",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 15
+   },
+   "16": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z016.json",
+    "evidence_sha256": "2a42eaa6418382d7c99b2fbd74643944885815a15ac468501cb7a6b9dc60b73b",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 16
+   },
+   "17": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z017.json",
+    "evidence_sha256": "efd53404a1692c960e89c3240a5c75d15e538662a9a9db6973579ebd7e9372c4",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 17
+   },
+   "18": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z018.json",
+    "evidence_sha256": "3cc539be3fb07792d44c81a660ff720b20888bf869ef001248228e6663fc80d0",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 18
+   },
+   "19": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z019.json",
+    "evidence_sha256": "4b221f7dadb16cc05aa9acfaaf6e8cc01274b07fa76e3cb9257f5cbd16e7f41c",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 19
+   },
+   "2": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z002.json",
+    "evidence_sha256": "70ad1e967300ee015cc8a7f5daa98576ce2459b09c0f6deb5ae81169ee78f785",
+    "raw_status": "uncertifiable_low_signal",
+    "status": "uncertifiable_low_signal",
+    "tau_cert_fac": 0.1,
+    "z": 2
+   },
+   "20": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z020.json",
+    "evidence_sha256": "4fde1c1d987063e16dbe94c6ac7a1e8987066e4ae040d9de1437cea2e51ddb99",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 20
+   },
+   "21": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z021.json",
+    "evidence_sha256": "f5281aa2e23ae47c4d16d6512a52f7b9ed5ade896f13463bd0e6a5235751b714",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 21
+   },
+   "22": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z022.json",
+    "evidence_sha256": "ee895d23d118514afc77aba9df9c07e5d77ffc5b33b5d469857c927c36704a23",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 22
+   },
+   "23": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z023.json",
+    "evidence_sha256": "57a4b414e987502652111e36d12e1b7960a7a21a57d91893f76705c542a34d56",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 23
+   },
+   "24": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z024.json",
+    "evidence_sha256": "c2c7a4315501acb62be5b59f5e46c1c915e2207c346a1f10b7684518bf1ad300",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 24
+   },
+   "25": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z025.json",
+    "evidence_sha256": "d38c08f65d05e7b9e2869c6cab820f183aed08d8332fa78631bc49095910314d",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 25
+   },
+   "26": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z026.json",
+    "evidence_sha256": "c91377071d28b09b7e801d3328f1273b38f4edee3ffb4c6d39778dc053561ddb",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 26
+   },
+   "27": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z027.json",
+    "evidence_sha256": "88c64c57851056ee2fcf9d9fdd63e37408bc1649e78452168773e47e8d35fe29",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 27
+   },
+   "28": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z028.json",
+    "evidence_sha256": "45cc29303f41c3282aa5d42a6e6c519ae04af6d2501338a94e9d42f6995eb448",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 28
+   },
+   "29": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z029.json",
+    "evidence_sha256": "3a9bb40b9364e07c4dadec93a9bf1c04f953a46cbc44cda2248344c48f2c99bf",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 29
+   },
+   "3": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z003.json",
+    "evidence_sha256": "6ca1be7471a1dcc22a7e8e0499e09f53dd8eb4a8aadcdc68353266890c6b2312",
+    "raw_status": "uncertifiable_low_signal",
+    "status": "uncertifiable_low_signal",
+    "tau_cert_fac": 0.1,
+    "z": 3
+   },
+   "30": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z030.json",
+    "evidence_sha256": "02ff3c63e5e7f1a28e229b1aa78b461c09a438c5f5b5632dc550b4cf6406e4e9",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 30
+   },
+   "31": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z031.json",
+    "evidence_sha256": "d24a779334c35ed89c8c5bbe6ecd71e441f07c769d3a3fa4bbb892965d5378d8",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 31
+   },
+   "32": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z032.json",
+    "evidence_sha256": "f4d465474ca864acb7a048761a09d2e7512085bc1fb911fb2373fc3585425074",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 32
+   },
+   "33": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z033.json",
+    "evidence_sha256": "f1e74f13b95871e326105a3843c5e4c31b799608f35dc7687da1344143f52e9c",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 33
+   },
+   "34": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z034.json",
+    "evidence_sha256": "d41a44040ff0557e33001d7caebb636eb880cfb62d56def222093adace7b11d8",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 34
+   },
+   "35": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z035.json",
+    "evidence_sha256": "07f3d1828bc5ee5871ac87babc00c7c4d8f4ac2631e5567ed1a0f231606e91ab",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 35
+   },
+   "36": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z036.json",
+    "evidence_sha256": "b61b9c409e43ea04be534c7de99e9008778f80a6030920e99edb3e7db2afeaab",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 36
+   },
+   "37": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z037.json",
+    "evidence_sha256": "9c4292f816458f2418133c1e3cffba6912f9a8ac7b2958df2960effe1f9bfb0e",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 37
+   },
+   "38": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z038.json",
+    "evidence_sha256": "3b4ccf0a090ef971acc5cfe353fe9cebed05b72f87e0ecbcb748470ce7b1ef99",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 38
+   },
+   "39": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z039.json",
+    "evidence_sha256": "6498e9aae53e2adeb37abb2d85df80d819dbcbf589b81db2722aae344c1700a7",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 39
+   },
+   "4": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z004.json",
+    "evidence_sha256": "b4eac5a6808cdb36a40813732d10df442b5a8c863298f6612c7399bfef27bdb4",
+    "override": {
+     "decision": "作者決定 2026-09-09 17:2x (選択肢 (a))",
+     "from": "certified",
+     "reason": "Be は界の比 0.024×B_grid で通っていたが、規則の前提 (‖Δρ₃‖ の安定性) が破れている (停止許容 τ/10 → τ/30 で +13.0 % 動く)。規則の一貫性を優先して再分類した。⚠ 数値表は変わらない — 「登録した証明では認証不能」であって「誤り」ではない",
+     "record": "docs/notes/grid_certification_l1_run_2026-08-14.md",
+     "to": "uncertifiable_low_signal"
+    },
+    "raw_status": "certified",
+    "status": "uncertifiable_low_signal",
+    "tau_cert_fac": 0.1,
+    "z": 4
+   },
+   "40": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z040.json",
+    "evidence_sha256": "910284f025c42d92f4440c8c79b1e9cbc9b7d03e9e840a4f5fbfda3e36f7ba4b",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 40
+   },
+   "41": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z041.json",
+    "evidence_sha256": "d12c3f575e5a3324e41ed8fb4fae0c697ff9658e03d40845c07a4a4126460368",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 41
+   },
+   "42": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z042.json",
+    "evidence_sha256": "b4f5e65ead5ad60ef4f2cf1d00a8f1d3fd885687debf10d4b8b1992265548c36",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 42
+   },
+   "43": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z043.json",
+    "evidence_sha256": "cc5aec53b753a21c56b4791ed34729f8ac5eb427f1cc75f1dcd22817421180c9",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 43
+   },
+   "44": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z044.json",
+    "evidence_sha256": "e3213b534e40306d12b350541caa68291a5d4db1613a41b53cd7cae36cc41bf9",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 44
+   },
+   "45": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z045.json",
+    "evidence_sha256": "817b3f92500b05a22a4dc9cf1b118e58ce7f1b2a95bc09fd19a417bae62c9c91",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 45
+   },
+   "46": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z046.json",
+    "evidence_sha256": "632706e0f561a6f72c2327736f8eb858879d22a548b21788ff520e9cc9c26cde",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 46
+   },
+   "47": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z047.json",
+    "evidence_sha256": "e6b257bc6f7a11bcec9c5c10544a857b121631595340f86722715ac337dfa742",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 47
+   },
+   "48": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z048.json",
+    "evidence_sha256": "23a7cb564211dce95010298be58b9b384b5b07a1aec6d10748f34aaf6cc986a0",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 48
+   },
+   "49": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z049.json",
+    "evidence_sha256": "50153e7e1e5b6ac56824af161dfc17d7d774ed38c01dfb4710df87ac14cbd75c",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 49
+   },
+   "5": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z005.json",
+    "evidence_sha256": "70e1a456fbbbfc0c88afa33b439e5ba207fc30f81c15bef1b5d8e0804213d497",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 5
+   },
+   "50": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z050.json",
+    "evidence_sha256": "fe9b0b92e1e56243f8961a28741d25faf8d737bcb519f601fd9b7db7f8d8e86a",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 50
+   },
+   "51": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z051.json",
+    "evidence_sha256": "11da2ce60cfdb9de42beb07dded989f4a7f5f22b6d442f16c08d548ebc1cbe72",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 51
+   },
+   "52": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z052.json",
+    "evidence_sha256": "1e290a8669dce6930464a9a84397c373726fbc1485b36f4c26f20ffe87a62c59",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 52
+   },
+   "53": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z053.json",
+    "evidence_sha256": "4e555d102a6b3165070398de7a57624441393190c5b915e800a8d92fcaaa8e5f",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 53
+   },
+   "54": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z054.json",
+    "evidence_sha256": "5593c697faab45b73116875a10db9316140d8c49b4b0c585260fd34bd7fc4f8b",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 54
+   },
+   "55": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z055.json",
+    "evidence_sha256": "9323936d2e9c81ec35b718e37adc45ca80dc79974379a8702cfab063b674d86b",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 55
+   },
+   "56": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z056.json",
+    "evidence_sha256": "7be043a97a8e12a45f6634f513fb0f63cffdf96782a9a37df78e8e499a726dbf",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 56
+   },
+   "57": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z057.json",
+    "evidence_sha256": "dea7360a7bfd6835a67621f2afec7e6587677a4252988f75b2f143e28812fbb0",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 57
+   },
+   "58": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z058.json",
+    "evidence_sha256": "1c68e5814428c2a481d22c3708f0085f3800d10cef83bf0aa37a191f73ce7bb1",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 58
+   },
+   "59": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z059.json",
+    "evidence_sha256": "8f7b23b01292a5187d806ea9cff64e4b0ad27b362255c764a99a4babd5b79896",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 59
+   },
+   "6": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z006.json",
+    "evidence_sha256": "cbc180acc64dd78c064c9a310b3680174bb34f45e95c8a47499c475fcaa71c7e",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 6
+   },
+   "60": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z060.json",
+    "evidence_sha256": "52aa86266a1813b2cb828d004cfcd06a4608865a3cc1a6001f863d0852c073ce",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 60
+   },
+   "61": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z061.json",
+    "evidence_sha256": "59021c16352670b29d86c7fdfd18aa9a51df856c04a834f1001c0b1aae358a44",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 61
+   },
+   "62": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z062.json",
+    "evidence_sha256": "6c35a3830e57ee4b74077827634996d8329f47581e33ad85ff772613be02d7b2",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 62
+   },
+   "63": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z063.json",
+    "evidence_sha256": "5b2f549ad25d6b025d3823d6d8eed5aeeaf6228501e69bdb67b5a0f466329179",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 63
+   },
+   "64": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z064.json",
+    "evidence_sha256": "7d4678085cad730e842bff5a17a97d64fb18dadf05958e085679b6e5b43190f7",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 64
+   },
+   "65": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z065.json",
+    "evidence_sha256": "276e4ab384d9f5495ecda660e33b171db89ad815ba015266191868840062a6e5",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 65
+   },
+   "66": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z066.json",
+    "evidence_sha256": "45b59382f04b6724c05c0b4de360751824f79e3a0debf7eded471042dcf455de",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 66
+   },
+   "67": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z067.json",
+    "evidence_sha256": "6756acf36b32f128d04052396219165703163f10cb1a87d1e3eb442997464ab7",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 67
+   },
+   "68": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z068.json",
+    "evidence_sha256": "1530dd4123412b2e735dfac1a89935db42e0efde2a005d4aad0fa7f91d40f703",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 68
+   },
+   "69": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z069.json",
+    "evidence_sha256": "f79ed7deef4830ac01b39e54920c647f08df79b468a723cfcc792abee1c77bc4",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 69
+   },
+   "7": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z007.json",
+    "evidence_sha256": "32dab3a6f8f9459ce9a0d5a20a0bcbb32db5018f1aa70a8d46a0d5d65b24e8c9",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 7
+   },
+   "70": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z070.json",
+    "evidence_sha256": "d97594558bde99aec9c8683f24eb6174f706ff19e0e285aba20e0435712e8dbe",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 70
+   },
+   "71": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z071.json",
+    "evidence_sha256": "e83eeae979d6635ee3addcf74534d75ea0de64c8ca0b13ec7f7a1989fccbaf7e",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 71
+   },
+   "72": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z072.json",
+    "evidence_sha256": "6d273930fad56fe9fa2b75f110f8cc115bb2f278ca83829270520f4feb3f1435",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 72
+   },
+   "73": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z073.json",
+    "evidence_sha256": "a126ed0deb2b950a89216b386f31627b775a0fd6ebc052791aed5322cc253039",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 73
+   },
+   "74": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z074.json",
+    "evidence_sha256": "12055ffdf917b6573901360d6eee9545a4fca4ed428954f651df269a4f7681ab",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 74
+   },
+   "75": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z075.json",
+    "evidence_sha256": "83302a68594f2ed414cd8ee7091f65fa169e700d18ae0cd50d595130b5084c65",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 75
+   },
+   "76": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z076.json",
+    "evidence_sha256": "5a1f008ee1c0568ad3cb81e676cf60a1460b1ad4b96d798751f06e34bbec8414",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 76
+   },
+   "77": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z077.json",
+    "evidence_sha256": "97e92fefffd4d4d4f8ab53de984da39e1f00a7841ce6c2927f2f1167d55082db",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 77
+   },
+   "78": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z078.json",
+    "evidence_sha256": "62c1b0a0ab754953984ed0ef0d0dcfe3a5f83e2872c6e76440850dc4a9040354",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 78
+   },
+   "79": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z079.json",
+    "evidence_sha256": "5fc245fac8d2c1915298d6dce46216f3871a17881ce3b837ae87e3e22ecc9236",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 79
+   },
+   "8": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z008.json",
+    "evidence_sha256": "557ab39a5e1aa4cb28dfa16db3868509731a7e88f2831f95c25454a9e61a3146",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 8
+   },
+   "80": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z080.json",
+    "evidence_sha256": "312d8a9ec31cbfe460bbf9d058ec299c685a420e7d5d2114d03f22133c1ad9c7",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 80
+   },
+   "81": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z081.json",
+    "evidence_sha256": "1d354e5fe2f710ab0c15181d6c430aa5fe47890d2dcbd4d82bd7e824f589b958",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 81
+   },
+   "82": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z082.json",
+    "evidence_sha256": "11351274d7f81b197e387240926d9eb2ac9124c905f6035e9699f7651ca327c4",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 82
+   },
+   "83": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z083.json",
+    "evidence_sha256": "99e5747bfad48a2fb4ca3c5feaab8ad156920be299e1ef59c9a7b7cc771a874a",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 83
+   },
+   "84": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z084.json",
+    "evidence_sha256": "2bcde6b63218f12aef5863421b38931270e906261cdb49953d147ac2d123f78d",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 84
+   },
+   "85": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z085.json",
+    "evidence_sha256": "95a810d0f453b0d695677282e7f2a4a83d796af037fda2bcd7a1a3b15f66a811",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 85
+   },
+   "86": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z086.json",
+    "evidence_sha256": "a470667225ffcdd86a567e4c8201d5deb4082c5b46238f0e019f84a8cf183a79",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 86
+   },
+   "9": {
+    "evidence": "docs/notes/data/grid_cert_l1_2026-08-14/z009.json",
+    "evidence_sha256": "98ef4aeb4e447de05914d707c001478d30897ec214037e4140ab12b3facc7a4e",
+    "raw_status": "certified",
+    "status": "certified",
+    "tau_cert_fac": 0.1,
+    "z": 9
+   }
+  },
+  "evidence_dir": "docs/notes/data/grid_cert_l1_2026-08-14",
+  "expected": {
+   "certified": 82,
+   "uncertifiable_low_signal": 4
+  },
+  "prereg": "docs/notes/grid_certification_preregistration_v2.1_2026-08-14.md",
+  "record": "docs/notes/grid_certification_l1_run_2026-08-14.md",
+  "tally": {
+   "certified": 82,
+   "uncertifiable_low_signal": 4
+  }
+ },
+ "note": "認証の分類の機械可読な記録 (作者決定 I12 / I31)。⚠ 分類は走行の生記録から読み、作者決定による上書きは override 欄に 1 件ずつ書く。散文からは書き写さない。⚠ 2026-09-13 の作者決定 I35 / I36 で certified は降ろした: 表に書く現在の役割と状態は role_policy から決め (生成器 gen_factors.jl が検査して読む)、entries の status は事後再解析の履歴 (I37) として残す。",
+ "overrides": [
+  {
+   "decision": "作者決定 2026-09-09 17:2x (選択肢 (a))",
+   "from": "certified",
+   "key": "4",
+   "reason": "Be は界の比 0.024×B_grid で通っていたが、規則の前提 (‖Δρ₃‖ の安定性) が破れている (停止許容 τ/10 → τ/30 で +13.0 % 動く)。規則の一貫性を優先して再分類した。⚠ 数値表は変わらない — 「登録した証明では認証不能」であって「誤り」ではない",
+   "record": "docs/notes/grid_certification_l1_run_2026-08-14.md",
+   "series": "neutral",
+   "to": "uncertifiable_low_signal"
+  },
+  {
+   "decision": "作者決定 2026-09-12 18:5x (D1 = 17/5 で組み直す)",
+   "from": "certified",
+   "key": "Z=8,q=-2,R=1.4200",
+   "reason": "事前登録が定めていた [0.1τ, 0.03τ] の増幅率 A の測り直し (2026-09-12) で A = 1.30 → 2.0151 となり、cond1 が 0.191644 → 0.303342 で門 0.2 を外れた。⚠ この種の A_max は 1.3545 で、実測は 48.8 % 超過。⚠ 数値表は変わらない — 「登録した証明では認証不能」であって「誤り」ではない",
+   "record": "docs/notes/ion_aref_provenance_2026-09-12.md",
+   "series": "ion_series2",
+   "to": "uncertifiable_low_signal"
+  },
+  {
+   "decision": "作者決定 2026-09-12 18:5x (D2) + 🔀-g (19:5x)",
+   "from": "certified",
+   "key": "Z=8,q=-2,R=1.3600",
+   "reason": "宣言域の対ごとの A = 0.788 / 1.117 / 0.526 で散りが 2.124 > 2.0。⚠ 増幅率 A を正当化する前提 (単一モードの幾何減衰なら A は段によらない) がこの種では観測で否定されている ⇒ 本規則の適用条件を満たさない。⚠ 数値表は変わらない。⚠ 「信号が小さい」とは言っていない",
+   "record": "docs/notes/ion_aref_provenance_2026-09-12.md",
+   "series": "ion_series2",
+   "to": "uncertifiable"
+  },
+  {
+   "decision": "作者決定 2026-09-12 18:5x (D2) + 🔀-g (19:5x)",
+   "from": "certified",
+   "key": "Z=16,q=-2,R=1.8680",
+   "reason": "宣言域の対ごとの A = 0.944 / 0.632 / 1.400 で散りが 2.213 > 2.0。⚠ 理由は O²⁻ CN=3 と同じ (条件 5 の不成立)。⚠ 数値表は変わらない",
+   "record": "docs/notes/ion_aref_provenance_2026-09-12.md",
+   "series": "ion_series2",
+   "to": "uncertifiable"
+  }
+ ],
+ "role_policy": {
+  "applies_to": [
+   "neutral",
+   "ion_series2"
+  ],
+  "artifact_role": "computed",
+  "certification_status": "not_certified",
+  "decision": "作者決定 I35 / I36 (2026-09-13)",
+  "history_meaning": "entries[*].status is the classification from a post-hoc reanalysis with supplementary measurements and rule changes (author decision I37). It is kept for provenance and is not a certification.",
+  "reason": "The stopping-error bound claim was withdrawn (author decision I34, 2026-09-13). No table carries a certified error bound."
+ },
+ "schema": 2
+}

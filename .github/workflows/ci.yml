@@ -45,14 +45,29 @@ jobs:
       # 1.11.9 for the F(s, E0) datasets (v3/v4/v5), 1.12.6 for dataset-factors
       # v1.0.0 -- 260818Cl: so the 1.12 leg is a shipping interpreter too, not
       # only an early warning for drift.
+      # 260922Cl: the exit code alone is not enough -- a selftest that never
+      # starts (the CLI branch not reached) also exits 0. Require the final
+      # "ALL PASS (" line, as the jobq acceptance does. bash on both OSes so
+      # that pipefail carries Julia's exit code through tee.
       - name: selftest
-        run: julia --startup-file=no -t auto src/ionization.jl selftest
+        shell: bash
+        run: |
+          julia --startup-file=no -t auto src/ionization.jl selftest 2>&1 | tee selftest.log
+          bash tools/require_all_pass.sh selftest.log
 
   bit-identity:
-    # The optimized kernels must produce exactly the same bits as the scalar
-    # reference implementations. Every script in this job exits non-zero on a
-    # mismatch (260818Cl: five steps now, and the integrity one guards the
-    # cache and the production checkpoint rather than a kernel).
+    # The optimized kernels against their reference implementations. Every
+    # script in this job exits non-zero on a failure (260818Cl: five steps
+    # now, and the integrity one guards the cache and the production
+    # checkpoint rather than a kernel).
+    # 260922Cl: the author released the bit-identity discipline on 2026-08-28
+    # and d19eb9c reordered the Bessel and R arithmetic, after which the first
+    # two steps failed on every run. They now follow the author's rule
+    # (docs/notes/ci_bitident_gate_2026-09-22.md): the q-lane step gates R on
+    # the reassociation bound (n-1)*eps*sum|terms|, and over it on a 256-bit
+    # BigFloat judgement (new error <= 2 x reference error + bound); the Bessel
+    # step reports SIMD and scalar accuracy against BigFloat and fails only on
+    # NaN/Inf. The other three steps still require identical bits.
     name: bit-identity of the optimized kernels
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -63,10 +78,10 @@ jobs:
         with:
           version: "1.11.9"
 
-      - name: SIMD spherical Bessel vs scalar (288 cases)
+      - name: SIMD spherical Bessel accuracy vs BigFloat, reported (288 cases)
         run: julia --startup-file=no -t 1 tools/verify_simd_bessel.jl
 
-      - name: Radial-integral q lane vs reference (75 cases)
+      - name: Radial-integral q lane vs reference, n-eps gate + BigFloat (75 cases)
         run: julia --startup-file=no -t 1 tools/verify_e5_qlane.jl
 
       # The v4 shipping path: the q-lane SIMD accumulation and the exact-zero
@@ -81,6 +96,53 @@ jobs:
       # interleaved Legendre recurrence, all against the preserved oracle.
       - name: Angular fast path vs oracle (61440 elements)
         run: julia --startup-file=no -t 1 tools/verify_angular_pack.jl
+
+  engine-api:
+    # 260922Cl (L-C E1-E2, author decision I65): the --json envelope, the set
+    # manifest writer, the engine source list, and the Python reader
+    # (python/temari_engine). The dataset F / dataset-factors archive tests and
+    # the Julia-launching run() tests skip by name here (no dist/ in CI).
+    name: engine API (envelope, set manifests, temari_engine)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.11.9"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: envelope unit test
+        run: julia --startup-file=no --project=. tools/cli_envelope_test.jl
+
+      - name: set manifest writer
+        run: julia --startup-file=no --project=. tools/artifact_manifest_test.jl
+
+      - name: engine and factors source lists
+        run: julia --startup-file=no --project=. tools/factors_source_files_test.jl
+
+      - name: temari_engine (Python)
+        env:
+          PYTHONPATH: python/temari_engine/src
+        run: python -W error -m unittest discover -s python/temari_engine/tests -v
+
+      # 260922Cl (L-C E3, author decisions I67 and I68): re-run the six golden
+      # v1 cases and compare. Report first: identical / conforming / inconclusive
+      # are printed and pass; only "fail" (exit 1) turns the job red. The
+      # tolerance was measured on one machine only, so a first failure here on a
+      # different CPU goes to the author rather than being loosened.
+      - name: golden v1 (report; only a fail is non-zero)
+        env:
+          PYTHONPATH: python/temari_engine/src
+        run: |
+          rc=0
+          python -m temari_engine golden verification/golden_v1 --julia julia || rc=$?
+          echo "golden exit code: $rc"
+          if [ "$rc" -eq 1 ]; then exit 1; fi
 
   refcheck:
     # Cross-implementation check: the Julia engine against values produced by the

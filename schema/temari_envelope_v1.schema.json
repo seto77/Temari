@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://seto77.github.io/Temari/schema/temari_envelope_v1.schema.json",
+  "title": "Temari single-run CLI output with envelope v1",
+  "description": "A JSON file written by `julia src/ionization.jl <exit> ... --json <path>`. The reserved top-level key `temari_envelope` describes how it was produced; every other top-level key is the unchanged payload of the exit. A single-run output never carries an artifact_role: only a manifest grants one. See docs/notes/envelope_spec_v1_2026-09-22.md.",
+  "type": "object",
+  "required": ["temari_envelope", "exit"],
+  "properties": {
+    "exit": {"$ref": "#/$defs/exit"},
+    "artifact_role": false,
+    "temari_envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["envelope_version", "exit", "provenance", "engine", "command", "units", "nonfinite"],
+      "properties": {
+        "envelope_version": {"const": 1},
+        "exit": {"$ref": "#/$defs/exit"},
+        "provenance": {"const": "single_run"},
+        "engine": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source_fingerprint", "source_files", "git_commit", "git_dirty", "julia_version", "julia_threads"],
+          "properties": {
+            "source_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "source_files": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+            "git_commit": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+            "git_dirty": {"type": ["boolean", "null"]},
+            "julia_version": {"type": "string", "minLength": 1},
+            "julia_threads": {"type": "integer", "minimum": 1}
+          }
+        },
+        "command": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "units": {
+          "type": "object",
+          "additionalProperties": {
+            "enum": ["1", "electron", "elementary_charge", "eV", "keV", "hartree", "bohr", "bohr^-1", "bohr^2",
+                     "bohr^4", "bohr^6", "angstrom", "angstrom^-1", "nm^2", "nm^2/eV", "nm^2*eV", "bohr^2/sr",
+                     "eV^-1", "deg", "rad", "s"]
+          }
+        },
+        "nonfinite": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["pointer", "value"],
+            "properties": {
+              "pointer": {"type": "string", "pattern": "^(/[^/]*)+$"},
+              "value": {"enum": ["Infinity", "-Infinity", "NaN"]}
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "exit": {"enum": ["edx-form-factor", "eels-dsde", "gos", "mott-elastic", "elastic-phase", "scattering-factor"]}
+  }
+}

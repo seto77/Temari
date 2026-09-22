@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "temari-engine"
+version = "0.1.0"
+description = "Run the Temari engine from Python and read its outputs and published sets with membership and artifact_role checks"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+temari_engine = ["known_sets.json"]

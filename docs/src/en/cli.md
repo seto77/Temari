@@ -177,6 +177,18 @@ separately as `N0`), printed as a sanity ratio σ_own/σ_Bote. Below
 overvoltage u = 2 the ratio dropping to about 0.3 is normal, and the console
 says so.
 
+Every exit that takes `--json` (F(s), `edge`, `gos`, `mott`, `phase` and `fx`)
+also writes one reserved key, `temari_envelope`, beside the keys above; nothing
+else in the file changes. It records how the file was made: the envelope
+version, the exit, `provenance: "single_run"`, the engine's source fingerprint
+and the files it covers, the git commit (`null` outside a repository), the
+Julia version and thread count, the command line with the output path replaced
+by `<json>`, and the unit of every numeric top-level key. Strict JSON has no
+Inf or NaN, so such values are written as `null` and listed under `nonfinite`
+together with the original value. A single run never names an `artifact_role`;
+only a release manifest grants one. The schema is
+`schema/temari_envelope_v1.schema.json`.
+
 ### The `edge` exit
 
 ```bash

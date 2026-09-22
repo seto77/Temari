@@ -69,6 +69,11 @@ function lkin_partial_waves(kappa::Float64, z::Int, r_core::Float64, r_b, u_b;
     end
 end
 
+# 260829Cl (audit 2 gate 3): match-radius diagnostic log. Set `RMATCH_LOG[] = NTuple{3,Float64}[]`
+#   and eps_setup pushes (eps, requested radius, effective radius). Default nothing = fully off.
+const RMATCH_LOG = Ref{Union{Nothing,Vector{NTuple{3,Float64}}}}(nothing)
+const RMATCH_LOCK = ReentrantLock()
+
 """ε ノード 1 点分の**運動学に依らない**準備 (260806Cl 分離、P3 の出口共通部)。
 
 手順 (式は全て Python 版と同一):
@@ -101,7 +106,15 @@ function eps_setup(pot_ion, r_b, u_b, e::Float64, z::Int, r_core::Float64,
                    rel::Union{Nothing,RelCont}=nothing,
                    dirac::Union{Nothing,NamedTuple}=nothing,
                    lkin_frac::Float64=LKIN_RADIUS_FRAC, lkin_margin::Int=LKIN_MARGIN,
-                   lkin_rule::Symbol=LKIN_RULE)
+                   lkin_rule::Symbol=LKIN_RULE,
+                   n_sub_C::Int=CONT_N_SUB_C,   # 260830Cl: C 区間の RK4 分割数 (Dirac 経路のみ)
+                   tail_fit::Symbol=CONT_TAIL_FIT,   # 260830Cl: 尾参照のフィット入力 (監査 2 で既定を変更)
+                   r_match_scale::Float64=CONT_R_MATCH_SCALE,  # 260829Cl: 監査 2 gate 3 の R->4R (診断専用。1.0 でビット同一)
+                   r_match_cap::Float64=CONT_R_MATCH_CAP,      # 260829Cl: 同上。事前登録 3 の「400 a0 cap を外す」= Inf
+                   eta_bessel::Float64=ETA_BESSEL,   # 260830Cl: 参照関数の切替 (0.0 = 常に Coulomb。Dirac 経路のみ)
+                   gap_join::Bool=false,        # 260830Cl: A–B の継ぎ目を Simpson で繋ぐ (Dirac 経路のみ)
+                   # 260919Cl (R2): 連続状態の残りの数値定数を引数で受ける (既定は従来の値 = ビット同一)。指紋の欄 `continuum_numerics`
+                   n_fit::Int=N_FIT, r_match_tol::Float64=R_MATCH_TOL, r_match_rmax_cap::Float64=R_MATCH_RMAX_CAP)
     # 放出電子の波数。相対論 (第 3.5 章) では k_rel — グリッド密度・部分波上限・
     # マッチ半径の全てが正しい (短い) 波長基準になる。
     # `dirac` を渡すと κ 分解 Dirac 連続状態 (第 3.6 章) へ切り替わる。中身は
@@ -117,13 +130,21 @@ function eps_setup(pot_ion, r_b, u_b, e::Float64, z::Int, r_core::Float64,
     l_max = min(l_cap, max(6, min(l_kin, l_barrier)))
     r_t = (sqrt(1.0 + 2.0 * e * l_max * (l_max + 1.0)) - 1.0) / (2.0 * e)
     lam = 2.0 * pi / kappa                     # 放出電子の波長
-    r_match = min(max(r_match_for(pot_ion, e), r_core + 5.0, r_t + 3.0 * lam),
-                  400.0)
+    # 260829Cl (audit 2 gate 3): keep the requested radius and the capped one apart.
+    #   r_match_scale = 1.0 and r_match_cap = 400.0 are BIT-IDENTICAL to the old line
+    #   (multiplying by 1.0 is exact in Float64 and the cap constant is the same).
+    r_match_req = max(r_match_for(pot_ion, e; tol=r_match_tol, rmax_cap=r_match_rmax_cap), r_core + 5.0, r_t + 3.0 * lam)
+    r_match = r_match_scale * min(r_match_req, r_match_cap)
+    if RMATCH_LOG[] !== nothing        # diagnostic only (default nothing = one Ref compare)
+        lock(RMATCH_LOCK) do
+            push!(RMATCH_LOG[], (e, r_match_req, r_match))
+        end
+    end
     local cont, rl, c_ortho, resid_ortho, resid_l, ok_l
     if dirac === nothing
         cont = ContinuumSet(V_for(pot_ion, e), e, l_max, r_core, r_match;
                             q_resolve=q_hi, ppw=ppw, dt_log=dt_log,
-                            z_asym=pot_ion.z_asym, rel=rel)
+                            z_asym=pot_ion.z_asym, rel=rel, n_fit=n_fit)
         c_ortho, resid_ortho = orthogonalize_l0!(cont, r_b, u_b; l=l_init)
         rl = RlTable(cont, r_b, u_b, q_lo, q_hi, n_q, l_init)
         resid_l = cont.match_resid
@@ -131,7 +152,11 @@ function eps_setup(pot_ion, r_b, u_b, e::Float64, z::Int, r_core::Float64,
     else
         cont = DiracContinuumSet(V_for(pot_ion, e), e, l_max, r_core, r_match, z;
                                  q_resolve=q_hi, ppw=ppw, dt_log=dt_log,
-                                 z_asym=pot_ion.z_asym, c=dirac.c)
+                                 z_asym=pot_ion.z_asym, c=dirac.c, n_sub_C=n_sub_C,
+                                 tail_fit=tail_fit,
+                                 eta_bessel=eta_bessel, gap_join=gap_join,
+                                 nucleus=(hasproperty(dirac, :nucleus) ? dirac.nucleus : POINT_NUCLEUS),
+                                 n_fit=n_fit)
         # ★格子は `dirac.r_b` を使う (positional の r_b は大成分のみ規格化した
         #   出荷処方の格子。同じ _dirac_gf から出るので一致するはずだが、
         #   2 成分側の格子を明示的に使って取り違えを構造的に防ぐ)
@@ -197,7 +222,11 @@ function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
                     tr::Union{Nothing,Transverse}=nothing,
                     dirac::Union{Nothing,NamedTuple}=nothing,
                     lkin_frac::Float64=LKIN_RADIUS_FRAC, lkin_margin::Int=LKIN_MARGIN,
-                    lkin_rule::Symbol=LKIN_RULE)
+                    lkin_rule::Symbol=LKIN_RULE,
+                    n_sub_C::Int=CONT_N_SUB_C, eta_bessel::Float64=ETA_BESSEL, gap_join::Bool=false,
+                    tail_fit::Symbol=CONT_TAIL_FIT,
+                    r_match_scale::Float64=CONT_R_MATCH_SCALE, r_match_cap::Float64=CONT_R_MATCH_CAP,
+                    n_fit::Int=N_FIT, r_match_tol::Float64=R_MATCH_TOL, r_match_rmax_cap::Float64=R_MATCH_RMAX_CAP)
     kappa = (rel === nothing && dirac === nothing) ? sqrt(2.0 * e) :
             krel(e, dirac === nothing ? rel.c : dirac.c)
     q_hi = min(k_i + kf, kappa + 15.0 * z + 2.0 * maximum(K_nodes))
@@ -205,7 +234,10 @@ function eps_worker(pot_ion, r_b, u_b, e::Float64, kf::Float64, k_i::Float64,
     cont, rl, mres, orec, l_max, bad_count, r_tail =
         eps_setup(pot_ion, r_b, u_b, e, z, r_core, q_lo, q_hi, l_cap, n_q,
                   ppw, dt_log, l_init, sig_thresh, k_i + kf; rel=rel,
-                  dirac=dirac, lkin_frac=lkin_frac, lkin_margin=lkin_margin, lkin_rule=lkin_rule)
+                  dirac=dirac, lkin_frac=lkin_frac, lkin_margin=lkin_margin, lkin_rule=lkin_rule,
+                  n_sub_C=n_sub_C, eta_bessel=eta_bessel, gap_join=gap_join, tail_fit=tail_fit,
+                  r_match_scale=r_match_scale, r_match_cap=r_match_cap,
+                  n_fit=n_fit, r_match_tol=r_match_tol, r_match_rmax_cap=r_match_rmax_cap)
     # 260805Cl 変更: K 非依存の角度幾何・作業領域を 1 回だけ作る (旧: K ごとに再構築)
     ws = AngWS(k_i, kf, n_x, n_phi, rl.lam_max)
     # 260808Cl 追加: Q₊ は i にしか依らない (j にも K にも非依存) ので、Q₊ 側の
@@ -299,7 +331,11 @@ function compute_NK(pot_ion, r_b, u_b, E_th::Float64, T0::Float64,
                     transverse::Bool=false,
                     dirac::Union{Nothing,NamedTuple}=nothing,
                     lkin_frac::Float64=LKIN_RADIUS_FRAC, lkin_margin::Int=LKIN_MARGIN,
-                    lkin_rule::Symbol=LKIN_RULE)
+                    lkin_rule::Symbol=LKIN_RULE,
+                    n_sub_C::Int=CONT_N_SUB_C, eta_bessel::Float64=ETA_BESSEL, gap_join::Bool=false,
+                    tail_fit::Symbol=CONT_TAIL_FIT,
+                    r_match_scale::Float64=CONT_R_MATCH_SCALE, r_match_cap::Float64=CONT_R_MATCH_CAP,
+                    n_fit::Int=N_FIT, r_match_tol::Float64=R_MATCH_TOL, r_match_rmax_cap::Float64=R_MATCH_RMAX_CAP)
     eps_max = T0 - E_th
     eps_max <= 0 && error("below threshold")
     transverse && any(!=(0.0), K_nodes) &&
@@ -333,6 +369,9 @@ function compute_NK(pot_ion, r_b, u_b, E_th::Float64, T0::Float64,
             pot_ion, r_b, u_b, eps[ie], kf, k_i, z, r_core, K_nodes,
             l_cap, n_x, n_phi, n_q, ppw, dt_log, l_init, occ_init, sig_thresh;
             rel=rel, dirac=dirac, lkin_frac=lkin_frac, lkin_margin=lkin_margin, lkin_rule=lkin_rule,
+            n_sub_C=n_sub_C, eta_bessel=eta_bessel, gap_join=gap_join, tail_fit=tail_fit,
+            r_match_scale=r_match_scale, r_match_cap=r_match_cap,
+            n_fit=n_fit, r_match_tol=r_match_tol, r_match_rmax_cap=r_match_rmax_cap,
             tr=(transverse ? Transverse(E_th + eps[ie], T0) : nothing))
         dNde[ie, :] = row
         match_resid[ie] = mres
@@ -478,7 +517,7 @@ const _cache = Dict{Tuple,Any}()
 # 260807Cl: SCFAtom に relativistic フィールドを足したのでスキーマ版 v2 を導入。
 # 旧 v1 ファイルは読まれずに残る (無害。消したければ手で消す)
 # 260807Cl: KLI の 3 フィールド (exchange / vx / z_asym) 追加で v4 へ。
-const CACHE_SCHEMA = "v4"
+const CACHE_SCHEMA = "v5"   # 260904Cl: SCFAtom に n_iter / stop_drho / stop_de を足した (Serialization の形が変わる)
 # Publication protocol epoch.  This belongs in the filename only: changing it
 # must not alter cache_provenance or generated dataset metadata.  `fw1` keeps
 # new hardlink/first-wins writers in a disjoint namespace while an older
@@ -486,10 +525,27 @@ const CACHE_SCHEMA = "v4"
 const CACHE_PUBLICATION_EPOCH = "fw1"
 # 260809Cl: スキーマを手で上げ忘れても、SCF・束縛解へ入るソースが変われば
 # 自動的に別ファイルへ分かれる。コメントだけの変更でも安全側に失効する。
-const CACHE_FINGERPRINT_FILES = ("l0_numerics.jl", "l1_atomic.jl")
+# 260908Cl: `l1b_config.jl` を追加 (作者決定 2026-09-08 07:5x の (4))。任意配置 builder は
+#   **SCF に入る値そのもの** (latter_charge・種密度・正準配置) を決めるので、変えたら
+#   キャッシュは失効しなければならない。⚠ 専用の小さいファイルに切り出してあるのはこのため —
+#   `l5_channel.jl` を丸ごと足すと無関係な編集で全原子キャッシュが失効し、指紋を止めたくなる。
+# ⚠ `PRODUCTION_SOURCE_FILES` (gen_production.jl) には**足していない** — EDX 出口は
+#   `build_config` を通らないので、足すと無関係な編集で campaign の resume が止まるだけになる。
+#   f_x/f_e 出荷生成器の `FACTORS_SOURCE_FILES` は ionization.jl の include 行から自動で拾う。
+const CACHE_FINGERPRINT_FILES = ("l0_numerics.jl", "l1_atomic.jl", "l1b_config.jl")
 const CACHE_FINGERPRINT_FALLBACK = "embedded1"  # 単一ファイル版では手動で上げる
 const CACHE_FORMAT_VERSION = 1
 
+# 260904Cl: ⚠⚠ **改行を正規化してから hash する。** 生バイトを使うと checkout の改行方針で
+#   指紋が動く — `core.autocrlf` はこの機では system 全体 (`C:/Program Files/Git/etc/gitconfig`)
+#   で `true` で、`.gitattributes` に指定の無い `.jl` は checkout で CRLF になる。実測 (2026-09-04、
+#   commit 11d1014) では 4 つの worktree で `l0_numerics.jl` / `l1_atomic.jl` の改行が 4 通りに
+#   分かれ、同じ commit から指紋が 3 通り出ていた (全 LF d8caf10a / 全 CRLF 7a647617 /
+#   混在 48f623c5)。指紋が動くとキャッシュ名が変わって SCF が黙って全失効し、出荷 JSON の
+#   来歴も worktree の偶然で決まる。⇒ **正準は LF**。`.gitattributes` でも `src/*.jl` を LF に
+#   固定してあるが、zip 配布や autocrlf を別設定にした機のために二重に守る
+#   (`tools/dummy/gen_dummy.jl:433` が同じ理由で同じことをしている)。
+#   実演つきの検査は `tools/source_fingerprint_eol_test.py`。
 function cache_source_fingerprint()
     io = IOBuffer()
     for name in CACHE_FINGERPRINT_FILES
@@ -497,7 +553,7 @@ function cache_source_fingerprint()
         isfile(path) || return CACHE_FINGERPRINT_FALLBACK
         write(io, name)
         write(io, UInt8(0))
-        write(io, read(path))
+        write(io, codeunits(replace(read(path, String), "\r\n" => "\n")))
         write(io, UInt8(0))
     end
     return bytes2hex(sha256(take!(io)))[1:16]
@@ -572,6 +628,49 @@ function cache_envelope(key::Tuple, obj)
             payload=payload)
 end
 
+"""SCF 原子の検査のうち、**鍵の形に依らない**部分 (260908Cl に切り出した)。
+
+⚠ 既存 2 形 ("n"/"nrel"/"i"/"irel") と任意配置の新形 ("c"/"crel") で**同じものを見る**。
+片方にだけ検査を足すと、新しい鍵形が「検査の薄い抜け道」になる。
+⚠ 核タグと外部場タグは**鍵形ごとに扱いが違う**:
+  ・既存 2 形 (`optional_tags = true`) — 省略が「点核 / 場なし」を意味する可変長。
+    ⇒ タグがあるのに点核、は**鍵の正準形の破れ**なので落とす
+  ・新形 "c"/"crel" (`optional_tags = false`) — 常に 7 要素で、"point" / "none" も明示的に載る
+⚠ どちらでも「鍵が言っている核・場」と「原子が持っている核・場」の**一致**は同じように見る
+(2026-09-08 に、可変長の規則を固定長へそのまま持ち込んで検査群が落ちた)。"""
+function cache_validate_scf_common(obj, z, relativistic::Bool, xc_key, cfg_key, nucleus_key,
+                                   ext_key; optional_tags::Bool=true)
+    obj isa SCFAtom || error("SCF cache object type mismatch")
+    z isa Int || error("SCF cache Z is not Int")
+    obj.z == z || error("SCF cache Z mismatch")
+    obj.relativistic == relativistic || error("SCF cache relativistic flag mismatch")
+    xc_tag(obj.x_alpha, obj.exchange) == xc_key || error("SCF cache exchange mismatch")
+    cache_tag(obj.cfg) == cfg_key || error("SCF cache numerics mismatch")
+    (nucleus_key === nothing ? "point" : nucleus_key) == nucleus_tag(obj.nucleus) ||
+        error(nucleus_key === nothing ? "SCF cache key lacks the nucleus tag" :
+              "SCF cache nucleus mismatch")
+    optional_tags && nucleus_key == "point" &&
+        error("SCF cache nucleus tag on a point-nucleus atom")
+    # 260908Cl: ⚠⚠ 外部一体場 (Watson 球) は**値を決める**。既存 2 形の鍵はこれを持たない
+    #   ので、そこに場つきの原子が載ることを禁じる (載せられると散乱源が黙って変わる)
+    (ext_key === nothing ? "none" : ext_key) == ext_tag(obj.ext) ||
+        error(ext_key === nothing ? "SCF cache key lacks the external-field tag" :
+              "SCF cache external field mismatch")
+    obj.dt == obj.cfg.dt || error("SCF cache grid spacing mismatch")
+    length(obj.r) > 1 && length(obj.rho) == length(obj.r) ||
+        error("SCF cache radial-grid shape mismatch")
+    isfinite(first(obj.r)) && first(obj.r) > 0.0 &&
+        isfinite(last(obj.r)) && last(obj.r) > first(obj.r) ||
+        error("SCF cache radial-grid bounds invalid")
+    # 260904Cl: 停止の記録の整合。欠損・NaN・負値・converged との矛盾を弾く
+    obj.n_iter isa Int && obj.n_iter >= 1 || error("SCF cache n_iter invalid")
+    isfinite(obj.stop_drho) && obj.stop_drho >= 0.0 || error("SCF cache stop_drho invalid")
+    isfinite(obj.stop_de) && obj.stop_de >= 0.0 || error("SCF cache stop_de invalid")
+    obj.converged == (obj.stop_drho < obj.cfg.tol_rho && obj.stop_de < obj.cfg.tol_e) ||
+        error("SCF cache converged flag inconsistent with the stop residuals")
+    return obj
+end
+
 "Recognized cache keys get a cheap semantic check in addition to byte integrity."
 function cache_validate_object(key::Tuple, obj)
     isempty(key) && error("empty cache key")
@@ -579,30 +678,39 @@ function cache_validate_object(key::Tuple, obj)
     if kind in ("n", "nrel", "i", "irel")
         obj isa SCFAtom || error("SCF cache object type mismatch")
         is_ion = kind in ("i", "irel")
-        length(key) == (is_ion ? 6 : 4) || error("SCF cache key shape mismatch")
-        z = key[2]
-        z isa Int || error("SCF cache Z is not Int")
-        obj.z == z || error("SCF cache Z mismatch")
-        obj.relativistic == (kind in ("nrel", "irel")) ||
-            error("SCF cache relativistic flag mismatch")
-        xc_index = is_ion ? 5 : 3
-        cfg_index = is_ion ? 6 : 4
-        xc_tag(obj.x_alpha, obj.exchange) == key[xc_index] ||
-            error("SCF cache exchange mismatch")
-        cache_tag(obj.cfg) == key[cfg_index] || error("SCF cache numerics mismatch")
-        obj.dt == obj.cfg.dt || error("SCF cache grid spacing mismatch")
-        length(obj.r) > 1 && length(obj.rho) == length(obj.r) ||
-            error("SCF cache radial-grid shape mismatch")
-        isfinite(first(obj.r)) && first(obj.r) > 0.0 &&
-            isfinite(last(obj.r)) && last(obj.r) > first(obj.r) ||
-            error("SCF cache radial-grid bounds invalid")
+        # 260829Cl: 有限核は鍵の末尾に nucleus_tag を 1 要素足す (点核は従来の形のまま)
+        base_len = is_ion ? 6 : 4
+        # 260919Cl (R2): SCF の予算が既定と違う鍵は末尾に ("bud", tag) の 2 要素を持つ (`_key_with_budget`)。
+        #   形の検査はその 2 要素を外した核心部に対して行う (既定の鍵の形は不変)
+        has_bud = length(key) >= base_len + 2 && key[end-1] == "bud"
+        core = has_bud ? key[1:end-2] : key
+        length(core) in (base_len, base_len + 1) || error("SCF cache key shape mismatch")
+        z = core[2]
+        cache_validate_scf_common(obj, z, kind in ("nrel", "irel"),
+                                  core[is_ion ? 5 : 3], core[is_ion ? 6 : 4],
+                                  length(core) == base_len + 1 ? core[end] : nothing,
+                                  nothing)          # 既存 2 形は外部場を表せない
         expected_occ = if is_ion
-            shell = (key[3], key[4])
+            shell = (core[3], core[4])
             [(n, l, q - ((n, l) == shell ? 1.0 : 0.0)) for (n, l, q) in ORBITALS[z]]
         else
             ORBITALS[z]
         end
         obj.occ == expected_occ || error("SCF cache occupancy mismatch")
+    elseif kind in ("c", "crel")
+        # 260908Cl: ⚠⚠ **任意配置の新形。** これが無いと `cache_validate_object` は
+        #   新形を**素通りさせる** (実測: 原子でない文字列を渡しても返ってきた)。
+        #   鍵は固定長 7 = (kind, z, config_tag, xc_tag, cache_tag, nucleus_tag, ext_tag)。
+        #   ⚠ 配置は 64 bit の tag でしか鍵に入らないので、**要求配置そのものとの照合は
+        #     取り出し口の `assert_atom_matches` が行う** (ここは鍵との自己整合まで)。
+        obj isa SCFAtom || error("SCF cache object type mismatch")
+        length(key) == 7 || error("SCF cache key shape mismatch")
+        z = key[2]
+        cache_validate_scf_common(obj, z, kind == "crel", key[4], key[5], key[6], key[7];
+                                  optional_tags=false)
+        # 正準形であること自体が不変条件 (q=0 を残した occ は別配置。canon_occ が落とす)
+        canon_occ(obj.occ) == obj.occ || error("SCF cache occupancy is not canonical")
+        config_tag(z, obj.occ) == key[3] || error("SCF cache configuration mismatch")
     elseif kind == "d"
         obj isa Tuple || error("bound-state cache object type mismatch")
         two_component = key[end] == "2c"
@@ -1041,6 +1149,85 @@ end
 "SCF ログの処方タグ (Dirac / KLI の取り違えをログの目で見つけられるように)"
 _scf_tag(a::SCFAtom) = (a.relativistic ? "/Dirac" : "") * (a.exchange === :kli ? "/KLI" : "")
 
+# ====================================================================
+# 束縛の診断 (260908Cl。ゲート G6 = §10.4 の材料)
+# ====================================================================
+# ⚠⚠ **SCF の収束は、自由な系として束縛されていることの保証ではない。**
+#   多価陰イオンは箱 (`rmax`) が電子を支えているだけでも「収束」しうる
+#   (実測: O の N=9.5 で a₀M₂/3 が rmax = 30/60/120 で 36 / 98 / 469 Å ≈ rmax²)。
+
+"""占有された副殻の固有値を、**収束ポテンシャルから解き直して**返す。
+
+⚠⚠ `SCFAtom.eps` は相対論経路では **κ 占有加重平均**であり (`l1_atomic.jl` の
+「κ 平均 (診断用)」)、κ 分解の固有値は返る原子に保存されていない。⇒ ここで解き直す。
+⚠ SCF の最終反復が使った場と同じ場 (`V_bound_callable`) で解くので、値は
+SCF 内部の固有値と**同じもの**である (挟み込み窓が違うので最下位ビットは一致しない)。
+
+⚠⚠⚠ **「束縛していなければ例外になる」は誤りだった** (2026-09-08、codex2 の指摘を実測で再現)。
+節点二分法は探索窓が固有値を挟んでいるかを確かめず、**最後の中点をそのまま返す**。
+⇒ **束縛状態が 1 つも無い `V ≡ 0` を渡しても負の値が返る**:
+
+    solve_bound(V=0, l=0, nodes=0)            -> -1.0000000045e-04
+    dirac_orbital_on_grid(V=0, κ=-1, nodes=0) -> -1.0000000048e-04
+
+どちらも探索窓の上端 `e_hi = -1e-4` に**張り付いた**値で、`E < 0` だけを見る検査は
+これを合格にしてしまう。⇒ **窓の端に張り付いていないこと**を併せて返す
+(`inside` 欄)。判定は SCF ループが使っている「挟み込みが低すぎる」検出と同じ形
+(`abs(E - e_hi) < 1e-5 * max(1, |e_hi|)`) にそろえる。
+
+⚠ **この検査が名乗れるのは「束縛エネルギーが窓の上端より深い」まで**である。
+`-1e-4 Ha < E < 0` の真に弱い束縛状態は、この窓では**認証できない** (合否ではなく
+検査不能)。⇒ 見つからなかったことは「非束縛の証明」ではない。
+
+戻り値 = (n, l, κ, q, ε, inside) の並び。非相対論では κ = 0 を置く。"""
+# 束縛解ソルバの既定の探索上端 (`l1_atomic.jl` の `e_hi`)。⚠ ここに張り付いた値は解ではない
+const EIG_SEARCH_TOP = -1.0e-4
+
+"窓の端に張り付いていないか。SCF ループの「挟み込みが低すぎる」検出と同じ形にそろえる"
+eig_inside_window(E::Float64) =
+    E < EIG_SEARCH_TOP && abs(E - EIG_SEARCH_TOP) >= 1.0e-5 * max(1.0, abs(EIG_SEARCH_TOP))
+
+function kappa_resolved_eigenvalues(a::SCFAtom)
+    pot = V_bound_callable(a; latter_charge = a.z_asym)
+    out = Tuple{Int,Int,Int,Float64,Float64,Bool}[]
+    if a.relativistic
+        for (nq, lq, kap, q) in dirac_occupancy(a.occ)
+            q <= 0.0 && continue
+            E, _, _ = dirac_orbital_on_grid(pot, a.z, a.r, a.dt; kappa = kap,
+                                            n_nodes = nq - lq - 1, numerics = a.cfg.id,
+                                            nucleus = a.nucleus)
+            push!(out, (nq, lq, kap, q, E, eig_inside_window(E)))
+        end
+    else
+        for (nq, lq, q) in a.occ
+            q <= 0.0 && continue
+            E, _, _ = solve_bound(pot, lq, nq - lq - 1; r0 = a.r[1],
+                                  rmax = a.r[end] * (1.0 + 1e-12), dt = a.dt)
+            push!(out, (nq, lq, 0, q, E, eig_inside_window(E)))
+        end
+    end
+    return out
+end
+
+"""格子の**外側の領域**にいる電子数 4π∫_{r>r_split} r²ρ dr。
+
+⚠ **f_x だけを見る境界検査は無力である** — 実測 (O の N=9.5) では r_max を 4 倍に
+しても f_x(s=0.2) は 3 桁目までしか動かないのに、r² で重みを持つ M₂ は 13 倍になった。
+⇒ 遠方の電子を**直接数える**。
+
+⚠ f_x と同じ求積 (対数格子上の Simpson、dr = r dt) の重みを使い、外側の添字だけ足す。
+分割点でちょうど正しい Simpson 区間になるとは限らないので、これは**桁を見る診断**であって
+高精度の積分ではない (判定は 1e-6 電子という緩い閾値で行う)。"""
+function outer_region_electrons(a::SCFAtom, r_split::Float64)
+    w = simpson_weights(length(a.r), a.dt) .* a.r
+    acc = 0.0
+    @inbounds for i in eachindex(a.r)
+        a.r[i] > r_split || continue
+        acc += 4.0 * pi * a.r[i]^2 * a.rho[i] * w[i]
+    end
+    return acc
+end
+
 function build_neutral(z::Int; kw...)
     t0 = time()
     a = SCFAtom(z, ORBITALS[z]; latter_charge=1.0, kw...)
@@ -1052,19 +1239,23 @@ end
 "内殻 (n,l) から電子を 1 個抜いた配置の SCF (relaxed core-hole。j は区別しない)"
 function build_ion(z::Int, shell::Tuple{Int,Int}; relativistic::Bool=false,
                    x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
-                   cfg::NumericsConfig=NumericsConfig(), kw...)
+                   cfg::NumericsConfig=NumericsConfig(), nucleus::NucleusSpec=POINT_NUCLEUS,
+                   budget::NamedTuple=SCF_BUDGET, retry::Bool=false,   # 260919Cl (R2): SCF の予算 (retry = 再試行の値を使う)
+                   kw...)
     t0 = time()
     # ⚠ 種にする中性原子も**同じ config** で引く。ここで既定に落とすと、
     #   別の格子・別の数値で解いた密度を種にしてしまう
     neutral = get_neutral(z; relativistic=relativistic, x_alpha=x_alpha,
-                          exchange=exchange, cfg=cfg)
+                          exchange=exchange, cfg=cfg, nucleus=nucleus, budget=budget)
     occ = [(n, l, q - ((n, l) == shell ? 1.0 : 0.0)) for (n, l, q) in ORBITALS[z]]
     nel = sum(q for (_, _, q) in occ)
     # latter_charge=2 は :xalpha 用。:kli では使われず、尾は Z−N+1 = 2 が物理から出る
     a = SCFAtom(z, occ; latter_charge=2.0, relativistic=relativistic, x_alpha=x_alpha,
                 exchange=exchange, numerics=Symbol(cfg.id), dt=cfg.dt, r0=cfg.r0,
                 rmax=cfg.rmax, tol_rho=cfg.tol_rho, tol_e=cfg.tol_e,
-                rho_init=neutral.rho .* (nel / neutral.nel), kw...)
+                rho_init=neutral.rho .* (nel / neutral.nel), nucleus=nucleus,
+                beta=(retry ? budget.retry_beta : budget.beta), max_iter=(retry ? budget.retry_max_iter : budget.max_iter),
+                eig_tol=budget.eig_tol, kw...)
     @printf("[SCF%s] ion Z=%d hole@%s: %.0fs converged=%s\n",
             _scf_tag(a), z, shell, time() - t0, a.converged)
     return a
@@ -1081,30 +1272,120 @@ end
 **再試行が誰も読まないキーへ書き込み、未収束の原子がそのまま使われる**という
 回帰を実際に作った (260811Cl に発見・修正)。取得・削除・再構築・保存が
 **同じ 1 つの関数からキーを引く**ようにして、その事故の形を構造的に潰す。"""
+# 260919Cl (R2): SCF の予算 (beta / max_iter / 再試行 / eig_tol) が既定と違うときだけ鍵の末尾に足す (既定の鍵は不変)
+# ⚠ 260919Cl (codex 4 巡目 #1 を再現して修正): 鍵はそのままファイル名になる (`cache_file`) ので、既定でない設定の tag を全部
+#   連結すると NTFS の成分長 (255) を超えた (実測: 束縛の "2c" 鍵で 283 文字 → cache_put がメモリ退避して disk に残らない)。
+#   追加する tag は sha256 の先頭 16 桁の digest にする (既定の鍵は不変)
+_short_tag(s::AbstractString) = bytes2hex(sha256(codeunits(s)))[1:16]
+_key_with_budget(key::Tuple, budget::NamedTuple) = budget == SCF_BUDGET ? key : (key..., "bud", _short_tag(scf_budget_tag(budget)))
 neutral_cache_key(z::Int, relativistic::Bool, x_alpha::Float64, exchange::Symbol,
-                  cfg::NumericsConfig) =
-    (relativistic ? "nrel" : "n", z, xc_tag(x_alpha, exchange), cache_tag(cfg))
+                  cfg::NumericsConfig, nucleus::NucleusSpec=POINT_NUCLEUS; budget::NamedTuple=SCF_BUDGET) =
+    _key_with_budget(is_point(nucleus) ?
+    (relativistic ? "nrel" : "n", z, xc_tag(x_alpha, exchange), cache_tag(cfg)) :
+    (relativistic ? "nrel" : "n", z, xc_tag(x_alpha, exchange), cache_tag(cfg), nucleus_tag(nucleus)), budget)
 
 "空孔イオンの SCF キャッシュキー (`neutral_cache_key` と対。上の注意書きを読むこと)"
 ion_cache_key(z::Int, shell, relativistic::Bool, x_alpha::Float64, exchange::Symbol,
-              cfg::NumericsConfig) =
+              cfg::NumericsConfig, nucleus::NucleusSpec=POINT_NUCLEUS; budget::NamedTuple=SCF_BUDGET) =
+    _key_with_budget(is_point(nucleus) ?
     (relativistic ? "irel" : "i", z, shell[1], shell[2],
-     xc_tag(x_alpha, exchange), cache_tag(cfg))
+     xc_tag(x_alpha, exchange), cache_tag(cfg)) :
+    (relativistic ? "irel" : "i", z, shell[1], shell[2],
+     xc_tag(x_alpha, exchange), cache_tag(cfg), nucleus_tag(nucleus)), budget)
+
+"""⚠⚠ **返ってきた原子が要求どおりかを、鍵ではなく実値で照合する** (260908Cl。
+作者決定 2026-09-08 07:5x の (1) = I5)。
+
+なぜ鍵では足りないか: `xa_tag` は `round(Int, α*100)` なので **α = 2/3 と 0.67 が
+同じ `"xa67"` に潰れる** (実測。中性基底の鍵が完全に一致する)。鍵形を変えると
+原子キャッシュが全部孤児になる (SCF は高価) ので、**鍵は衝突したままにして
+取り出し口で fail-closed** にする。⚠ 費用の問題は残る — 近い 2 つの α を同時に使うと
+片方は毎回再計算になる (正しさの問題ではない)。
+
+⚠ `exchange=:kli` でも α は無関係ではない — KLI の**初回反復は Xα でブートストラップ**
+する (`src/l1_atomic.jl` の SCF ループ) ので、α は解の経路に入る。⇒ :kli でも厳密照合する。
+
+⚠⚠ **メモリ命中・ディスク命中・新規計算の 3 経路すべてで呼ぶこと。**
+`disk_cached` の戻り値を包めば 3 経路とも通る (memory `total-gate-above-semantic-gates` =
+上位の門を 1 つ置いて下の意味的な門を盲いにしない)。"""
+function assert_atom_matches(a, z::Int, occ, relativistic::Bool, x_alpha::Float64,
+                             exchange::Symbol, cfg::NumericsConfig,
+                             nucleus::NucleusSpec=POINT_NUCLEUS,
+                             ext::ExternalField=NO_EXT_FIELD)
+    a isa SCFAtom || error("SCF request mismatch: not an SCFAtom")
+    a.z == z || error("SCF request mismatch: Z (got $(a.z), want $z)")
+    a.occ == occ || error("SCF request mismatch: occupancy")
+    a.relativistic == relativistic ||
+        error("SCF request mismatch: relativistic (got $(a.relativistic), want $relativistic)")
+    a.x_alpha == x_alpha ||
+        error("SCF request mismatch: x_alpha (got $(a.x_alpha), want $x_alpha; " *
+              "xc_tag collapses both to $(xc_tag(x_alpha, exchange)))")
+    a.exchange === exchange ||
+        error("SCF request mismatch: exchange (got $(a.exchange), want $exchange)")
+    cache_tag(a.cfg) == cache_tag(cfg) || error("SCF request mismatch: numerics")
+    nucleus_tag(a.nucleus) == nucleus_tag(nucleus) || error("SCF request mismatch: nucleus")
+    ext_tag(a.ext) == ext_tag(ext) || error("SCF request mismatch: external field")
+    return a
+end
 
 """中性原子の SCF (キャッシュ付き)。`relativistic=true` で完全 Dirac SCF、
 `exchange=:kli` で厳密交換。キーの規約は `neutral_cache_key` を参照。"""
 get_neutral(z::Int; relativistic::Bool=false, x_alpha::Float64=X_ALPHA,
-            exchange::Symbol=:xalpha, cfg::NumericsConfig=NumericsConfig()) =
-    disk_cached(() -> build_neutral(z; relativistic=relativistic, x_alpha=x_alpha,
-                                    exchange=exchange, numerics=Symbol(cfg.id),
-                                    dt=cfg.dt, r0=cfg.r0, rmax=cfg.rmax,
-                                    tol_rho=cfg.tol_rho, tol_e=cfg.tol_e),
-                neutral_cache_key(z, relativistic, x_alpha, exchange, cfg))
+            exchange::Symbol=:xalpha, cfg::NumericsConfig=NumericsConfig(),
+            nucleus::NucleusSpec=POINT_NUCLEUS, budget::NamedTuple=SCF_BUDGET) =   # 260919Cl (R2): 予算を引数で
+    assert_atom_matches(
+        disk_cached(() -> build_neutral(z; relativistic=relativistic, x_alpha=x_alpha,
+                                        exchange=exchange, numerics=Symbol(cfg.id),
+                                        dt=cfg.dt, r0=cfg.r0, rmax=cfg.rmax,
+                                        tol_rho=cfg.tol_rho, tol_e=cfg.tol_e,
+                                        beta=budget.beta, max_iter=budget.max_iter, eig_tol=budget.eig_tol,
+                                        nucleus=nucleus),
+                    neutral_cache_key(z, relativistic, x_alpha, exchange, cfg, nucleus; budget=budget)),
+        z, ORBITALS[z], relativistic, x_alpha, exchange, cfg, nucleus)
 get_ion(z::Int, shell; relativistic::Bool=false, x_alpha::Float64=X_ALPHA,
-        exchange::Symbol=:xalpha, cfg::NumericsConfig=NumericsConfig()) =
-    disk_cached(() -> build_ion(z, shell; relativistic=relativistic, x_alpha=x_alpha,
-                                exchange=exchange, cfg=cfg),
-                ion_cache_key(z, shell, relativistic, x_alpha, exchange, cfg))
+        exchange::Symbol=:xalpha, cfg::NumericsConfig=NumericsConfig(),
+        nucleus::NucleusSpec=POINT_NUCLEUS, budget::NamedTuple=SCF_BUDGET) =
+    assert_atom_matches(
+        disk_cached(() -> build_ion(z, shell; relativistic=relativistic, x_alpha=x_alpha,
+                                    exchange=exchange, cfg=cfg, nucleus=nucleus, budget=budget),
+                    ion_cache_key(z, shell, relativistic, x_alpha, exchange, cfg, nucleus; budget=budget)),
+        z, [(n, l, q - ((n, l) == shell ? 1.0 : 0.0)) for (n, l, q) in ORBITALS[z]],
+        relativistic, x_alpha, exchange, cfg, nucleus)
+
+"""任意配置の SCF (キャッシュ付き。260908Cl)。鍵は `config_cache_key` が唯一の出所で、
+既存の 2 配置 (中性基底・(n,l) 空孔) は**既存の鍵形へ落ちる** — つまり同じ物理が
+2 つのファイルに分かれない。
+
+⚠ 非基底の配置は**同設定の中性基底を種**にする (`build_config` の掟)。種は
+`get_neutral` から引くので、種そのものも上の実値照合を通る。
+⚠ 外部場つき (Watson 球) の要求では**種は場なし**で引く — 中性は安定化を要らない。"""
+function get_config(z::Int, occ; relativistic::Bool=false, x_alpha::Float64=X_ALPHA,
+                    exchange::Symbol=:xalpha, cfg::NumericsConfig=NumericsConfig(),
+                    nucleus::NucleusSpec=POINT_NUCLEUS,
+                    ext::ExternalField=NO_EXT_FIELD)
+    c = canon_occ(occ)
+    key = config_cache_key(z, c, relativistic, x_alpha, exchange, cfg, nucleus, ext)
+    a = disk_cached(key) do
+        seed = is_ground_neutral(z, c) ? nothing :
+               get_neutral(z; relativistic=relativistic, x_alpha=x_alpha,
+                           exchange=exchange, cfg=cfg, nucleus=nucleus)
+        t0 = time()
+        at = build_config(z, c; neutral=seed, relativistic=relativistic, x_alpha=x_alpha,
+                          exchange=exchange, cfg=cfg, nucleus=nucleus, ext=ext)
+        @printf("[SCF%s] config Z=%d N=%.6g%s: %.0fs converged=%s\n", _scf_tag(at), z,
+                config_nel(c), is_no_field(ext) ? "" : " ext=$(ext_tag(ext))",
+                time() - t0, at.converged)
+        at
+    end
+    # ⚠ 既存 2 形の鍵へ落ちた場合、`a.occ` は `build_neutral` / `build_ion` が作った occ で
+    #   ある (空孔は q=0 の項を**残す**)。⇒ 照合する期待値も鍵形ごとに分ける
+    want_occ = key[1] in ("c", "crel") ? c :
+               key[1] in ("i", "irel") ?
+               [(n, l, q - ((n, l) == (key[3], key[4]) ? 1.0 : 0.0)) for (n, l, q) in ORBITALS[z]] :
+               ORBITALS[z]
+    return assert_atom_matches(a, z, want_occ, relativistic, x_alpha, exchange, cfg,
+                               nucleus, ext)
+end
 
 """SCF の収束を保証 (未収束なら混合を弱めて再試行、それでも駄目なら停止)。
 
@@ -1112,30 +1393,39 @@ get_ion(z::Int, shell; relativistic::Bool=false, x_alpha::Float64=X_ALPHA,
 SCF がそもそも要らない (元素あたり SCF 1 回分の節約)。
 
 ⚠ `cfg` は**取得にも再構築にも同じものを渡す**。再構築だけ既定に落ちると、
-別の格子で解いた原子を収束済みとしてキャッシュへ置くことになる。"""
+別の格子で解いた原子を収束済みとしてキャッシュへ置くことになる。
+⚠⚠ **`nucleus` も同じ** (260830Cl に実際に落ちていた) — 取得だけ既定に落ちると
+**点核の収束を見て有限核の未収束を見逃す**。key・rebuild・取得の 3 箇所すべてに渡すこと。"""
 function ensure_converged(z::Int, shell; relativistic::Bool=false,
                           x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
-                          need_ion::Bool=true, cfg::NumericsConfig=NumericsConfig())
+                          need_ion::Bool=true, cfg::NumericsConfig=NumericsConfig(),
+                          nucleus::NucleusSpec=POINT_NUCLEUS,
+                          budget::NamedTuple=SCF_BUDGET)   # 260919Cl (R2): 予算 (初回と再試行) を引数で。key・rebuild・取得の 3 箇所に渡す
     rl = relativistic
     for (kind, key, rebuild) in (
-            ("neutral", neutral_cache_key(z, rl, x_alpha, exchange, cfg),
+            ("neutral", neutral_cache_key(z, rl, x_alpha, exchange, cfg, nucleus; budget=budget),
              () -> build_neutral(z; relativistic=rl, x_alpha=x_alpha,
                                  exchange=exchange, numerics=Symbol(cfg.id),
                                  dt=cfg.dt, r0=cfg.r0, rmax=cfg.rmax,
                                  tol_rho=cfg.tol_rho, tol_e=cfg.tol_e,
-                                 beta=SCF_RETRY.beta, max_iter=SCF_RETRY.max_iter)),
-            ("ion", ion_cache_key(z, shell, rl, x_alpha, exchange, cfg),
+                                 beta=budget.retry_beta, max_iter=budget.retry_max_iter, eig_tol=budget.eig_tol,
+                                 nucleus=nucleus)),
+            ("ion", ion_cache_key(z, shell, rl, x_alpha, exchange, cfg, nucleus; budget=budget),
              () -> build_ion(z, shell; relativistic=rl, x_alpha=x_alpha,
-                             exchange=exchange, cfg=cfg,
-                             beta=SCF_RETRY.beta, max_iter=SCF_RETRY.max_iter)))
+                             exchange=exchange, cfg=cfg, nucleus=nucleus,
+                             budget=budget, retry=true)))
         kind == "ion" && !need_ion && continue
+        # ⚠⚠ 260830Cl (Sol 指摘、実測で確認): **取得にも `nucleus` を渡す**。落とすと点核の原子を
+        #   取ってきてその収束を見るので、**有限核 SCF の未収束を見逃す** (key と rebuild には渡していた
+        #   のに取得だけ既定 = POINT_NUCLEUS に落ちていた)。上の docstring が `cfg` について警告している
+        #   のと同じ型の欠陥。`nucleus = POINT_NUCLEUS` のときは既定と同値なのでビット同一
         a = kind == "neutral" ?
             get_neutral(z; relativistic=rl, x_alpha=x_alpha, exchange=exchange,
-                        cfg=cfg) :
+                        cfg=cfg, nucleus=nucleus, budget=budget) :
             get_ion(z, shell; relativistic=rl, x_alpha=x_alpha, exchange=exchange,
-                    cfg=cfg)
+                    cfg=cfg, nucleus=nucleus, budget=budget)
         a.converged && continue
-        println("  [scf-retry] Z=$z $kind not converged -> beta=0.08, max_iter=400")
+        println("  [scf-retry] Z=$z $kind not converged -> beta=$(budget.retry_beta), max_iter=$(budget.retry_max_iter)")
         a2 = rebuild()
         a2.converged || error("SCF failed Z=$z $kind shell=$shell")
         # Another process may have repaired the same key while rebuild() ran.
@@ -1146,6 +1436,51 @@ function ensure_converged(z::Int, shell; relativistic::Bool=false,
                                reason="unconverged")
         winner.converged || error("SCF cache repair failed Z=$z $kind shell=$shell")
     end
+end
+
+# ====================================================================
+# 260919Cl (R2、事前登録 fingerprint_preregistration_2026-09-19.md §2.2 / §7 の 1): 数値定数の解決
+# ====================================================================
+# `prepare_channel` は SCF の格子と閾値 (`NumericsConfig`)・SCF の予算・束縛ソルバの格子・連続状態の定数・終状態の
+# 交換係数を**引数で受け取り**、無ければ**ここ 1 箇所**で src の定数から解決する。解決済みの一式は返り値
+# (`physics_numerics`) で出口に渡り、出荷 JSON の `physics` ブロック (指紋の元) はその値から組む。
+# ⚠ 既定の値は従来の定数・リテラルと同一 (ビット同一。bitident_snapshot の前後で確認)。
+const SCF_NUMERICS_FIELDS = (:id, :dt, :r0, :rmax, :tol_rho, :tol_e, :beta, :max_iter, :retry_beta, :retry_max_iter, :eig_tol)
+const BOUND_NUMERICS = (r0=GRID_R0, dt=GRID_DT, rmax=BOUND_RMAX, tol=EIG_TOL)
+const CONTINUUM_NUMERICS = (n_fit=N_FIT, r_match_tol=R_MATCH_TOL, r_match_rmax_cap=R_MATCH_RMAX_CAP)
+bound_numerics_tag(b) = string("r0=", repr(b.r0), ";dt=", repr(b.dt), ";rmax=", repr(b.rmax), ";tol=", repr(b.tol))
+"SCF の数値定数の既定 (NumericsConfig の欄 + SCF の予算)"
+function default_scf_numerics(numerics::Symbol)
+    c = NumericsConfig(id=numerics_id(numerics))
+    return (id=Symbol(c.id), dt=c.dt, r0=c.r0, rmax=c.rmax, tol_rho=c.tol_rho, tol_e=c.tol_e, SCF_BUDGET...)
+end
+_pos(x, name) = (x isa Real && !(x isa Bool) && isfinite(x) && x > 0) || error("$name は有限の正数でなければならない ($x)")
+"""数値定数の一式を解決する。`nothing` の欄は src の定数、与えた欄は**欄集合の完全一致**を要求する (欠け・余分は error =
+fail-closed。既定へ黙って落とさない)。返り値は型を揃えた NamedTuple `(scf, bound, cont, cont_exchange_coeff)`。"""
+function resolve_physics_numerics(numerics::Symbol; scf_numerics=nothing, bound_numerics=nothing,
+                                  continuum_numerics=nothing, cont_exchange_coeff=nothing)
+    scf = scf_numerics === nothing ? default_scf_numerics(numerics) : scf_numerics
+    Set(keys(scf)) == Set(SCF_NUMERICS_FIELDS) ||
+        error("scf_numerics の欄が違う: $(collect(keys(scf))) (期待 $(collect(SCF_NUMERICS_FIELDS)))")
+    Symbol(scf.id) === numerics || error("scf_numerics.id $(scf.id) が numerics $numerics と違う")
+    for k in (:dt, :r0, :rmax, :tol_rho, :tol_e, :beta, :retry_beta, :eig_tol); _pos(scf[k], "scf_numerics.$k"); end
+    (isinteger(scf.max_iter) && scf.max_iter >= 1 && isinteger(scf.retry_max_iter) && scf.retry_max_iter >= 1) ||
+        error("scf_numerics.max_iter / retry_max_iter は 1 以上の整数")
+    bnd = bound_numerics === nothing ? BOUND_NUMERICS : bound_numerics
+    Set(keys(bnd)) == Set(keys(BOUND_NUMERICS)) || error("bound_numerics の欄が違う: $(collect(keys(bnd)))")
+    for k in keys(BOUND_NUMERICS); _pos(bnd[k], "bound_numerics.$k"); end
+    cnt = continuum_numerics === nothing ? CONTINUUM_NUMERICS : continuum_numerics
+    Set(keys(cnt)) == Set(keys(CONTINUUM_NUMERICS)) || error("continuum_numerics の欄が違う: $(collect(keys(cnt)))")
+    (isinteger(cnt.n_fit) && cnt.n_fit >= 2) || error("continuum_numerics.n_fit は 2 以上の整数 ($(cnt.n_fit))")
+    _pos(cnt.r_match_tol, "continuum_numerics.r_match_tol"); _pos(cnt.r_match_rmax_cap, "continuum_numerics.r_match_rmax_cap")
+    cx = cont_exchange_coeff === nothing ? CONT_EXCHANGE_COEFF : cont_exchange_coeff
+    (cx isa Real && !(cx isa Bool) && isfinite(cx) && cx >= 0) || error("cont_exchange_coeff は有限の非負数 ($cx)")
+    return (scf=(id=Symbol(scf.id), dt=Float64(scf.dt), r0=Float64(scf.r0), rmax=Float64(scf.rmax),
+                 tol_rho=Float64(scf.tol_rho), tol_e=Float64(scf.tol_e), beta=Float64(scf.beta), max_iter=Int(scf.max_iter),
+                 retry_beta=Float64(scf.retry_beta), retry_max_iter=Int(scf.retry_max_iter), eig_tol=Float64(scf.eig_tol)),
+            bound=(r0=Float64(bnd.r0), dt=Float64(bnd.dt), rmax=Float64(bnd.rmax), tol=Float64(bnd.tol)),
+            cont=(n_fit=Int(cnt.n_fit), r_match_tol=Float64(cnt.r_match_tol), r_match_rmax_cap=Float64(cnt.r_match_rmax_cap)),
+            cont_exchange_coeff=Float64(cx))
 end
 
 """出口に依らないチャネルの準備 — (Z, 殻, E0) から始状態・終状態場・運動学まで。
@@ -1210,8 +1545,30 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
                          final_state::Symbol=:relaxed,
                          dirac_continuum::Bool=false,
                          numerics::Symbol=:legacy_v5,
-                         rel_override::Union{Nothing,RelCont}=nothing)
+                         rel_override::Union{Nothing,RelCont}=nothing,
+                         nucleus::Symbol=:point,
+                         nucleus_radius::Symbol=:formula_1p2A13,
+                         nucleus_scf::Union{Nothing,Symbol}=nothing,
+                         nucleus_bound::Union{Nothing,Symbol}=nothing,
+                         nucleus_cont::Union{Nothing,Symbol}=nothing,
+                         # 260919Cl (R2): 数値定数を引数で受ける (無ければ resolve_physics_numerics が src の定数から 1 箇所で解決)
+                         scf_numerics::Union{Nothing,NamedTuple}=nothing,
+                         bound_numerics::Union{Nothing,NamedTuple}=nothing,
+                         continuum_numerics::Union{Nothing,NamedTuple}=nothing,
+                         cont_exchange_coeff::Union{Nothing,Float64}=nothing)
     haskey(CHANNELS, tag) || error("unknown channel $tag (K/L1/L2/L3/M1..M5)")
+    # 260829Cl: 核模型。通常 API は `nucleus` 1 つ (SCF・束縛・連続に同じ核)。
+    #   `nucleus_scf/bound/cont` は**監査 (2×2) 専用**の段階別上書きで、混成は
+    #   model_id に "-FNUS[sbc]" の形で残る (提供元 = finite_nucleus_2x2 の事前登録)
+    # 260830Cl (B2): 半径の出所は**呼び出し側が明示する**。落とすと `:uniform_sphere` が
+    #   黙って `R = 1.2 A^(1/3)` で走る (実測: Au で比 1.005339 の別物)
+    ns_scf   = resolve_nucleus(z, nucleus_scf   === nothing ? nucleus : nucleus_scf; source=nucleus_radius)
+    ns_bound = resolve_nucleus(z, nucleus_bound === nothing ? nucleus : nucleus_bound; source=nucleus_radius)
+    ns_cont  = resolve_nucleus(z, nucleus_cont  === nothing ? nucleus : nucleus_cont; source=nucleus_radius)
+    (is_point(ns_bound) && is_point(ns_cont)) || dirac_scf ||
+        error("有限核は Dirac SCF (dirac_scf=true) の経路にしか配線していない")
+    (is_point(ns_cont) || dirac_continuum) ||
+        error("有限核の連続状態は κ 分解 Dirac (dirac_continuum=true) にしか配線していない")
     # ⚠ M 殻は元素によって Bote 表の副殻が足りない (Fe は M1-M3 まで) し、
     # 3d が空の軽元素もある。落ちる前に読める形で弾く
     tag in available_channels(z) ||
@@ -1225,7 +1582,13 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
         error("dirac_continuum と rel_continuum は排他 (前者が上位互換)")
     # ⚠ 未知の ID もここで死ぬ (numerics_id が hard fail する)。既定へ黙って
     #   落とさないことが要点 — docstring の「numerics」節を読むこと
-    cfg = NumericsConfig(id=numerics_id(numerics))
+    # 260919Cl (R2): 解決済みの数値定数 (引数 > src の定数)。cfg も予算もここからだけ作る
+    pn = resolve_physics_numerics(numerics; scf_numerics=scf_numerics, bound_numerics=bound_numerics,
+                                  continuum_numerics=continuum_numerics, cont_exchange_coeff=cont_exchange_coeff)
+    cfg = NumericsConfig(id=numerics_id(pn.scf.id), dt=pn.scf.dt, r0=pn.scf.r0, rmax=pn.scf.rmax,
+                         tol_rho=pn.scf.tol_rho, tol_e=pn.scf.tol_e)
+    budget = (beta=pn.scf.beta, max_iter=pn.scf.max_iter, retry_beta=pn.scf.retry_beta,
+              retry_max_iter=pn.scf.retry_max_iter, eig_tol=pn.scf.eig_tol)
     cfg.id === legacy_v5 ||
         error("prepare_channel は numerics=$(numerics) をまだ計算できない — " *
               "束縛始状態 (solve_dirac_bound / _2c) が backend 引数を持たず " *
@@ -1240,17 +1603,17 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
     frozen = final_state !== :relaxed
     static_field = final_state === :frozen_static
     ensure_converged(z, shell; relativistic=dirac_scf, x_alpha=x_alpha,
-                     exchange=exchange, need_ion=!frozen, cfg=cfg)
+                     exchange=exchange, need_ion=!frozen, cfg=cfg, nucleus=ns_scf, budget=budget)
     neutral = get_neutral(z; relativistic=dirac_scf, x_alpha=x_alpha,
-                          exchange=exchange, cfg=cfg)
+                          exchange=exchange, cfg=cfg, nucleus=ns_scf, budget=budget)
 
     # ---- 束縛と終状態が見る場 (frozen core では同一物) ----
     # :frozen_static だけ尾を 0 に落とした静的場。Latter クリップ無し・局所交換で
     # 組む (KLI の V_eff は −1/r の尾を持つので、そのままでは静的場にならない)。
     # :relaxed と :frozen は**同じ** KS ポテンシャル (Latter 補正込み) を使う
     v_bound = static_field ? V_bound_callable(neutral; latter_charge=0.0,
-                                              local_exchange=true) :
-                             V_bound_callable(neutral)
+                                              local_exchange=true, nucleus=ns_bound) :
+                             V_bound_callable(neutral; nucleus=ns_bound)
 
     # ---- 始状態: その場の中の Dirac 大成分 (第 4 章) ----
     n_b, l_b = shell
@@ -1265,19 +1628,40 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
     # 黙って読む。要素を足す (長さを変える) 形にしたのは既存キャッシュを生かすため
     bkey_base = ("d", z, n_b, l_b, kap, dirac_scf ? "rel" : "nr",
                  xc_tag(x_alpha, exchange))
+    # 260829Cl: 有限核は鍵に SCF 場の核と束縛の核を足す (点核どうしは従来の鍵のまま)
+    if !(is_point(ns_scf) && is_point(ns_bound))
+        bkey_base = (bkey_base..., "nuc", nucleus_tag(ns_scf), nucleus_tag(ns_bound))
+    end
+    # 260919Cl (R2): 束縛ソルバの格子が既定と違うときだけ鍵に足す (既定の鍵は不変)
+    if pn.bound != BOUND_NUMERICS
+        bkey_base = (bkey_base..., "bnum", _short_tag(bound_numerics_tag(pn.bound)))
+    end
+    # 260919Cl (R2、codex 3 巡目 #1 を再現して修正): 束縛解は SCF の場の中で解くので、SCF の格子・閾値 (cfg) と予算が
+    #   既定と違えば別の解。鍵に無いと同じ cwd で scf_numerics を変えても旧設定の束縛解を再利用した
+    #   (実測: dt 0.001 → 0.002 で E_b が −10.69460396216344 のまま。直接解くと −10.69459886190785)
+    if cache_tag(cfg) != cache_tag(NumericsConfig(id=cfg.id))
+        bkey_base = (bkey_base..., "scf", _short_tag(cache_tag(cfg)))
+    end
+    if budget != SCF_BUDGET
+        bkey_base = (bkey_base..., "bud", _short_tag(scf_budget_tag(budget)))
+    end
     E_b, r_b, u_b, frac_small = disk_cached(
         static_field ? (bkey_base..., "fzs") : bkey_base) do
-        solve_dirac_bound(v_bound, z; kappa=kap, n_nodes=n_b - l_b - 1)
+        solve_dirac_bound(v_bound, z; kappa=kap, n_nodes=n_b - l_b - 1, nucleus=ns_bound,
+                          r0=pn.bound.r0, rmax=pn.bound.rmax, dt=pn.bound.dt, tol=pn.bound.tol)
     end
 
     # ---- 終状態の場 (第 5 章) ----
     # frozen は★束縛と同じ場をそのまま渡す。IonPotential は (z, z_asym, r, V) の
     # 既定コンストラクタを持つので新しい型は要らない
+    ion_atom = frozen ? nothing :
+               get_ion(z, shell; relativistic=dirac_scf, x_alpha=x_alpha, exchange=exchange, cfg=cfg,
+                       nucleus=ns_scf, budget=budget)
     ion_pot = frozen ?
               IonPotential(z, static_field ? 0.0 : 1.0, neutral.r, v_bound) :
-              IonPotential(z, neutral,
-                           get_ion(z, shell; relativistic=dirac_scf,
-                                   x_alpha=x_alpha, exchange=exchange, cfg=cfg))
+              IonPotential(z, neutral, ion_atom; nucleus=ns_cont, cont_exchange_coeff=pn.cont_exchange_coeff)
+    frozen && !(ns_cont == ns_bound) &&
+        error("frozen core では連続状態の核は束縛と同じでなければならない")
 
     rel = rel_override !== nothing ? rel_override :
           (rel_continuum ? RelCont(z) : nothing)
@@ -1290,10 +1674,18 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
     if dirac_continuum
         _, r_b2, G_b2, F_b2, _ = disk_cached(
             static_field ? (bkey_base..., "fzs", "2c") : (bkey_base..., "2c")) do
-            solve_dirac_bound_2c(v_bound, z; kappa=kap, n_nodes=n_b - l_b - 1)
+            solve_dirac_bound_2c(v_bound, z; kappa=kap, n_nodes=n_b - l_b - 1,
+                                 nucleus=ns_bound,
+                                 r0=pn.bound.r0, rmax=pn.bound.rmax, dt=pn.bound.dt, tol=pn.bound.tol)
         end
-        dirac_cont = (r_b=r_b2, G_b=G_b2, F_b=F_b2, kappa=kap, c=C_LIGHT)
+        dirac_cont = (r_b=r_b2, G_b=G_b2, F_b=F_b2, kappa=kap, c=C_LIGHT, nucleus=ns_cont)
     end
+    # 260830Cl (B2): 出所の符号を足す (式 = "" で監査 1 と同一、実験半径 = "X")
+    _nsc = nucleus_source_code(nucleus_radius)
+    nuc_suffix = (is_point(ns_scf) && is_point(ns_bound) && is_point(ns_cont)) ? "" :
+                 (!is_point(ns_scf) && !is_point(ns_bound) && !is_point(ns_cont)) ? "-FNUS" * _nsc :
+                 "-FNUS" * _nsc * "[" * (is_point(ns_scf) ? "" : "s") * (is_point(ns_bound) ? "" : "b") *
+                 (is_point(ns_cont) ? "" : "c") * "]"
 
     return (z=z, tag=tag, e0_keV=e0_keV, shell=shell, subshell=subshell,
             occ_init=occ_init, n_b=n_b, l_b=l_b, kappa=kap,
@@ -1305,10 +1697,13 @@ function prepare_channel(z::Int, tag::String, e0_keV::Union{Nothing,Float64};
             # ⚠ **解決済みの cfg をそのまま返す。**出口側が provenance を書くために
             #   もう一度 NumericsConfig を組むと、それが例の「二重経路」になる
             numerics_cfg=cfg,
+            # 260919Cl (R2): 解決済みの数値定数の一式と、SCF 原子 (停止情報の記録用)
+            physics_numerics=pn, scf_atoms=(neutral=neutral, ion=ion_atom),
             dirac_scf=dirac_scf, x_alpha=x_alpha,
             exchange=exchange, final_state=final_state,
+            nucleus=(scf=ns_scf, bound=ns_bound, cont=ns_cont),
             model_id=model_id_of(rel !== nothing, dirac_scf, x_alpha, exchange,
-                                 final_state, false, dirac_continuum))
+                                 final_state, false, dirac_continuum) * nuc_suffix)
 end
 
 "入射エネルギーを伴わない準備 (GOS のように E0 非依存な出口用)"

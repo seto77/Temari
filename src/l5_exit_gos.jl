@@ -55,6 +55,18 @@ function gos_surface(pot_ion, r_b, u_b, E_th::Float64, z::Int,
                      dt_log::Float64=CONT_DT_LOG, sig_thresh::Float64=1e-12,
                      rel::Union{Nothing,RelCont}=nothing,
                      dirac::Union{Nothing,NamedTuple}=nothing,
+                     n_sub_C::Int=CONT_N_SUB_C, eta_bessel::Float64=ETA_BESSEL, gap_join::Bool=false,
+                     # 260920Cl: `compute_NK` が持っている数値つまみを**ここでも引数で受ける**。
+                     #   R2 (260919Cl) が `eps_setup` を引数化したのに、この経路だけ src 既定に
+                     #   委ねたままだった = 出荷経路と別物を計算しうる状態だった。
+                     #   ⚠ 既定は src の定数と同値 ⇒ 渡さなければビット同一
+                     lkin_frac::Float64=LKIN_RADIUS_FRAC, lkin_margin::Int=LKIN_MARGIN,
+                     lkin_rule::Symbol=LKIN_RULE,
+                     tail_fit::Symbol=CONT_TAIL_FIT,
+                     r_match_scale::Float64=CONT_R_MATCH_SCALE,
+                     r_match_cap::Float64=CONT_R_MATCH_CAP,
+                     n_fit::Int=N_FIT, r_match_tol::Float64=R_MATCH_TOL,
+                     r_match_rmax_cap::Float64=R_MATCH_RMAX_CAP,
                      progress::Bool=false)
     # 束縛軌道の実効的な拡がり → 行列要素の積分域 (compute_NK と同一の式)
     cum = cumsum(u_b .^ 2 .* gradient_(r_b))
@@ -78,7 +90,12 @@ function gos_surface(pot_ion, r_b, u_b, E_th::Float64, z::Int,
         q_hi = 1.05 * maximum(qgrid)
         _, rl, mres, _, lm, bd, rtl = eps_setup(
             pot_ion, r_b, u_b, e, z, r_core, q_lo, q_hi, l_cap, n_q,
-            ppw, dt_log, l_init, sig_thresh, Inf; rel=rel, dirac=dirac)
+            ppw, dt_log, l_init, sig_thresh, Inf; rel=rel, dirac=dirac, n_sub_C=n_sub_C, eta_bessel=eta_bessel,
+            gap_join=gap_join,
+            # 260920Cl: ここが `compute_NK` と 1 対 1 でなければ「別物を測っている」
+            lkin_frac=lkin_frac, lkin_margin=lkin_margin, lkin_rule=lkin_rule,
+            tail_fit=tail_fit, r_match_scale=r_match_scale, r_match_cap=r_match_cap,
+            n_fit=n_fit, r_match_tol=r_match_tol, r_match_rmax_cap=r_match_rmax_cap)
         S = legendre_sum(rl, qgrid, qgrid, ones_q, occ)   # S(Q, Q, cosΘ=1)
         dE = E_th + e
         @inbounds for iq in 1:nq
@@ -124,12 +141,32 @@ function compute_gos(z::Int, tag::String;
                      rel_continuum::Bool=false, dirac_scf::Bool=true,
                      x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
                      final_state::Symbol=:relaxed,
-                     dirac_continuum::Bool=false)
+                     dirac_continuum::Bool=false,
+                     # 260920Cl: 出荷経路 (`compute_channel`) と同じものを受ける。⚠ 既定は
+                     #   従来と同値なので、渡さなければビット同一 (実測済)
+                     numerics::Symbol=:legacy_v5,
+                     rel_override::Union{Nothing,RelCont}=nothing,
+                     nucleus::Symbol=:point,
+                     nucleus_radius::Symbol=:formula_1p2A13,
+                     nucleus_scf::Union{Nothing,Symbol}=nothing,
+                     nucleus_bound::Union{Nothing,Symbol}=nothing,
+                     nucleus_cont::Union{Nothing,Symbol}=nothing,
+                     scf_numerics::Union{Nothing,NamedTuple}=nothing,
+                     bound_numerics::Union{Nothing,NamedTuple}=nothing,
+                     continuum_numerics::Union{Nothing,NamedTuple}=nothing,
+                     cont_exchange_coeff::Union{Nothing,Float64}=nothing)
     t0 = time()
     ch = prepare_channel(z, tag; rel_continuum=rel_continuum, dirac_scf=dirac_scf,
                           x_alpha=x_alpha, exchange=exchange,
                           final_state=final_state,
-                          dirac_continuum=dirac_continuum)
+                          dirac_continuum=dirac_continuum,
+                          numerics=numerics, rel_override=rel_override,
+                          nucleus=nucleus, nucleus_radius=nucleus_radius,
+                          nucleus_scf=nucleus_scf, nucleus_bound=nucleus_bound,
+                          nucleus_cont=nucleus_cont,
+                          scf_numerics=scf_numerics, bound_numerics=bound_numerics,
+                          continuum_numerics=continuum_numerics,
+                          cont_exchange_coeff=cont_exchange_coeff)
     eps_max = eps_max_Ha === nothing ? 10.0 * ch.E_th : eps_max_Ha
     eps_max > 0 || error("eps_max_Ha は正")
     # 和則を評価できる Q の上限: 尾根 Q²/2 とその Compton 幅 ~3pQ が ε 域に収まること
@@ -150,7 +187,23 @@ function compute_gos(z::Int, tag::String;
                           ppw=Float64(get(settings, :ppw, CONT_PPW)),
                           dt_log=Float64(get(settings, :dt_log, CONT_DT_LOG)),
                           sig_thresh=settings.sig_thresh, rel=ch.rel,
-                          dirac=ch.dirac, progress=verbose)
+                          dirac=ch.dirac, n_sub_C=Int(get(settings, :n_sub_c, CONT_N_SUB_C)),
+                          eta_bessel=Float64(get(settings, :eta_bessel, ETA_BESSEL)),
+                          gap_join=Bool(get(settings, :gap_join, false)),
+                          # 260920Cl: ここから下は `compute_channel` → `compute_NK` の該当行と
+                          #   1 対 1。⚠ src 側が引数を足したらここにも足す (さもなくば
+                          #   「src 既定で走った別物」を測ることになる)
+                          lkin_frac=Float64(get(settings, :lkin_frac, LKIN_RADIUS_FRAC)),
+                          lkin_margin=Int(get(settings, :lkin_margin, LKIN_MARGIN)),
+                          lkin_rule=Symbol(get(settings, :lkin_rule, LKIN_RULE)),
+                          tail_fit=Symbol(get(settings, :tail_fit, CONT_TAIL_FIT)),
+                          r_match_scale=Float64(get(settings, :r_match_scale, CONT_R_MATCH_SCALE)),
+                          r_match_cap=Float64(get(settings, :r_match_cap, CONT_R_MATCH_CAP)),
+                          # 260919Cl (R2): 連続状態の残りは**解決済みの処方の一式**から
+                          n_fit=ch.physics_numerics.cont.n_fit,
+                          r_match_tol=ch.physics_numerics.cont.r_match_tol,
+                          r_match_rmax_cap=ch.physics_numerics.cont.r_match_rmax_cap,
+                          progress=verbose)
 
     # 和則の左辺 ∫ (df/dΔE) dΔE を各 Q で。dΔE = dε なので ε の重みがそのまま使える
     f_sum = [sum(we[ie] * gos[ie, iq] for ie in 1:ne) for iq in 1:n_q_out]
@@ -159,12 +212,23 @@ function compute_gos(z::Int, tag::String;
         "cache_provenance" => cache_provenance(),
         "model_id" => ch.model_id, "exit" => "gos",
         "quadrature_preset" => settings_preset(settings),
-        "settings" => settings_dict(settings),
+        "settings" => settings_dict_full(settings),
         "physics" => Dict{String,Any}(
             "continuum" => ch.dirac !== nothing ? "dirac-kappa-2c" :
                            (ch.rel !== nothing ? "scalar-relativistic" : "nonrelativistic"),
             "dirac_scf" => dirac_scf, "scf_exchange" => String(exchange),
-            "x_alpha" => x_alpha, "final_state" => String(final_state)),
+            "x_alpha" => x_alpha, "final_state" => String(final_state),
+            # 260920Cl: R2 と同じ来歴を GOS 出口にも載せる (`compute_channel` と同じ形)。
+            #   ⚠ これが無いと「どの核・どの定数で出た GOS か」が記録から再構成できない
+            "numerics_id" => String(Symbol(ch.numerics_cfg.id)),
+            "numerics_config" => cache_tag(ch.numerics_cfg),
+            "nucleus" => Dict{String,Any}(
+                "radius_source_id" => String(nucleus_radius),
+                (String(k) => Dict{String,Any}("kind" => String(v.kind), "radius_a0" => v.radius_a0,
+                                               "radius_source" => v.radius_source)
+                 for (k, v) in pairs(ch.nucleus))...),
+            physics_numerics_dict(ch.physics_numerics)...,
+            "scf" => scf_stop_dict(ch.scf_atoms)),
         "z" => z, "channel" => tag,
         "shell_nl" => [ch.n_b, ch.l_b], "kappa" => ch.kappa,
         "occupancy" => ch.occ_init,

@@ -193,13 +193,31 @@ fe_zero_limit_a0(m2::Float64) = m2 / 3.0
 避けてモーメントから直接求める。**イオンでのみ発散する**ので、そのときだけ null。
 
 戻り値は Dict (そのまま JSON 化できる):
-  "f_x"              X 線原子散乱因子 [電子数]。f_x(0) = Z を厳密に満たす
+  "f_x"              X 線原子散乱因子 [電子数]。f_x(0) = N を厳密に満たす
   "f_e_A"            電子線原子散乱因子 [Å] (Mott–Bethe)。s=0 は中性なら M₂/3、
-                     イオンなら null
+                     荷電種なら null
+  "f_e_regular_A"    ⭐ f_e の**正則部** 2·corr·deficit/K² [Å]。s=0 は全化学種で
+                     a₀M₂/3 で有限。⚠ **これを表にする** (単極子は閉じた式で渡す)
+  "charge_state"     q_net = Z − N。⚠ 開殻の球平均では非整数もありうる
+  "monopole_coefficient_A_inv"  C = q_net/(8π²a₀) [Å⁻¹]。f_e_mono(s) = C/s²
+  "n_electrons"      ⭐ **唯一の電子数** N。要求された正準配置の補償和
   "m2_a0sq"          M₂ = 4π∫r⁴ρ dr [a₀²]。⚠ ⟨r²⟩ ではない (⟨r²⟩ = M₂/N)
   "m4_a0four"        M₄ = 4π∫r⁶ρ dr [a₀⁴]。小 K 展開の 2 次項
-  "n_electrons_raw"  規格化補正**前**の ∫4πr²ρ dr。Z との差が格子品質の指標
-  "norm_correction"  掛けた一様補正 −1 (期待値 +Z×1.67e-7 / Z ≈ 1.67e-7)
+  "n_electrons_raw"  規格化補正**前**の ∫4πr²ρ dr。N との差が格子品質の指標
+  "norm_correction"  掛けた一様補正 −1 (期待値 +N×1.67e-7 / N ≈ 1.67e-7)
+
+## 荷電種 (260908Cl。レーン L-D)
+
+`occ` に正準配置を渡すと任意の化学種を計算する (既定 `nothing` = 中性基底で、
+**経路も従来の `get_neutral` のまま**)。⚠ 出力の分離は §7 のとおり:
+
+    f_e(s) = 単極子 C/s² + 正則部 f_e_regular(s)
+
+⚠⚠ **正則部を `f_e − 単極子` の引き算で作ってはいけない** (低 s で桁がまるごと消える。
+実測: C⁴⁺ は出荷格子の第 1 節点で相対 4.8e-10 = 有効 11 桁の丸め幅超え)。
+⚠ 多価陰イオン (N ≥ Z+2) は自由イオンとして束縛しないので `ext` に Watson 球を渡す
+(作者決定 I8)。⚠⚠ **安定化場は SCF に入るが散乱源には入らない** — 単極子係数は
+`(Z−N)/(8π²a₀)` のままで、`ext` は密度を通してだけ効く。
 
 ## `cfg` — 数値 backend と格子 (260811Cl 追加)
 
@@ -213,6 +231,9 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
                     relativistic::Bool=true, x_alpha::Float64=X_ALPHA,
                     exchange::Symbol=:xalpha, verbose::Bool=true,
                     cfg::NumericsConfig=NumericsConfig(),
+                    occ::Union{Nothing,Vector{Tuple{Int,Int,Float64}}}=nothing,
+                    nucleus::NucleusSpec=POINT_NUCLEUS,
+                    ext::ExternalField=NO_EXT_FIELD,
                     atom::Union{Nothing,SCFAtom}=nothing)
     s_nodes === nothing && (s_nodes = collect(0.0:0.1:6.0))
     isempty(s_nodes) && error("s_nodes は 1 点以上")
@@ -224,23 +245,52 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
     # **同一手順**で解いた原子をそのまま渡す — キャッシュ経由だと「別の cfg で
     # 解いた原子を黙って読む」事故の形が残るため。渡されたら Z・処方が一致する
     # ことだけ検査し、`relativistic`/`exchange`/`cfg` は原子側の値を正とする
+    # 260908Cl: 要求配置。⚠ **既定 (`occ === nothing`) は中性基底で、経路も従来の
+    #   `get_neutral` のまま**にする (出荷済み 86 元素の値を動かさないため)
+    want_occ = canon_occ(occ === nothing ? ORBITALS[z] : occ)
     if atom === nothing
-        a = get_neutral(z; relativistic=relativistic, x_alpha=x_alpha,
-                        exchange=exchange, cfg=cfg)
+        a = occ === nothing ?
+            get_neutral(z; relativistic=relativistic, x_alpha=x_alpha,
+                        exchange=exchange, cfg=cfg) :
+            get_config(z, want_occ; relativistic=relativistic, x_alpha=x_alpha,
+                       exchange=exchange, cfg=cfg, nucleus=nucleus, ext=ext)
     else
         a = atom
         a.z == z || error("atom.z=$(a.z) が要求 Z=$z と違う")
         a.relativistic == relativistic ||
             error("atom.relativistic=$(a.relativistic) が要求 $relativistic と違う")
         a.exchange === exchange || error("atom.exchange=$(a.exchange) が要求 $exchange と違う")
+        # 260908Cl: ⚠⚠ **配置そのものを照合する。** 電子数だけでは「同じ N の別配置」
+        #   (Fe²⁺ の 3d⁶ と 3d⁵4s¹) が素通りする。⚠ 空孔原子の occ は q=0 の項を残すので
+        #   両側を正準化してから比べる
+        canon_occ(a.occ) == want_occ ||
+            error("atom.occ が要求配置と違う (canonical: $(canon_occ(a.occ)) vs $want_occ)")
+        # 260918Cl: x_alpha も照合する (relativistic / exchange と同じ扱い。以前はここだけ照合が無く、
+        #   出力の settings.x_alpha に引数の値を書いていた。出荷は既定 X_ALPHA = 原子の値なので出力は不変)
+        a.x_alpha == x_alpha || error("atom.x_alpha=$(a.x_alpha) が要求 $x_alpha と違う")
     end
-    a.converged || error("Z=$z の中性 SCF が未収束")
+    a.converged || error("Z=$z の SCF が未収束")
+    return fx_observables(a, want_occ, s_nodes; verbose=verbose)
+end
+
+# 260918Cl: `compute_fx` の「原子 → 観測量」の部分を関数に切り出した (中身は移しただけで、出荷経路の数値は不変 =
+#   旧新の src で Z=1,2,6,8 の出力がビット同一なことを実測してから commit)。Z・処方は `a` が持つので引数にしない。
+#   ⚠ ここには `converged` の検査を置かない — 検査は呼ぶ側の責任 (`compute_fx` は要求する。中性の停止点診断
+#   `tools/scf_post_stop_neutral.jl` は要求せず、出力に converged を書く)
+function fx_observables(a::SCFAtom, want_occ, s_nodes::Vector{Float64}; verbose::Bool)
+    z, relativistic, x_alpha, exchange = a.z, a.relativistic, a.x_alpha, a.exchange
     K = 4.0 * pi .* s_nodes .* BOHR_ANG            # s [Å⁻¹] → K [a₀⁻¹] (F(s) と同規約)
     # 台形則規格化のバイアスを除く (上のコメント参照)。一様スケールなので形は不変
     nel_raw = xray_form_factor(a.r, a.dt, a.rho, [0.0])[1]
-    corr = a.nel / nel_raw
+    # 260908Cl: ⚠⚠ **電子数は 1 本化する。** 要求された正準配置から補償和で 1 回だけ作り、
+    #   規格化・電荷・ゲートが全部これを使う (`config_nel`)。⚠ `SCFAtom.nel` は素の `sum`
+    #   なので分数占有では食い違う (実測: occ = [2.0, 2⁻⁵², 2⁻⁵²] で 素の和 2.0 /
+    #   補償和 2.0000000000000004 = BigFloat の厳密和)。⚠ 出荷済み 86 元素の occ は
+    #   全部整数なので**両者はビット一致**する ⇒ 中性の出荷値は動かない
+    nel = config_nel(want_occ)
+    corr = nel / nel_raw
     fx = xray_form_factor(a.r, a.dt, a.rho, K) .* corr
-    z_net = Float64(z)                             # 中性原子: 核電荷 = 電子数
+    z_net = Float64(z)                             # 核電荷 (中性なら = 電子数)
     # モーメントも**同じ補正**を掛ける。掛けないと f_e(0) が f_x の K→0 極限で
     # なくなり、s=0 と s→0 で食い違う (規格化補正は一様スケールなので単純に乗る)
     m2 = density_moment(a.r, a.dt, a.rho, 2) * corr
@@ -248,13 +298,25 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
     # M₆ は小 K 展開の 3 項目 f_e = a₀[M₂/3 − K²M₄/60 + K⁴M₆/2520 − …] に使う
     # (出荷生成器の s→0 整合ゲート。260816Cl 追加。K⁶ 項は M₈/181440)
     m6 = density_moment(a.r, a.dt, a.rho, 6) * corr
-    neutral = abs(z_net - a.nel) < 1e-8 * max(1.0, z_net)
     # ---- f_e は δ 形で構成する (260815Cl、作者決定 §4.23.8-(ii)) ----
     # f_e = 2(Z_net − corr·f_x_raw)/K² = 2(q_net + corr·deficit)/K²、
-    # q_net = Z_net − nel (中性なら厳密に 0)。差 Z − f_x を数値で踏まないので、
+    # q_net = Z_net − N (中性なら厳密に 0)。差 Z − f_x を数値で踏まないので、
     # 低 s でも丸め床の 1/K² 増幅が起きない (MB 直接構成は Au 級で 1.41×B_num,e)
-    q_net = z_net - a.nel
+    q_net = z_net - nel
+    # 260908Cl: ⚠⚠ **中性判定を厳密にする** (旧: `abs(z_net − nel) < 1e-8·max(1, z_net)`)。
+    #   実測: q_net = 1e-10 の種が「中性」に潰れて**有限の f_e(0)** を返していた
+    #   (1e-7 では null)。⚠ これは「Float64 に丸めた N に対する厳密判定」であって、
+    #   厳密和が Z と違うのに N が Z へ丸まる場合までは識別しない (schema v1 の規約)
+    neutral = q_net == 0.0
     defic = xray_deficit(a.r, a.dt, a.rho, K) .* corr
+    # ---- 単極子 (解析的) と 正則部 (構成する) を分ける (§7) --------------------
+    # f_e = 単極子 2q_net/K² + 正則部 2·corr·deficit(K)/K²
+    # ⚠⚠ **正則部を `f_e − 単極子` の引き算で作ってはいけない。** 低 s では両者とも
+    #   1/s² で発散し、差は桁がまるごと消える (実測: C⁴⁺ は出荷格子の第 1 節点で既に
+    #   相対 4.8e-10 = 有効 11 桁の丸め幅を超える)。ここは**構成**するので影響を受けない。
+    # ⭐ 正則部は s→0 で a₀M₂/3 に落ちる = **中性の f_e と同じ滑らかな量**。表にするのはこちら
+    fe_reg = [k < 1e-12 ? fe_zero_limit_a0(m2) * BOHR_ANG :
+              2.0 * defic[i] / (k * k) * BOHR_ANG for (i, k) in enumerate(K)]
     fe = Union{Nothing,Float64}[k < 1e-12 ?
                                 # K=0: 中性なら極限 M₂/3 が有限。イオンは発散するので null
                                 (neutral ? fe_zero_limit_a0(m2) * BOHR_ANG : nothing) :
@@ -263,17 +325,30 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
     # ---- 生成時ゲート (作者決定とセット): δ 形 ↔ MB 構成の整合 ----
     # 増幅の無い域 (s ≥ 0.2) では両者は同じ量。相対差が閾値を超えたら
     # どちらかの実装が壊れている (閾値 1e-10 = 補償和後の床 ~1e-13 の 1000 倍)
+    # 260908Cl: ⚠ 比べるのは**正則部**にする — 荷電種では全体の f_e に単極子 2q/K² が
+    #   乗っており、それは deficit 求積とは無関係の解析項なので「求積の整合」を測れない。
+    #   正則部の δ 形 `2·corr·deficit/K²` と MB 構成 `2(N − f_x)/K²` は同じ量である
+    #   (f_x = corr·∫ρj₀ ⇒ N − f_x = corr·deficit)。⚠ **中性では N = Z がビット一致**
+    #   なので、比べる 2 つの数も相対差も従来と厳密に同じ (出荷値は動かない)。
+    # ⚠ 検査点の**件数も返す**。0 件は「合格」ではなく判定不能なので、判定する側
+    #   (出荷ゲート G2) が件数を見る。ここで error にしないのは、低 s だけを要求する
+    #   正当な呼び出し (収束試験など) があるため — 判定と報告を分ける。
     fe_mb_maxrel = 0.0
+    fe_mb_points = 0
     @inbounds for (i, k) in enumerate(K)
         s_nodes[i] >= 0.2 || continue
-        d = abs(2.0 * (q_net + defic[i]) / (k * k) - mott_bethe_a0(z_net, fx[i], k))
-        rel = d / max(abs(2.0 * (q_net + defic[i]) / (k * k)), 1e-300)
+        lhs = 2.0 * defic[i] / (k * k)
+        rhs = mott_bethe_a0(nel, fx[i], k)
+        d = abs(lhs - rhs)
+        isfinite(d) || error("Z=$z: δ 形 ↔ Mott–Bethe の比較に非有限が出た (i=$i, s=$(s_nodes[i]))")
+        rel = d / max(abs(lhs), 1e-300)
+        fe_mb_points += 1
         rel > fe_mb_maxrel && (fe_mb_maxrel = rel)
     end
     fe_mb_maxrel <= 1e-10 ||
         error("Z=$z: δ 形と Mott–Bethe 構成が s ≥ 0.2 で不整合 (相対 $fe_mb_maxrel)")
-    verbose && @printf("Z=%d  電子数 %.1f  規格化補正 %.3e (台形則バイアス Z×1.67e-7)\n",
-                       z, a.nel, corr - 1.0)
+    verbose && @printf("Z=%d  電子数 %.1f  規格化補正 %.3e (台形則バイアス N×1.67e-7)\n",
+                       z, nel, corr - 1.0)
     return Dict{String,Any}(
         "schema_version" => SINGLE_RUN_SCHEMA_VERSION,
         "cache_provenance" => cache_provenance(),
@@ -286,18 +361,30 @@ function compute_fx(z::Int; s_nodes::Union{Nothing,Vector{Float64}}=nothing,
             "numerics_id" => String(Symbol(a.cfg.id)),
             "numerics_config" => cache_tag(a.cfg)),
         "n_electrons_raw" => nel_raw,      # 補正前の Simpson 積分 (格子品質の指標)
+        # 260908Cl: `n_electrons` が**唯一の電子数** (要求配置の補償和)。`n_electrons_scf`
+        # は `SCFAtom` が自分で持っている素の和で、**2 経路が食い違っていないかの記録**
+        # として残す (整数占有では一致する)
+        "n_electrons" => nel, "configuration" => want_occ,
         "n_electrons_scf" => a.nel, "norm_correction" => corr - 1.0,
         "s_A_inv" => s_nodes, "q_a0inv" => K,
         "f_x" => fx, "f_e_A" => fe,
+        # 260908Cl (§7): 荷電種のための分離。⚠ **単極子は表にしない** — 1/s² を数値で
+        # 刻むことになり s→0 で必ず破綻する。閉じた式 `f_e_mono(s) = C/s²` を渡す
+        "charge_state" => q_net,                      # q_net = Z − N (開殻平均で非整数もありうる)
+        "monopole_coefficient_A_inv" => q_net / (8.0 * pi^2 * BOHR_ANG),
+        "f_e_regular_A" => fe_reg,                    # 2·corr·deficit/K² [Å]。s=0 は a₀M₂/3
         # 動径モーメント (規格化補正込み)。f_e(0) = M₂/3 [a₀] の出所であり、
         # 小 K での展開 f_e(K) = M₂/3 − K²M₄/60 + O(K⁴) の検算にも使える
         "m2_a0sq" => m2, "m4_a0four" => m4, "m6_a0six" => m6,
         "f_e_zero_source" => neutral ? "M2/3 (K->0 limit of the Mott-Bethe form)" :
                              "null (ion: Z_net - f_x(0) != 0, so f_e diverges as K^-2)",
+        "f_e_regular_zero_source" => "a0*M2/3 (K->0 limit of the regular part; " *
+                                     "finite for every charge state)",
         # δ 形構成の来歴と、MB 構成との整合ゲートの実測値 (260815Cl)
         "f_e_construction" => "deficit quadrature (int rho*(1-j0)) + Kahan sums; " *
                               "no Z - f_x cancellation at low s",
         "f_e_mb_consistency_maxrel" => fe_mb_maxrel,
+        "f_e_mb_consistency_points" => fe_mb_points,
         "relativistic" => a.relativistic, "exchange" => String(a.exchange),
         "density" => (a.relativistic ? "DHFS (完全 Dirac SCF、小成分込み)" :
                       "HFS (非相対論)") *

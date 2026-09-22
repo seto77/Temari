@@ -1,0 +1,60 @@
+{
+  "artifact_role": "control",
+  "command": ["tools/make_golden.jl", "<outdir>", "--manifest", "--tolerance", "tolerance.json"],
+  "digest_note": "sha256 over sorted \"<file>:<sha256>\\n\" lines; independent of file order and timestamps",
+  "digest_sha256": "29c630bc288b659bfdba88138797fb4292a03bb4b3068f7e0eddc72b9c30a8af",
+  "engine": {
+    "git_commit": "4eccacff90c09f12b8f66a9245f02d7fee04c932",
+    "git_dirty": false,
+    "julia_threads": 4,
+    "julia_version": "1.11.9",
+    "source_files": ["ionization.jl", "Temari.jl", "l0_numerics.jl", "l0_json.jl", "l1_atomic.jl", "l1b_config.jl", "l2_continuum.jl", "l1_nucleus_radius.jl", "l3_radial.jl", "l4_angular.jl", "l5_channel.jl", "l5_exit_edx.jl", "l5_exit_eels.jl", "l5_exit_phase.jl", "l5_exit_mott.jl", "l5_exit_gos.jl", "l5_exit_fx.jl", "selftest.jl", "cli_envelope.jl", "../Project.toml"],
+    "source_fingerprint": "3d4fcc1b695488bd6cea2ff2acd8a252ea805e0e925a7b31f6a2a06fb87db5d1"
+  },
+  "files": [{
+    "bytes": 8426,
+    "file": "fx_Au.json",
+    "media_type": "application/json",
+    "sha256": "f4396acde3a80eec7bd5f660f38a7d8bfaba8f60b7ad65a0d2afbd5c24ea8f80"
+  }, {
+    "bytes": 8480,
+    "file": "fx_C.json",
+    "media_type": "application/json",
+    "sha256": "2de1dbdc240c9298a0e51dc75d757d7bf20f216f698bdacf80cf22a858a56f4e"
+  }, {
+    "bytes": 8404,
+    "file": "fx_Fe.json",
+    "media_type": "application/json",
+    "sha256": "cb686608f0281728588939bd548da9ba6380a7cda513e5d480649433994dc426"
+  }, {
+    "bytes": 34273,
+    "file": "mott_Au_20keV.json",
+    "media_type": "application/json",
+    "sha256": "3c78573a76a28c7f26bdb2e0dfe72aa2e61e47dd56a97774a2c29d9f17879e07"
+  }, {
+    "bytes": 18501,
+    "file": "mott_C_1keV.json",
+    "media_type": "application/json",
+    "sha256": "d4cb1c740e3524ccb92ee93afc343479a56e746435b84cb308a6846c3336d56a"
+  }, {
+    "bytes": 38303,
+    "file": "mott_Fe_10keV.json",
+    "media_type": "application/json",
+    "sha256": "89d002e0a1f50081bc2ef2982e5b1f17deaddcee0e84c4aff2d523afaf57123d"
+  }, {
+    "bytes": 233,
+    "file": "tolerance.json",
+    "media_type": "application/json",
+    "sha256": "6fc3357cbf6b5a3245a6ede90599ce65c5492263c26b520ae497bf854d0a69e0"
+  }],
+  "kind": "temari.artifact_set",
+  "producer": {
+    "tool_files": ["tools/make_golden.jl", "tools/artifact_manifest.jl"],
+    "tool_fingerprint": "e05934ebfcf328e3a42bf23ad65873bc5c56a55816feb97c2bb61e34ad6defa8"
+  },
+  "row_schema": "temari_envelope_v1",
+  "rows_ok": 7,
+  "rows_total": 7,
+  "series": "golden_v1",
+  "set_manifest_version": 1
+}

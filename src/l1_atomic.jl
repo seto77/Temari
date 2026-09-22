@@ -354,6 +354,86 @@ function dirac_exchange_energy_x(G::Vector{Vector{Float64}}, F::Vector{Vector{Fl
     return ex
 end
 
+# ====================================================================
+# 260911Cl (作者決定 I26): 起動時の `-t` はそのマシンのコア数にしておき、**実行中の同時実行数は
+#   Semaphore で絞る**。絞り値は設定ファイル (既定 `<cwd>/threads_active`、環境変数
+#   TEMARI_THREADS_FILE で場所を変えられる) の整数で、SCF の各反復の頭で読み直す (mtime が
+#   変わったときだけ parse)。無い / 読めない ⇒ nthreads() (全部使う)。値は [1, nthreads()] に丸める。
+#   ⚠ 結果は絞り値に依らない: 各 task は自分の slot にしか書かず、集計は元の順で直列 (thread 化と同じ根拠)。
+#   なぜ: フリートの最後の尾 (1 台に重い票が 1 つ残る) で、走行中の票に thread を足し引きできる方が効率的。
+# ====================================================================
+const THREADS_FILE_ENV = "TEMARI_THREADS_FILE"
+const THREADS_FILE_DEFAULT = "threads_active"
+const _threads_file_override = Ref{String}("")  # 道具の `--threads-file` (Y58: Yonabe は環境変数を消すので argv で渡す)
+const _threads_active = Ref{Int}(0)             # 0 = 未読
+const _threads_file_mtime = Ref{Float64}(-1.0)
+const _threads_changes = Ref{Int}(0)            # 値が変わった回数 (JSONL の solve 行用)
+const _threads_lock = ReentrantLock()
+
+"設定ファイルの場所 (道具の `--threads-file` > 環境変数 > cwd の既定)"
+threads_file() = !isempty(_threads_file_override[]) ? _threads_file_override[] : get(ENV, THREADS_FILE_ENV, THREADS_FILE_DEFAULT)
+"道具から場所を指定する (空文字で解除)。指定したら未読状態に戻す"
+function set_threads_file!(path::AbstractString)
+    Base.@lock _threads_lock begin
+        _threads_file_override[] = String(path)
+        _threads_file_mtime[] = -1.0
+    end
+    return path
+end
+"値が変わった回数 (診断用)"
+threads_active_changes() = _threads_changes[]
+
+"""いま使う同時実行数を返す (SCF の反復の頭で呼ぶ)。ファイルの mtime が変わったときだけ読み直す。
+⚠ Y58 §2-2: 読めない / 壊れている (書きかけ・空・ファイルが消えた) ときは**前回の値を保つ** (nthreads() に戻さない)。
+初回だけ、ファイルが無ければ nthreads()。値が変わったら stderr に 1 行出す (走行記録との突き合わせ用)。"""
+function threads_active_refresh!()
+    Base.@lock _threads_lock begin
+        nmax = Threads.nthreads()
+        f = threads_file()
+        mt = try isfile(f) ? mtime(f) : -2.0 catch; -2.0 end
+        if mt != _threads_file_mtime[] || _threads_active[] == 0
+            _threads_file_mtime[] = mt
+            v = _threads_active[] == 0 ? nmax : _threads_active[]     # 既定 = 前回値 (初回は全部)
+            if mt >= 0
+                v = try
+                    clamp(parse(Int, strip(read(f, String))), 1, nmax)
+                catch
+                    v                                                 # 書きかけ・空 ⇒ 前回値を保つ
+                end
+            end
+            if v != _threads_active[]
+                _threads_active[] != 0 && (_threads_changes[] += 1)
+                _threads_active[] = v
+                @info "threads_active = $v (of $nmax, $(mt >= 0 ? f : "no file"))"
+            end
+        end
+        return _threads_active[]
+    end
+end
+"直近の値 (読み直さない)。未読なら nthreads()"
+threads_active() = _threads_active[] == 0 ? Threads.nthreads() : _threads_active[]
+
+"""`f(i)` を i = 1..n について並列に実行する。同時実行数 ≤ k (Semaphore)。k ≤ 1 か n ≤ 1 なら直列。
+⚠ f は自分の slot にしか書かないこと (順序に依らない) — 呼び手がその条件を保証する。"""
+function pfor_limited(f, n::Int, k::Int)
+    if k <= 1 || n <= 1 || Threads.nthreads() == 1
+        for i in 1:n; f(i); end
+        return
+    end
+    sem = Base.Semaphore(k)
+    @sync for i in 1:n
+        Threads.@spawn begin
+            Base.acquire(sem)
+            try
+                f(i)
+            finally
+                Base.release(sem)
+            end
+        end
+    end
+    return
+end
+
 """Dirac 版の w_a(r) = (G_a²+F_a²) u_{x,a}(r)。非相対論の
 `orbital_exchange_weights` と同じ規約 (δE/δ軌道 = 2q_aε_a×軌道 由来の 1/2 込み)。
 
@@ -363,15 +443,19 @@ function dirac_orbital_exchange_weights(G::Vector{Vector{Float64}},
                                         q::Vector{Float64}, kap::Vector{Int},
                                         r::AbstractVector{Float64})
     w = [zeros(length(r)) for _ in eachindex(G)]
-    for a in eachindex(G), b in eachindex(G)
-        rho_ab = overlap_density(G, F, a, b)
-        kmax = (kappa_tj(kap[a]) + kappa_tj(kap[b])) ÷ 2
-        for k in 0:kmax
-            c = dirac_exchange_c(kap[a], k, kap[b])
-            c == 0.0 && continue
-            y = ykr_rho(k, rho_ab, r)
-            f = c * dirac_exchange_weight(k, a, b, q, kap) / q[a]
-            @. w[a] -= f * rho_ab * y / r
+    # 260911Cl (I24): w[a] は a ごとに独立で、b → k の内側の順序を保てば a を thread で並列にしても
+    #   演算の順序は単スレッドと同じ (ビット同一)。⚠ 内側の b・k のループ順を変えない
+    pfor_limited(length(G), threads_active()) do a
+        for b in eachindex(G)
+            rho_ab = overlap_density(G, F, a, b)
+            kmax = (kappa_tj(kap[a]) + kappa_tj(kap[b])) ÷ 2
+            for k in 0:kmax
+                c = dirac_exchange_c(kap[a], k, kap[b])
+                c == 0.0 && continue
+                y = ykr_rho(k, rho_ab, r)
+                f = c * dirac_exchange_weight(k, a, b, q, kap) / q[a]
+                @. w[a] -= f * rho_ab * y / r
+            end
         end
     end
     return w
@@ -492,6 +576,93 @@ xa_tag(a::Float64) = "xa" * string(round(Int, a * 100))
 別処方で作った原子を黙って読む (260807Cl に SCF 種別で実際にやった)。"""
 xc_tag(a::Float64, exchange::Symbol) = exchange === :kli ? "kli" : xa_tag(a)
 
+# ---- 核模型 (260829Cl 追加) --------------------------------------------------
+# κ 分解 Dirac 経路 (SCF・束縛・relaxed ion 場・連続) は従来すべて**点核**だった
+# (出荷 JSON の provenance 文字列「finite nucleus (uniform sphere)」は固定文の誤記 —
+# v4/v5/v6 の ERRATA)。本節は有限核 (一様帯電球) を**点核場への加算 ΔV_N** として
+# 入れる最小配線。既定は `POINT_NUCLEUS` で、点核経路は 1 bit も変えない
+# (加算は `is_point` で分岐し、`+ 0.0` すら通さない)。
+#
+#   V_N(r) = −Z/(2R)·(3 − r²/R²)  (r < R),  −Z/r (r ≥ R)
+#   ΔV_N(r) = V_N − (−Z/r) = Z[1/r − (3 − (r/R)²)/(2R)] ≥ 0  (r < R のみ非零)
+#
+# ⚠ Latter クリップ `min(V, −q/r)` は**点核 total に掛けてから** ΔV_N を足す。
+#   有限核 total に掛けると核内で −q/r の特異点を再導入する。
+# ⚠ 有限ポテンシャル V = V₀ + O(r²) の原点級数は点核の Frobenius 指数 γ と別物:
+#   B₀ = 2c + (E−V₀)/c、C₀ = (E−V₀)/c として
+#     κ > 0:      G ∝ r^{κ+1},  F/G = (2κ+1)/(B₀ r)
+#     κ = −k < 0: G ∝ r^{k},    F/G = −C₀ r/(2k+1)
+#   (事前登録 `docs/notes/finite_nucleus_2x2_preregistration_2026-08-29.md` §1)
+struct NucleusSpec
+    kind::Symbol            # :point | :uniform_sphere
+    radius_a0::Float64      # 一様球の半径 [a0]。点核は 0
+    radius_source::String   # 半径の出所 (provenance 用。点核は "")
+end
+const POINT_NUCLEUS = NucleusSpec(:point, 0.0, "")
+"""半径ちょうど 0 の一様球だけを canonical な点核へ畳む (H1: R=0 で点核とビット同一)。
+
+⚠⚠ 260830Cl (B6、Sol 指摘 → 実測で確認): **それ以外は fail-closed**。以前は `radius_a0 <= 0.0` を
+まとめて点核へ畳んでいたので、**負の半径・欠測・parse error が黙って「点核」に化けた** — 有限核を
+要求した生成が点核で走っても誰も気づかない。`absent` (= 明示的な `:point`) と `invalid` は別物として扱う。
+⚠ 有限核には **`radius_source` を必須**にする (来歴の無い半径を出荷経路へ入れない)。"""
+function NucleusSpec(kind::Symbol; radius_a0::Float64=0.0, radius_source::String="")
+    kind in (:point, :uniform_sphere) || error("NucleusSpec: kind は :point | :uniform_sphere ($kind)")
+    kind === :point && return POINT_NUCLEUS
+    isfinite(radius_a0) || error("NucleusSpec: radius_a0 が有限でない ($radius_a0)")
+    radius_a0 == 0.0 && return POINT_NUCLEUS          # canonical: 厳密に 0 のときだけ
+    radius_a0 > 0.0 || error("NucleusSpec: radius_a0 は正でなければならない ($radius_a0) — " *
+                             "欠測や parse error を点核へ畳まない (fail-closed)")
+    isempty(radius_source) &&
+        error("NucleusSpec: 有限核には radius_source が要る (来歴の無い半径は出荷経路へ入れない)")
+    return NucleusSpec(kind, radius_a0, radius_source)
+end
+is_point(ns::NucleusSpec) = ns.kind === :point
+"キャッシュ鍵・provenance 用の短いタグ。点核は \"point\""
+nucleus_tag(ns::NucleusSpec) = is_point(ns) ? "point" : "us" * string(ns.radius_a0)
+"model_id の接尾辞 (点核は空 = 従来と同一)"
+nucleus_model_suffix(ns::NucleusSpec) = is_point(ns) ? "" : "-FNUS"
+"""ΔV_N(r) = V_finite − V_point。点核または r ≥ R では厳密に 0。
+
+⚠ 260830Cl (Sol 指摘、実測で確認): 素朴な `z(1/r − (3−x²)/(2R))` は **r → R で大数差の桁落ち**を起こす。
+代数的に厳密に等しい安定形 `Z/(2R)·(1−x)²(x+2)/x` (x = r/R) を使う。
+実測 (Z=79, R=1.3e-4 a0): 1−x = 2⁻²⁰ で相対 1.3e-4、**2⁻²⁸ で素朴形は厳密に 0 を返す**
+(安定形は 1.27e-11)。⚠ 実格子 (log メッシュ dt=1e-3) では 1−x ~ 1e-3 が典型なので実害は小さいが、
+境界に格子点が近づく元素で無用に精度を落とす。"""
+function dV_nuc(ns::NucleusSpec, z::Real, r::Float64)
+    (is_point(ns) || r >= ns.radius_a0) && return 0.0
+    R = ns.radius_a0
+    x = r / R
+    return z / (2.0 * R) * ((1.0 - x)^2 * (x + 2.0) / x)
+end
+"点核場 (Latter 処理済み) に ΔV_N を**その場で**加える。点核なら何もしない (ビット同一)"
+function add_dV_nuc!(v::AbstractVector{Float64}, ns::NucleusSpec, z::Real, r::AbstractVector{Float64})
+    is_point(ns) && return v
+    @inbounds for i in eachindex(r)
+        r[i] >= ns.radius_a0 && break          # r は昇順
+        v[i] += dV_nuc(ns, z, r[i])
+    end
+    return v
+end
+"""束縛 Dirac の原点の種 (G₀, F₀)。点核 (または種の位置が核の外) なら従来の
+G = r^γ, F/G = c(γ+κ)/Z と**同じ式**。有限核の内側なら上の有限ポテンシャル級数"""
+function _dirac_seed(r1::Float64, v1::Float64, E::Float64, kap::Float64, c::Float64,
+                     gam::Float64, z::Int, ns::NucleusSpec)
+    if is_point(ns) || r1 >= ns.radius_a0
+        G0 = r1^gam
+        return G0, G0 * c * (gam + kap) / z
+    end
+    B0 = 2.0 * c + (E - v1) / c
+    C0 = (E - v1) / c
+    if kap > 0
+        G0 = r1^(kap + 1.0)
+        return G0, (2.0 * kap + 1.0) * G0 / (B0 * r1)
+    else
+        k = -kap
+        G0 = r1^k
+        return G0, -C0 * r1 * G0 / (2.0 * k + 1.0)
+    end
+end
+
 # ==== 260811Cl 追加: 数値 backend の版付けと resolved config ================
 # 出荷済み F v5 は **legacy_v5** で凍結する。新しい数値方式は別 ID を名乗り、
 # v5 の名前で出さない (codex 助言 2026-08-11)。
@@ -565,6 +736,115 @@ function (p::RvSpline)(rr::Float64)
     return w / rr
 end
 
+"""外部一体ポテンシャル (260908Cl 新設。作者決定 2026-09-08 = Watson 球)。
+
+多価陰イオン (`O²⁻` など N ≥ Z+2) は**自由イオンとして束縛しない** —
+KS の漸近 `−(Z−N+1)/r` が斥力に転じ、解は格子の箱 (`rmax`) が支えるだけになる
+(実測: `a₀M₂/3` が rmax = 30/60/120 で 36.1 / 98.5 / 469.4 Å ≈ rmax²)。
+⇒ 半径 R・電荷 +Q の薄い球殻を外部場として入れ、全系の漸近を戻す。
+
+    v_W(r) = −Q/R  (r < R)  /  −Q/r  (r ≥ R)      ⚠ v_W(∞) = 0 (エネルギー基準は動かない)
+
+⚠⚠ **これは電子が感じる場であって、出荷する散乱源ではない。**
+`f_x` / `f_e` の散乱源は核と N 個の電子だけで、単極子係数は `(Z−N)/(8π²a₀)` のまま。
+殻を散乱源に算入すると差は `2a₀ Q j₀(KR)/K²` になる (検査可能)。
+
+⚠ fail-closed (`NucleusSpec` と同じ流儀): 電荷 0 だけを canonical な「場なし」へ畳む。
+半径は正、**半径の出所 (`source`) は必須** (来歴の無い半径を出荷経路へ入れない)。"""
+struct ExternalField
+    kind::Symbol            # :none | :watson_shell
+    charge::Float64         # 球殻の電荷 +Q [e]。場なしは 0
+    radius_a0::Float64      # 球殻の半径 R [a0]。場なしは 0
+    source::String          # R と Q の出所 (provenance)。場なしは ""
+end
+const NO_EXT_FIELD = ExternalField(:none, 0.0, 0.0, "")
+
+function ExternalField(kind::Symbol; charge::Float64=0.0, radius_a0::Float64=0.0,
+                       source::String="")
+    kind in (:none, :watson_shell) || error("ExternalField: kind は :none | :watson_shell ($kind)")
+    kind === :none && return NO_EXT_FIELD
+    isfinite(charge) || error("ExternalField: charge が有限でない ($charge)")
+    charge == 0.0 && return NO_EXT_FIELD             # canonical: 厳密に 0 のときだけ
+    isfinite(radius_a0) && radius_a0 > 0.0 ||
+        error("ExternalField: radius_a0 は有限の正でなければならない ($radius_a0) — " *
+              "欠測や parse error を「場なし」へ畳まない (fail-closed)")
+    isempty(source) &&
+        error("ExternalField: 外部場には source が要る (来歴の無い半径を出荷経路へ入れない)")
+    return ExternalField(kind, charge, radius_a0, source)
+end
+
+is_no_field(f::ExternalField) = f.kind === :none
+"""外部場の数値法の版 (provenance)。260910Cl: **`analytic_split_v1`** = v_W をスプラインに入れず
+評価時に解析的に足し、束縛 Dirac の RK4 段を r = R で分割する。
+
+⚠⚠ **なぜ変えたか (2026-09-10、イオン認証 campaign 1 で発見)**: 旧法は `add_dV_ext!` で v_W を格子点に
+足してから r·V を ln r で 3 次スプラインしていた。v_W の折れ (r = R) が格子点の間に落ちると、スプラインが
+見る折れの位置が節点の配置で変わり、格子を半分にしても誤差が h² で縮まない (O²⁻ CN=4 で収縮比 0.525、
+R を stage-3 節点に丸めると 0.255 = `tools/ion_watson_snap_probe.jl`)。RK4 も R を跨ぐ段で位相依存の
+局所誤差を持つ (codex2 2026-09-10、thread 01a08870)。⇒ 旧法は残さない (fail-closed: `ext_tag` を変え、
+旧 cache 鍵と旧 JSON の `external_field` 文字列に一致しない)。"""
+const EXT_FIELD_SCHEME = "analytic_split_v1"
+
+"キャッシュ鍵・provenance 用の短いタグ。場なしは \"none\"。⚠ 260910Cl: 接頭辞を `ws` → `wsA` に変えた (数値法 `analytic_split_v1`。旧 cache 鍵と一致させない)"
+ext_tag(f::ExternalField) = is_no_field(f) ? "none" :
+                            "wsA" * string(f.charge) * "@" * string(f.radius_a0)
+
+"外部場の値 v_W(r) (解析的)。場なしは 0"
+@inline v_ext(f::ExternalField, rr::Float64) =
+    is_no_field(f) ? 0.0 : (rr < f.radius_a0 ? -f.charge / f.radius_a0 : -f.charge / rr)
+
+"""原子の場 (スプライン) + 外部場 (解析的) の callable (260910Cl)。
+
+`base` は**外部場を含まない** r·V のスプライン (漸近は原子自身の電荷)。v_W は評価点ごとに
+`v_ext` で足すので、折れ r = R は格子に依らず正確な位置にある。束縛 Dirac の積分器は
+`kink_radius` で R を受け取り、R を跨ぐ段を 2 つに割る。"""
+struct ExtPotential
+    base::RvSpline
+    ext::ExternalField
+end
+(p::ExtPotential)(rr::Float64) = p.base(rr) + v_ext(p.ext, rr)
+
+"ポテンシャルが持つ折れの位置 (無ければ nothing)。積分器が段を分割するために使う"
+kink_radius(::Any) = nothing
+kink_radius(p::ExtPotential) = p.ext.radius_a0
+
+"""格子 r の中で折れ R を跨ぐ区間 i (r[i] < R < r[i+1]) と、分割に要る V の値。
+R が節点に厳密に一致する・格子の外にある ⇒ nothing (分割不要)。
+`vm` (真の中点) を使う数値法では 2 つの半区間の中点も評価する。"""
+function kink_split(pot_V, r::AbstractVector{Float64}, use_midpoint::Bool)
+    R = kink_radius(pot_V)
+    R === nothing && return nothing
+    n = length(r)
+    (R <= r[1] || R >= r[n]) && return nothing
+    i = searchsortedlast(r, R)                 # r[i] ≤ R < r[i+1]
+    (i < 1 || i >= n) && return nothing
+    r[i] == R && return nothing                # 節点に乗っている
+    vR = pot_V(R)
+    vmL = use_midpoint ? pot_V((r[i] + R) / 2.0) : NaN
+    vmR = use_midpoint ? pot_V((R + r[i+1]) / 2.0) : NaN
+    return (i = i, R = R, vR = vR, vmL = vmL, vmR = vmR)
+end
+"""外部場が漸近 −asym/r に足す電荷。球殻は r > R で −Q/r なので Q。
+
+⚠ `SCFAtom.z_asym` は**原子自身の**漸近電荷のままにし、ここを別に足す。
+こうしないと `q_net` を `z_asym − 1` から作る経路に Q が混入する。"""
+ext_asym(f::ExternalField) = is_no_field(f) ? 0.0 : f.charge
+
+"""外部場を有効場へ加える (場なしは no-op)。
+
+⚠ **Latter クリップの後**に加える (`add_dV_nuc!` と同じ位置)。
+外部場込みの全体に `min(…, −(L+Q)/r)` を掛けると、球殻内部に `−Q/r` を
+持ち込む (内部は `−Q/R` なので等価ではない)。"""
+function add_dV_ext!(v::AbstractVector{Float64}, f::ExternalField,
+                     r::AbstractVector{Float64})
+    is_no_field(f) && return v
+    Q, R = f.charge, f.radius_a0
+    @inbounds for i in eachindex(r)
+        v[i] += r[i] < R ? -Q / R : -Q / r[i]
+    end
+    return v
+end
+
 """HFS の自己無撞着場 (Python 版 SCFAtom)。収束すると rho / orbitals / eps /
 converged を持つ。latter_charge: Latter 尾の電荷 (中性 1、+1 イオン 2)。
 
@@ -596,7 +876,35 @@ mutable struct SCFAtom
                              # :kli は物理が出す Z−N+1 (中性 1、core-hole 2)
     cfg::NumericsConfig      # 260811Cl: **実際に解いた数値設定**。provenance と
                              # キャッシュキーの唯一の出所 (§4.19)
+    nucleus::NucleusSpec     # 260829Cl: 核模型 (既定 = 点核)。キャッシュ鍵と provenance に入る
+    # 260904Cl (作者決定 2026-09-03 案 3): SCF の**停止の記録**。`resolved` の偽陽性の抜け道は
+    #   「SCF がプロセスによって別の反復で止まる」なので、どの反復で止まり、停止判定に使った
+    #   残差がいくつだったかを原子と一緒に運ぶ。値の計算には一切使わない (数値は不変)。
+    #   `converged == (stop_drho < cfg.tol_rho && stop_de < cfg.tol_e)` が不変条件 (cache_validate_object が検査)
+    n_iter::Int              # 停止した反復 (1 始まり。max_iter で打ち切られたら max_iter)
+    stop_drho::Float64       # 最後の停止判定に使った drho = ∫4πr²|ρ_new − ρ| dr (混合前の新密度と旧密度の差)
+    stop_de::Float64         # 最後の停止判定に使った de = max_k |Δε_k| / max(1, |ε_k|) (⚠ 純粋な相対変化ではない)
+    ext::ExternalField       # 260908Cl: 外部一体場 (既定 = 無し)。⚠ 電子が感じる場であって
+                             #   **出荷する散乱源ではない** (ExternalField の docstring)
 end
+
+"""260915Cl (I38 手順 4d の D2、作者決定 I48): SCF の反復で KLI の交換ポテンシャルに非有限値が出た。
+
+⚠ 収束の判定は密度と固有値の差だけを見るので、`vx_new` の NaN はその反復の判定に入らず、`converged = true` で返り得た
+(codex2 の 4d の設計の検算の 1)。⇒ 両方の KLI の分岐で `vx_new` を作った直後に検査し、この例外で止める。
+生成器 (`generate_element_ledgered`) が台帳に理由 `scf_nonfinite` の保留を残す。有限の経路の値は変えない。
+⚠ `SCFAtom` の型の定義は変えない (検査専用のスナップショットの前提、規則 R0.5)。"""
+struct ScfNonFinite <: Exception
+    z::Int
+    nel::Float64
+    relativistic::Bool
+    iteration::Int
+    quantity::String
+    n_nonfinite::Int
+end
+Base.showerror(io::IO, e::ScfNonFinite) =
+    print(io, "ScfNonFinite: Z=", e.z, " N=", e.nel, " ", e.relativistic ? "Dirac-KLI" : "KLI", " の反復 ", e.iteration,
+          " で ", e.quantity, " に非有限値が ", e.n_nonfinite, " 点")
 
 """(n, l, q) の占有を Dirac の (n, l, κ, q) へ分ける。
 
@@ -624,11 +932,18 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                  rmax::Float64=SCF_RMAX, dt::Float64=GRID_DT,
                  beta::Float64=SCF_BETA, tol_rho::Float64=SCF_TOL_RHO,
                  tol_e::Float64=SCF_TOL_E, max_iter::Int=SCF_MAX_ITER,
+                 eig_tol::Float64=EIG_TOL,      # 260919Cl (R2): 軌道の固有値二分法の許容を引数で受ける (既定は従来の定数)
                  rho_init::Union{Nothing,Vector{Float64}}=nothing,
                  relativistic::Bool=false, c::Float64=C_LIGHT,
                  x_alpha::Float64=X_ALPHA, exchange::Symbol=:xalpha,
-                 numerics::Symbol=:legacy_v5)
+                 numerics::Symbol=:legacy_v5, nucleus::NucleusSpec=POINT_NUCLEUS,
+                 ext::ExternalField=NO_EXT_FIELD)
     exchange in (:xalpha, :kli) || error("unknown exchange $exchange (:xalpha|:kli)")
+    # 260904Cl: 停止の記録の不変条件 converged == (drho < tol_rho ∧ de < tol_e) は max_iter ≥ 1 と
+    #   有限で正の許容値を前提にする。max_iter ≤ 0 はループが回らず n_iter = 0 の原子を作ってしまう
+    max_iter >= 1 || error("SCF max_iter must be ≥ 1 (got $max_iter)")
+    isfinite(tol_rho) && tol_rho > 0.0 && isfinite(tol_e) && tol_e > 0.0 ||
+        error("SCF tolerances must be finite and positive (tol_rho=$tol_rho, tol_e=$tol_e)")
     # ⚠⚠ **解決済みの kwargs から config を 1 つ作り、計算にもキー生成にも
     #   これだけを使う。**「キーは既定値を参照、計算は kwargs」の二重経路は
     #   どちらかが変わった瞬間に黙って乖離する (codex 助言 2026-08-11)
@@ -654,7 +969,10 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
     eps_now_k = Dict{Tuple{Int,Int,Int},Float64}()
     drho = 0.0
     de = 0.0
-    for _ in 1:max_iter
+    n_iter = 0
+    for it in 1:max_iter
+        n_iter = it
+        threads_active_refresh!()                      # 260911Cl (I26): 絞り値を反復ごとに読み直す
         vh = hartree(r, rho)
         veff_b = similar(r)                            # 束縛軌道を解く有効場
         local asym_now::Float64
@@ -673,7 +991,14 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
             end
             asym_now = latter_charge
         end
-        pot = RvSpline(r, veff_b .* r, -asym_now)
+        add_dV_nuc!(veff_b, nucleus, z, r)             # 260829Cl: 有限核 (点核なら no-op)
+        # 260908Cl: 外部一体場 (Watson 球。場なしなら no-op)。⚠ Latter クリップの**後**。
+        #   ⚠ z_asym / latter_charge は原子自身の漸近のままにし、別に足す。
+        # 260910Cl (`EXT_FIELD_SCHEME`): v_W は**スプラインに入れない**。原子の場だけを
+        #   スプラインし、`ExtPotential` が評価時に解析的に足す (折れ r = R が格子に依らない)。
+        #   場なしなら従来どおり RvSpline そのもの (中性の数値は 1 bit も動かない)。
+        pot = is_no_field(ext) ? RvSpline(r, veff_b .* r, -asym_now) :
+                                 ExtPotential(RvSpline(r, veff_b .* r, -asym_now), ext)
         rho_new = zeros(length(r))
         eps_now = Dict{Tuple{Int,Int},Float64}()
         orbs = Dict{Tuple{Int,Int},Vector{Float64}}()
@@ -692,9 +1017,15 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
             # eps_now/orbs には κ 平均を入れる (診断用。密度には使わない)
             acc_e = Dict{Tuple{Int,Int},Float64}()
             acc_q = Dict{Tuple{Int,Int},Float64}()
-            for (nq, lq, kap, q) in dirac_occupancy(occ)
-                q <= 0.0 && continue
-                key = (nq, lq)
+            # 260911Cl (作者決定 I24): 軌道 (n, l, κ) ごとの Dirac 解は互いに独立 (入力は pot・r・
+            #   前回の固有値 eps_prev_k だけで、どれも読むだけ) なので **解だけを thread で並列**にし、
+            #   密度・固有値・交換用の軌道の**集計は元の順で直列**に行う。⇒ 演算の順序は単スレッドと
+            #   同じで、結果は thread 数に依らずビット同一 (tools/scf_thread_determinism_test.jl で実演)。
+            #   ⚠ 集計を並列にしない — 浮動小数の和の順序が変わる。
+            dtasks = [(nq, lq, kap, q) for (nq, lq, kap, q) in dirac_occupancy(occ) if q > 0.0]
+            dres = Vector{Tuple{Float64,Vector{Float64},Vector{Float64}}}(undef, length(dtasks))
+            solve_one = function (t)
+                nq, lq, kap, q = t
                 kkey = (nq, lq, kap)
                 local E, G, F
                 solved = false
@@ -706,7 +1037,8 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                                                         kappa=kap,
                                                         n_nodes=nq - lq - 1,
                                                         e_lo=lo, e_hi=hi, c=c,
-                                                        numerics=cfg.id)
+                                                        numerics=cfg.id,
+                                                        nucleus=nucleus, tol=eig_tol)
                         abs(E - hi) < 1e-5 * max(1.0, abs(hi)) &&
                             error("hint bracket too low")
                         solved = true
@@ -717,8 +1049,29 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                 if !solved
                     E, G, F = dirac_orbital_on_grid(pot, z, r, dt; kappa=kap,
                                                     n_nodes=nq - lq - 1, c=c,
-                                                    numerics=cfg.id)
+                                                    numerics=cfg.id, nucleus=nucleus, tol=eig_tol)
                 end
+                return (E, G, F)
+            end
+            pfor_limited(length(dtasks), threads_active()) do i
+                dres[i] = solve_one(dtasks[i])
+            end
+            # 軌道ごとの密度寄与 q(G²+F²)/(4πr²) は純関数なので並列に作り、足すのは元の順で直列
+            #   (足す値も式も単スレッド版と同一 = ビット同一)
+            dcontrib = Vector{Vector{Float64}}(undef, length(dtasks))
+            pfor_limited(length(dtasks), threads_active()) do it
+                q = dtasks[it][4]; G = dres[it][2]; F = dres[it][3]
+                cvec = Vector{Float64}(undef, length(r))
+                @inbounds for i in eachindex(r)
+                    cvec[i] = q * (G[i]^2 + F[i]^2) / (4.0 * pi * r[i]^2)
+                end
+                dcontrib[it] = cvec
+            end
+            for it in eachindex(dtasks)                # ⚠ 集計は元の順で直列 (ビット同一の要)
+                nq, lq, kap, q = dtasks[it]
+                E, G, F = dres[it]
+                key = (nq, lq)
+                kkey = (nq, lq, kap)
                 eps_now_k[kkey] = E
                 acc_e[key] = get(acc_e, key, 0.0) + q * E
                 acc_q[key] = get(acc_q, key, 0.0) + q
@@ -727,8 +1080,9 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                     push!(dG, G); push!(dF, F)
                     push!(dq, q); push!(dkap, kap); push!(deps, E)
                 end
+                cvec = dcontrib[it]
                 @inbounds for i in eachindex(r)
-                    rho_new[i] += q * (G[i]^2 + F[i]^2) / (4.0 * pi * r[i]^2)
+                    rho_new[i] += cvec[i]
                     orbs[key][i] += q * G[i]           # 診断用の占有加重和
                 end
             end
@@ -751,7 +1105,7 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                 try
                     E, _, ub = solve_bound(pot, lq, nq - lq - 1; r0=r[1],
                                            rmax=rmax_call, dt=dt,
-                                           e_lo=e_lo, e_hi=e_hi)
+                                           e_lo=e_lo, e_hi=e_hi, tol=eig_tol)
                     if abs(E - e_hi) < 1e-5 * max(1.0, abs(e_hi))
                         error("hint bracket too low")
                     end
@@ -763,7 +1117,7 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
             end
             if !solved                                  # ヒント無し / 外れ → 広域
                 E, _, ub = solve_bound(pot, lq, nq - lq - 1; r0=r[1],
-                                       rmax=rmax_call, dt=dt)
+                                       rmax=rmax_call, dt=dt, tol=eig_tol)
             end
             @assert length(ub) == length(r) "solve_bound grid mismatch"
             eps_now[key] = E
@@ -783,6 +1137,10 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                 Pv, qv, lv, epv = scf_exchange_arrays(occ, orbs, eps_now)
                 vx_new = kli_exchange_potential(Pv, qv, lv, r, epv)[1]
             end
+            # 260915Cl (I38 手順 4d の D2、作者決定 I48): ⚠ 非有限の交換ポテンシャルを混合に入れない。収束の判定は密度と
+            #   固有値の差だけなので、最終反復の NaN を持ったまま converged = true で返り得た。専用の例外で止める
+            nbad = count(!isfinite, vx_new)
+            nbad == 0 || throw(ScfNonFinite(z, nel, relativistic, it, "vx_kli", nbad))
             vx_kli = isempty(vx_kli) ? vx_new :
                      (1.0 - beta) .* vx_kli .+ beta .* vx_new
         end
@@ -804,7 +1162,7 @@ function SCFAtom(z::Int, occ::Vector{Tuple{Int,Int,Float64}};
                 z, drho, de)
     end
     return SCFAtom(z, occ, r, dt, rho, orbs, eps_now, converged, nel, relativistic,
-                   x_alpha, exchange, vx_kli, z_asym, cfg)
+                   x_alpha, exchange, vx_kli, z_asym, cfg, nucleus, n_iter, drho, de, ext)
 end
 
 """収束密度から束縛軌道用ポテンシャル V_eff を作る。
@@ -820,18 +1178,26 @@ KLI の V_eff は −1/r の尾を持つ。これは KS ポテンシャルとし
 KLI の改善は**密度**を通して受け取り、交換は終状態場 (第 5 章) と同じく
 局所形で当てる、という切り分け。"""
 function V_bound_callable(a::SCFAtom; latter_charge::Float64=1.0,
-                          local_exchange::Bool=false)
+                          local_exchange::Bool=false,
+                          nucleus::NucleusSpec=a.nucleus,
+                          ext::ExternalField=a.ext)
+    # 260829Cl: `nucleus` 既定は SCF と同じ核。監査の 2×2 (SCF 場は点核のまま束縛だけ
+    #   有限核) でだけ上書きする。ΔV_N は Latter 処理の**後**に加える
     vh = hartree(a.r, a.rho)
     if a.exchange === :kli && !local_exchange
         veff = @. -a.z / a.r + vh + a.vx
-        return RvSpline(a.r, veff .* a.r, -a.z_asym)
+        add_dV_nuc!(veff, nucleus, a.z, a.r)
+        base = RvSpline(a.r, veff .* a.r, -a.z_asym)
+        return is_no_field(ext) ? base : ExtPotential(base, ext)   # 260910Cl: 外部場は解析的
     end
     veff = similar(a.r)
     @inbounds for i in eachindex(a.r)
         veff[i] = min(-a.z / a.r[i] + vh[i] + a.x_alpha * slater_vx(a.rho[i]),
                       -latter_charge / a.r[i])
     end
-    return RvSpline(a.r, veff .* a.r, -latter_charge)
+    add_dV_nuc!(veff, nucleus, a.z, a.r)
+    base = RvSpline(a.r, veff .* a.r, -latter_charge)
+    return is_no_field(ext) ? base : ExtPotential(base, ext)       # 260910Cl: 外部場は解析的
 end
 
 # ====================================================================
@@ -1007,6 +1373,29 @@ legacy 経路は今までどおり 9 引数版へ落ちる。
             F0 + h / 6.0 * (k1F + 2k2F + 2k3F + k4F))
 end
 
+"""1 区間 [r_a, r_b] の RK4。260910Cl: 区間が折れ R を跨ぐ (`split` の区間 i) なら
+[r_a, R] と [R, r_b] の 2 段に割る (向き ±1 は呼び手が r_a, r_b の順で表す)。
+⚠ `split === nothing` なら従来の 1 段そのもの (中性は分岐しない)。"""
+@inline function _dirac_step_split(ra::Float64, rb::Float64, va::Float64, vb::Float64,
+                                   vmid, E::Float64, g::Float64, f::Float64,
+                                   kap::Float64, c::Float64, split, i::Int)
+    if split !== nothing && i == split.i
+        R = split.R
+        if vmid === nothing
+            g1, f1 = _dirac_rk4_step(ra, R, va, split.vR, E, g, f, kap, c)
+            return _dirac_rk4_step(R, rb, split.vR, vb, E, g1, f1, kap, c)
+        else
+            # 向きで半区間の中点を入れ替える (ra < R なら外向き)
+            vm1 = ra < R ? split.vmL : split.vmR
+            vm2 = ra < R ? split.vmR : split.vmL
+            g1, f1 = _dirac_rk4_step(ra, R, va, vm1, split.vR, E, g, f, kap, c)
+            return _dirac_rk4_step(R, rb, split.vR, vm2, vb, E, g1, f1, kap, c)
+        end
+    end
+    return vmid === nothing ? _dirac_rk4_step(ra, rb, va, vb, E, g, f, kap, c) :
+                              _dirac_rk4_step(ra, rb, va, vmid, vb, E, g, f, kap, c)
+end
+
 """外向き RK4 で大成分の節数を数える (節定理は Dirac でも大成分に成立)。
 
 `vm` は中点 V の配列 (`dirac_true_midpoint_v1` 用)。⚠ **`nothing` なら legacy と
@@ -1014,15 +1403,21 @@ end
 `VM === Nothing` はコンパイル時に畳まれ**セルループ内に分岐は残らない**。"""
 function _dirac_shoot(E::Float64, r::Vector{Float64}, v::Vector{Float64},
                       kap::Float64, c::Float64, gam::Float64, z::Int,
-                      vm::VM=nothing) where {VM}
+                      vm::VM=nothing;
+                      seed::Union{Nothing,Tuple{Float64,Float64}}=nothing,
+                      split=nothing) where {VM}
     # 節数だけが要るので波動関数の配列は持たず、現在値のスカラー対で進める
-    g = r[1]^gam
-    f = g * c * (gam + kap) / z                # 点核極限の比 F/G = c(γ+κ)/Z
+    # 260829Cl: `seed` は有限核用 (`_dirac_seed`)。nothing なら従来の点核の式そのまま
+    # 260910Cl: `split` は折れ R を跨ぐ区間の分割 (`kink_split`)。nothing なら従来どおり
+    g = seed === nothing ? r[1]^gam : seed[1]
+    f = seed === nothing ? g * c * (gam + kap) / z : seed[2]   # 点核極限の比 F/G = c(γ+κ)/Z
     nodes = 0
     @inbounds for i in 1:length(r)-1
-        gn, fn = VM === Nothing ?
+        gn, fn = split === nothing ? (VM === Nothing ?
             _dirac_rk4_step(r[i], r[i+1], v[i], v[i+1], E, g, f, kap, c) :
-            _dirac_rk4_step(r[i], r[i+1], v[i], vm[i], v[i+1], E, g, f, kap, c)
+            _dirac_rk4_step(r[i], r[i+1], v[i], vm[i], v[i+1], E, g, f, kap, c)) :
+            _dirac_step_split(r[i], r[i+1], v[i], v[i+1], VM === Nothing ? nothing : vm[i],
+                              E, g, f, kap, c, split, i)
         if g != 0.0 && gn != 0.0 && (g < 0.0) != (gn < 0.0)   # 符号は直接比較
             nodes += 1
         end
@@ -1043,7 +1438,7 @@ end
 function _dirac_seg(r2::Vector{Float64}, v2::Vector{Float64}, E::Float64,
                     kap::Float64, c::Float64, idx0::Int, idx1::Int,
                     G0::Float64, F0::Float64, direction::Int,
-                    vm2::VM=nothing) where {VM}
+                    vm2::VM=nothing; split=nothing) where {VM}
     n2 = length(r2)
     G = zeros(n2)
     F = zeros(n2)
@@ -1051,10 +1446,12 @@ function _dirac_seg(r2::Vector{Float64}, v2::Vector{Float64}, E::Float64,
     rng = direction > 0 ? (idx0:idx1-1) : (idx0:-1:idx1+1)
     @inbounds for i in rng
         j = i + direction
-        G[j], F[j] = VM === Nothing ?
+        G[j], F[j] = split === nothing ? (VM === Nothing ?
             _dirac_rk4_step(r2[i], r2[j], v2[i], v2[j], E, G[i], F[i], kap, c) :
             _dirac_rk4_step(r2[i], r2[j], v2[i], vm2[min(i, j)], v2[j], E,
-                            G[i], F[i], kap, c)
+                            G[i], F[i], kap, c)) :
+            _dirac_step_split(r2[i], r2[j], v2[i], v2[j], VM === Nothing ? nothing : vm2[min(i, j)],
+                              E, G[i], F[i], kap, c, split, min(i, j))   # 区間番号は向きに依らず min
     end
     return G, F
 end
@@ -1068,7 +1465,7 @@ Dirac SCF が Schrödinger SCF へ落ちることの検証 (selftest T13) に使
 function _dirac_gf(pot_V, z::Int, kappa::Int, n_nodes::Int, r0::Float64,
                    rmax::Float64, dt::Float64, tol::Float64,
                    e_lo::Union{Nothing,Float64}, e_hi::Float64, c::Float64;
-                   numerics::NumericsID=legacy_v5)
+                   numerics::NumericsID=legacy_v5, nucleus::NucleusSpec=POINT_NUCLEUS)
     n = ceil(Int, (log(rmax) - log(r0)) / dt)
     t = log(r0) .+ dt .* (0:n-1)
     r = exp.(t)
@@ -1079,8 +1476,13 @@ function _dirac_gf(pot_V, z::Int, kappa::Int, n_nodes::Int, r0::Float64,
     #   呼び直すと V がエネルギー非依存なのに無駄な評価が入る)
     vm = numerics === legacy_v5 ? nothing :
          pot_V.((@view(r[1:end-1]) .+ @view(r[2:end])) ./ 2.0)
+    # 260910Cl: 折れ R を跨ぐ区間の分割 (外部場が無ければ nothing = 従来どおり)
+    split = kink_split(pot_V, r, numerics !== legacy_v5)
 
-    shoot(E) = _dirac_shoot(E, r, v, kap, c, gam, z, vm)
+    # 260829Cl: 点核は seed=nothing (従来の式)。有限核は E 依存の種を毎回作る
+    shoot(E) = is_point(nucleus) ? _dirac_shoot(E, r, v, kap, c, gam, z, vm; split=split) :
+               _dirac_shoot(E, r, v, kap, c, gam, z, vm;
+                            seed=_dirac_seed(r[1], v[1], E, kap, c, gam, z, nucleus), split=split)
     lo = e_lo === nothing ? -1.2 * z * z - 20.0 : e_lo
     E = bisect_nodes(shoot, lo, e_hi, n_nodes, tol)
 
@@ -1095,6 +1497,7 @@ function _dirac_gf(pot_V, z::Int, kappa::Int, n_nodes::Int, r0::Float64,
     #   (vm を先頭から流用すると、n2 < n のとき末尾の区間がずれる)
     vm2 = numerics === legacy_v5 ? nothing :
           pot_V.((@view(r2[1:end-1]) .+ @view(r2[2:end])) ./ 2.0)
+    split2 = kink_split(pot_V, r2, numerics !== legacy_v5)   # 260910Cl: r2 は r の先頭部分だが区間数が違う
     i_t = 3
     @inbounds for i in n2:-1:1                 # 古典的許容域 V<E の右端
         if v2[i] < E
@@ -1106,12 +1509,11 @@ function _dirac_gf(pot_V, z::Int, kappa::Int, n_nodes::Int, r0::Float64,
     r_m = r2[i_t] + 0.8 * log(1e9) / (2.0 * lam)   # δE 増幅 ~10⁹ の手前で接続
     i_m = clamp(searchsortedfirst(r2, r_m), i_t + 2, n2 - 8)
 
-    G0 = r2[1]^gam
-    F0 = G0 * c * (gam + kap) / z
-    Gout, Fout = _dirac_seg(r2, v2, E, kap, c, 1, i_m, G0, F0, +1, vm2)
+    G0, F0 = _dirac_seed(r2[1], v2[1], E, kap, c, gam, z, nucleus)   # 点核なら従来と同じ式
+    Gout, Fout = _dirac_seg(r2, v2, E, kap, c, 1, i_m, G0, F0, +1, vm2; split=split2)
     Ge = 1e-30                                 # 内向きの種
     Fe = -lam * Ge / (2.0 * c + E / c)         # 遠方減衰解の比 F/G = −λ/(2c+E/c)
-    Gin, Fin = _dirac_seg(r2, v2, E, kap, c, n2, i_m, Ge, Fe, -1, vm2)
+    Gin, Fin = _dirac_seg(r2, v2, E, kap, c, n2, i_m, Ge, Fe, -1, vm2; split=split2)
     scale = Gin[i_m] != 0 ? Gout[i_m] / Gin[i_m] : 1.0
     G = vcat(Gout[1:i_m-1], Gin[i_m:end] .* scale)
     F = vcat(Fout[1:i_m-1], Fin[i_m:end] .* scale)
@@ -1125,9 +1527,10 @@ function solve_dirac_bound(pot_V, z::Int; kappa::Int=-1, n_nodes::Int=0,
                            r0::Float64=GRID_R0, rmax::Float64=BOUND_RMAX,
                            dt::Float64=GRID_DT, tol::Float64=EIG_TOL,
                            e_lo::Union{Nothing,Float64}=nothing,
-                           e_hi::Float64=-1e-4, c::Float64=C_LIGHT)
+                           e_hi::Float64=-1e-4, c::Float64=C_LIGHT,
+                           nucleus::NucleusSpec=POINT_NUCLEUS)
     E, r2, G, F = _dirac_gf(pot_V, z, kappa, n_nodes, r0, rmax, dt, tol,
-                            e_lo, e_hi, c)
+                            e_lo, e_hi, c; nucleus=nucleus)
     norm2 = trapz(G .* G .+ F .* F, r2)        # 全ノルム ∫(G²+F²)dr
     frac_small = trapz(F .* F, r2) / norm2     # 小成分の割合 ≈ (Zα/2)² (診断)
     u = G ./ sqrt(trapz(G .* G, r2))           # 大成分のみで再規格化 (処方)
@@ -1154,9 +1557,10 @@ function solve_dirac_bound_2c(pot_V, z::Int; kappa::Int=-1, n_nodes::Int=0,
                               r0::Float64=GRID_R0, rmax::Float64=BOUND_RMAX,
                               dt::Float64=GRID_DT, tol::Float64=EIG_TOL,
                               e_lo::Union{Nothing,Float64}=nothing,
-                              e_hi::Float64=-1e-4, c::Float64=C_LIGHT)
+                              e_hi::Float64=-1e-4, c::Float64=C_LIGHT,
+                              nucleus::NucleusSpec=POINT_NUCLEUS)
     E, r2, G, F = _dirac_gf(pot_V, z, kappa, n_nodes, r0, rmax, dt, tol,
-                            e_lo, e_hi, c)
+                            e_lo, e_hi, c; nucleus=nucleus)
     norm2 = trapz(G .* G .+ F .* F, r2)
     frac_small = trapz(F .* F, r2) / norm2
     s = 1.0 / sqrt(norm2)
@@ -1176,10 +1580,11 @@ function dirac_orbital_on_grid(pot_V, z::Int, r_full::Vector{Float64}, dt::Float
                                tol::Float64=EIG_TOL,
                                e_lo::Union{Nothing,Float64}=nothing,
                                e_hi::Float64=-1e-4, c::Float64=C_LIGHT,
-                               numerics::NumericsID=legacy_v5)
+                               numerics::NumericsID=legacy_v5,
+                               nucleus::NucleusSpec=POINT_NUCLEUS)
     E, r2, G, F = _dirac_gf(pot_V, z, kappa, n_nodes, r_full[1],
                             r_full[end] * (1.0 + 1e-12), dt, tol, e_lo, e_hi, c;
-                            numerics=numerics)
+                            numerics=numerics, nucleus=nucleus)
     s = 1.0 / sqrt(trapz(G .* G .+ F .* F, r2))
     nf = length(r_full)
     n2 = length(r2)
@@ -1210,12 +1615,19 @@ struct IonPotential
     V::RvSpline
 end
 
-function IonPotential(z::Int, neutral::SCFAtom, ion::SCFAtom)
+function IonPotential(z::Int, neutral::SCFAtom, ion::SCFAtom;
+                      nucleus::NucleusSpec=neutral.nucleus,
+                      cont_exchange_coeff::Float64=CONT_EXCHANGE_COEFF)   # 260919Cl (R2): 2/3 のリテラルを引数に (既定は同じ値)
+    # 260829Cl: 通常は neutral/ion と同じ核 (不一致は hard fail)。監査の 2×2 だけ
+    #   `nucleus` を明示して連続状態側の核を上書きする
+    neutral.nucleus == ion.nucleus ||
+        error("IonPotential: neutral と ion の核模型が違う ($(nucleus_tag(neutral.nucleus)) vs $(nucleus_tag(ion.nucleus)))")
     r = neutral.r
     rho_ion = max.(ion.rho, 0.0)
     z_asym = z - ion.nel                       # full hole なら 1.0
     vst = -z ./ r .+ hartree(r, rho_ion)       # Latter/交換なしの静電場
-    rv = @. (vst + (2.0 / 3.0) * slater_vx(rho_ion)) * r
+    add_dV_nuc!(vst, nucleus, z, r)            # 有限核 (点核なら no-op)
+    rv = @. (vst + cont_exchange_coeff * slater_vx(rho_ion)) * r
     return IonPotential(z, z_asym, r, RvSpline(r, rv, -z_asym))
 end
 
@@ -1223,7 +1635,7 @@ end
 V_for(p::IonPotential, eps) = p.V
 
 "|r·V + z_asym| < tol となる最小半径 (Coulomb フィットが正当化される半径)"
-function r_match_for(p::IonPotential, eps; tol::Float64=1e-7, rmax_cap::Float64=90.0)
+function r_match_for(p::IonPotential, eps; tol::Float64=R_MATCH_TOL, rmax_cap::Float64=R_MATCH_RMAX_CAP)   # 260919Cl (R2): 既定を名前つき定数に
     rr = p.r
     dev(k) = abs(p.V(rr[k]) * rr[k] + p.z_asym)
     i = 0

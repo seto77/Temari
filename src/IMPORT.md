@@ -22,7 +22,7 @@
 (層分割 P1/P2 の完了 + v3 本番生成の完走) は両方満たされ、dataset v4.0.0 (2026-08-08) と
 v5.0.0 は実際に Temari 側のコードから生成した。ReciPro 側 handout の
 `gen_production.jl` は v3 世代のミラーのままで v4/v5 を生成できない (既定処方が v3)。
-正本 = `src/prod_v4_jl/MANIFEST.md` / `src/prod_v5_jl/MANIFEST.md`。
+正本 = `src/prod_v4_jl/MANIFEST.md` / `src/prod_v5_jl/MANIFEST.md` (⚠ 2026-09-09 註: どちらも**もう追跡されていない** — 両ディレクトリに残るのは `ERRATA.md` だけ。現存する MANIFEST は `src/prod_v6_jl/MANIFEST.md` (追跡) と `src/prod_v7_jl/MANIFEST.md` (追跡外の生成物)。v4/v5 の書庫は GitHub Release / Zenodo の版が正本)。
 以下は履歴として残す。
 
 dataset v3 (246 チャネル) は完走し ReciPro ver4.946 で出荷済み。ただし生成コードの

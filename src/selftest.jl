@@ -1037,7 +1037,9 @@ function selftest()
 
     let eps_t = 2.0, lmax = 6
         # (c) 自由粒子: 大成分は Riccati-Bessel、短距離位相は厳密に 0
-        cont = DiracContinuumSet(PureZero(), eps_t, lmax, 6.0, 30.0, 1;
+        # 260829Cl: 第 6 引数 (原点の種の z) は 0。1 を渡すと種が点核 γ=√(1−1/c²) を仮定して
+        #   V≡0 と食い違い、κ=−1 の小成分が最初の格子点で相対 2.5e-5 ずれる (z=0 で 3e-7)
+        cont = DiracContinuumSet(PureZero(), eps_t, lmax, 6.0, 30.0, 0;
                                  q_resolve=5.0, z_asym=0.0)
         k = krel(eps_t, C_LIGHT)
         amp = sqrt(2.0 / (pi * k) * (1.0 + eps_t / (2.0 * C_LIGHT^2)))
@@ -1049,14 +1051,32 @@ function selftest()
                   for rr in cont.r_int]
             m = maximum(abs, ex)
             m < 1e-12 && continue
-            eG = max(eG, maximum(abs.(cont.G_int[ic, :] .- ex)) / m)
+            eG = max(eG, maximum(abs.(cont.G_int[:, ic] .- ex)) / m)
         end
         b_ref = sqrt(eps_t / (eps_t + 2.0 * C_LIGHT^2))
-        @printf("[T23c] 自由粒子 Dirac (κ %d 本): 大成分 max 相対誤差 %.2e / max|δ_κ| %.2e / 小成分比 ~%.1e (理論 %.1e)\n",
-                length(cont.kappas), eG, maximum(abs, cont.delta),
-                maximum(abs, cont.F_int[1, :]) / maximum(abs, cont.G_int[1, :]),
+        # 260829Cl: **符号つき**小成分。ODE G′ = −(κ/r)G + BF から F = (G′ + κG/r)/B、B = 2c + ε/c、
+        #   b = k/B = √(ε/(ε+2c²)) で
+        #     κ = −(l+1) < 0: F = −A b x j_{l+1}(x)     (x j_l′ − l j_l = −x j_{l+1})
+        #     κ = +l     > 0: F = +A b x j_{l−1}(x)     (x j_l′ + (l+1) j_l = x j_{l−1})
+        #   従来は比 max|F|/max|G| を表示するだけで assert が無く、片側の符号反転が素通りした
+        #   (`tools/small_component_sign_probe.jl`、実測 1.8〜3.1e-7、F→−F なら 2.0)
+        jlb2 = zeros(lmax + 2)
+        eF = 0.0
+        for ic in eachindex(cont.kappas)
+            l = cont.ls[ic]; kap = cont.kappas[ic]
+            exF = [(x = k * rr; sph_jl_all!(jlb2, lmax + 1, x);
+                    kap < 0 ? -amp * b_ref * x * jlb2[l+2] : amp * b_ref * x * jlb2[l])
+                   for rr in cont.r_int]
+            m = maximum(abs, exF)
+            m < 1e-12 && continue
+            eF = max(eF, maximum(abs.(cont.F_int[:, ic] .- exF)) / m)
+        end
+        @printf("[T23c] 自由粒子 Dirac (κ %d 本): 大成分 max 相対誤差 %.2e / 符号つき小成分 %.2e / max|δ_κ| %.2e / 小成分比 ~%.1e (理論 %.1e)\n",
+                length(cont.kappas), eG, eF, maximum(abs, cont.delta),
+                maximum(abs, cont.F_int[:, 1]) / maximum(abs, cont.G_int[:, 1]),
                 b_ref)
         @assert eG < 1e-5 "T23c FAIL: Dirac 連続状態が Riccati-Bessel と合わない"
+        @assert eF < 1e-5 "T23c FAIL: 小成分が符号つき解析解 ∓A b x j_{l±1} と合わない (符号反転なら ≈ 2)"
         @assert maximum(abs, cont.delta) < 1e-4 "T23c FAIL: 自由粒子で位相シフトが 0 でない"
     end
 
