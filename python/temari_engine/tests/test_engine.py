@@ -503,6 +503,25 @@ class Golden(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
+    def test_G13_save_dir(self):
+        """I70: 走らせ直した出力を保存し、それが envelope の検査を通って本文が一致する (揺れの測定で読み直す)"""
+        from temari_engine import golden as g
+        tmp = tempfile.mkdtemp()
+        try:
+            d = make_golden_set(os.path.join(tmp, "g"), tol=self.TOL)
+
+            def fake(args, **kw):
+                return te.RunResult(output=te.read_output(dumps(envelope_doc())), returncode=0, stdout="", stderr="", argv=tuple(args))
+            out = os.path.join(tmp, "saved")
+            r = g.check(d, run=fake, save_dir=out)
+            self.assertEqual(r[0].verdict, "identical")
+            o = te.read_output(os.path.join(out, "mott_C.json"), restore_nonfinite=True)
+            gold = te.read_output(dumps(envelope_doc()), restore_nonfinite=True)
+            self.assertEqual(g.compare_payloads(gold.payload, o.payload, "mott-elastic", self.TOL)[0], "identical")
+            self.assertEqual(sorted(os.listdir(out)), ["mott_C.json"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_G7_not_a_golden_set(self):
         from temari_engine import golden as g
         tmp = tempfile.mkdtemp()

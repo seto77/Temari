@@ -1,11 +1,11 @@
 """python -m temari_engine verify <path> [--research]
-python -m temari_engine golden <golden_dir> [--julia CMD] [--threads N]
+python -m temari_engine golden <golden_dir> [--julia CMD] [--threads N] [--save-dir DIR]
 
 verify : 一式 (dir か manifest.json) か 1 本のファイルの所属と役割を確かめて印字する。
          EXIT 0 = 通常入口で読める / 1 = 所属・役割・envelope の検査で拒否 / 2 = 使い方・読めない / 3 = 道具の欠陥
 golden : golden の一式の入力でエンジンを走らせ直し、出口ごとに 同一 / 適合 / 不合格 / 判定不能 を印字する。
          EXIT 0 = 全部 同一か適合 / 1 = 不合格がある / 2 = 判定不能がある (不合格は無い) / 3 = 道具の欠陥
-         `--julia` は "julia +1.11.9" のように空白で区切る。
+         `--julia` は "julia +1.11.9" のように空白で区切る。`--save-dir` は走らせ直した出力を 1 本ずつ書く (揺れの測定用、I70)。
 """
 import sys
 
@@ -40,6 +40,8 @@ def _golden(argv):
         i = argv.index("--julia"); kw["julia"] = argv[i + 1].split(); argv = argv[:i] + argv[i + 2:]
     if "--threads" in argv:
         i = argv.index("--threads"); kw["threads"] = int(argv[i + 1]); argv = argv[:i] + argv[i + 2:]
+    if "--save-dir" in argv:
+        i = argv.index("--save-dir"); kw["save_dir"] = argv[i + 1]; argv = argv[:i] + argv[i + 2:]
     if len(argv) != 1:
         print(__doc__)
         return 2

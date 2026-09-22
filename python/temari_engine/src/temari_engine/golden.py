@@ -180,8 +180,22 @@ def _check_tolerance(tol):
         raise MembershipError("tolerance.json の by_exit に非負の有限の数でない値: %s" % bad)
 
 
-def check(golden_dir, run=None, **run_kwargs):
-    """golden を走らせ直して照らす。`run` はエンジンを走らせる関数 (既定 = temari_engine.run)。CaseResult の list を返す"""
+def _save(save_dir, name, output):
+    """走らせ直した出力を `<save_dir>/<name>.json` に書く (本文 + envelope、鍵は整列。揺れの測定で読み直す)"""
+    import json
+    os.makedirs(save_dir, exist_ok=True)
+    doc = dict(output.payload)
+    doc["temari_envelope"] = output.envelope
+    p = os.path.join(save_dir, name + ".json")
+    with open(p + ".tmp", "w", encoding="utf-8", newline="\n") as f:
+        json.dump(doc, f, ensure_ascii=False, sort_keys=True, indent=1, allow_nan=False)
+        f.write("\n")
+    os.replace(p + ".tmp", p)
+
+
+def check(golden_dir, run=None, save_dir=None, **run_kwargs):
+    """golden を走らせ直して照らす。`run` はエンジンを走らせる関数 (既定 = temari_engine.run)。CaseResult の list を返す。
+    `save_dir` を与えると、走らせ直した出力を 1 本ずつそこへ書く (作者決定 I70: CPU・OS を跨いだ揺れを測るため)"""
     if run is None:
         from .run import run as run_engine
         run = run_engine
@@ -205,6 +219,8 @@ def check(golden_dir, run=None, **run_kwargs):
             results.append(CaseResult(name, "inconclusive", problems=["エンジンが走らない: %s" % ex]))
             continue
         new = r.output
+        if save_dir is not None:
+            _save(save_dir, name, new)
         if new.envelope["command"] != cmd:
             results.append(CaseResult(name, "inconclusive", problems=["入力が golden と違う: %r / %r" % (new.envelope["command"], cmd)]))
             continue

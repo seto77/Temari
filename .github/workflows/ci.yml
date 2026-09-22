@@ -130,19 +130,51 @@ jobs:
           PYTHONPATH: python/temari_engine/src
         run: python -W error -m unittest discover -s python/temari_engine/tests -v
 
-      # 260922Cl (L-C E3, author decisions I67 and I68): re-run the six golden
-      # v1 cases and compare. Report first: identical / conforming / inconclusive
-      # are printed and pass; only "fail" (exit 1) turns the job red. The
-      # tolerance was measured on one machine only, so a first failure here on a
-      # different CPU goes to the author rather than being loosened.
-      - name: golden v1 (report; only a fail is non-zero)
+  golden-report:
+    # 260922Cl (L-C E3, author decision I70): the first run on GitHub (c1b574c)
+    # failed all six golden cases against a tolerance taken from one machine's
+    # spread, which was zero. Physics values moved by 1e-10..1e-8 of their
+    # scale and near-zero diagnostics (closures, residuals) by much more. Until
+    # the cross-platform spread is measured and a new tolerance is registered,
+    # this job only reports (always exit 0) and keeps the re-run outputs as an
+    # artifact on Linux and Windows.
+    name: golden v1 re-run (report only, ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.11.9"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: re-run golden v1 and keep the outputs
+        shell: bash
         env:
           PYTHONPATH: python/temari_engine/src
+          PYTHONIOENCODING: utf-8
         run: |
           rc=0
-          python -m temari_engine golden verification/golden_v1 --julia julia || rc=$?
-          echo "golden exit code: $rc"
-          if [ "$rc" -eq 1 ]; then exit 1; fi
+          mkdir -p golden_out
+          python -m temari_engine golden verification/golden_v1 --julia julia --save-dir golden_out > golden_report.txt 2>&1 || rc=$?
+          cat golden_report.txt
+          echo "golden exit code: $rc (report only, author decision I70)"
+          echo "$rc" > golden_out/exit_code.txt
+          cp golden_report.txt golden_out/
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: golden-out-${{ matrix.os }}
+          path: golden_out/
 
   refcheck:
     # Cross-implementation check: the Julia engine against values produced by the
