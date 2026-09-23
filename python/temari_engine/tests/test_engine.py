@@ -525,6 +525,34 @@ class ArtifactSetVersions(unittest.TestCase):
             m["files"][1].__setitem__("file", "E_6.jsonl."), m.__setitem__("digest_sha256", te.manifest_digest(m)))))
             if "v2 の file" in x], [])
 
+    def test_S20_unopenable_name_is_a_problem_not_a_crash(self):
+        """(負、260924Cl) ファイルを開く段の例外が OS に依らず所属の問題になる。公開側の CI (Ubuntu) で S15 が落ちた:
+        Linux では孤立サロゲートを含む名前を UTF-8 に直せず open が UnicodeEncodeError を投げ、読み手は OSError しか捕まえて
+        いなかった (Windows では FileNotFoundError なので手元では通った)。⇒ Windows でも同じ例外を出すよう `_read` を差し替えて確かめる。
+        NUL を含む名前の ValueError も同じ。CLI は EXIT 1 (道具の欠陥 = 3 ではない)"""
+        import contextlib
+        import io
+        from unittest import mock
+        from temari_engine import __main__ as cli
+        from temari_engine import sets
+        for exc in (UnicodeEncodeError("utf-8", "\ud800", 0, 1, "surrogates not allowed"), ValueError("embedded null byte")):
+            d = os.path.join(self.tmp, type(exc).__name__)
+            make_set(d, version=1)
+            real = sets._read
+
+            def fake(p, exc=exc):
+                if os.path.basename(p) == "E_6.jsonl":
+                    raise exc
+                return real(p)
+            with mock.patch.object(sets, "_read", fake):
+                p = research_problems(os.path.join(d, "manifest.json"))
+                self.assertEqual(len(p), 1, p)
+                self.assertTrue(p[0].startswith("manifest のファイルが読めない: 'E_6.jsonl' (%s(" % type(exc).__name__), p)
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = cli.main(["verify", d])
+                self.assertEqual(rc, 1, buf.getvalue())
+
 
 class Dispatch(unittest.TestCase):
     def test_X1_single_run_without_manifest(self):

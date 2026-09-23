@@ -191,8 +191,11 @@ def _check_set(mpath, mraw):
         p = os.path.join(d, f)
         try:
             b = _read(p)
-        except OSError as ex:
-            problems.append("manifest のファイルが読めない: %s (%s)" % (f, ex))
+        except (OSError, UnicodeError, ValueError) as ex:
+            # 260924Cl: ⚠ Linux では孤立サロゲートを含む名前を OS の文字コード (UTF-8) に直せず open が UnicodeEncodeError を投げる
+            #   (Windows では FileNotFoundError になるので手元の試験は通っていた。公開側の CI の Ubuntu で S15 が例外で落ちた)。
+            #   NUL を含む名前は ValueError。どれも「読めない」= 所属の問題にする。名前と例外は repr で書く (印字で落ちないように)
+            problems.append("manifest のファイルが読めない: %r (%r)" % (f, ex))
             continue
         if _sha256(b) != e.get("sha256") or len(b) != e.get("bytes"):
             problems.append("sha256 か大きさが manifest と合わない: %s" % f)
