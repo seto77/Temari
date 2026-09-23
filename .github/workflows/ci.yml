@@ -130,25 +130,28 @@ jobs:
           PYTHONPATH: python/temari_engine/src
         run: python -W error -m unittest discover -s python/temari_engine/tests -v
 
-  golden-report:
+  golden:
     # 260922Cl (L-C E3, author decision I70): the first run on GitHub (c1b574c)
     # failed all six golden cases against a tolerance taken from one machine's
     # spread, which was zero. Physics values moved by 1e-10..1e-8 of their
-    # scale and near-zero diagnostics (closures, residuals) by much more. Until
-    # the cross-platform spread is measured and a new tolerance is registered,
-    # this job only reports (always exit 0) and keeps the re-run outputs as an
-    # artifact on Linux and Windows.
+    # scale and near-zero diagnostics (closures, residuals) by much more, so
+    # the job was made report-only while the cross-platform spread was measured
+    # on runs 35744409840 and 35805689504 (Linux and Windows, Julia 1.11.9).
     #
-    # 260923Cl: the spread was measured on run 35744409840 (commit eeffaa1) and
-    # verification/golden_v1/tolerance.json is now v2 ("scaled+bound": physics
-    # keys by scaled difference, diagnostic keys by an upper bound; author
-    # decisions I70 and I71). That run replays as "conforming" under v2. The job
-    # stays report-only for one more run on purpose: the registered criterion is
-    # that the measured run AND the next one both come out conforming, so that
-    # the tolerance is not just fitted to a single run. Turn this back into a
-    # gate (drop "|| rc=$?" and exit rc) once this run reports conforming too;
-    # if it does not, the tolerance is not loosened -- it goes to the author.
-    name: golden v1 re-run (report only, ${{ matrix.os }})
+    # 260923Cl: verification/golden_v1/tolerance.json is now v3 ("scaled+band":
+    # physics keys by scaled difference per exit, diagnostic keys inside a band
+    # per case; author decisions I70, I71, I72), and this job is a gate again:
+    # both of those runs come out "conforming" under v3, which was the
+    # registered criterion for restoring it. The re-run outputs are still kept
+    # as an artifact so a failure can be replayed off-line with
+    # tools/golden_replay.py.
+    #
+    # If this goes red on a runner this tolerance was not measured on, the
+    # tolerance is NOT loosened -- the spread is measured again and it goes to
+    # the author. Note what the two measured runs do and do not show: they
+    # produced bit-identical numbers on both operating systems, so they
+    # establish stability across runs, not the spread of a third CPU.
+    name: golden v1 re-run (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -176,9 +179,12 @@ jobs:
           mkdir -p golden_out
           python -m temari_engine golden verification/golden_v1 --julia julia --save-dir golden_out > golden_report.txt 2>&1 || rc=$?
           cat golden_report.txt
-          echo "golden exit code: $rc (report only, author decision I70)"
+          echo "golden exit code: $rc (gate: 0 = identical or conforming)"
           echo "$rc" > golden_out/exit_code.txt
           cp golden_report.txt golden_out/
+          # The artifact upload below runs with if: always(), so it still keeps
+          # the outputs of a failing run.
+          exit $rc
 
       - uses: actions/upload-artifact@v4
         if: always()
