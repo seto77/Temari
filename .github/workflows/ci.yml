@@ -59,7 +59,8 @@ jobs:
     # The optimized kernels against their reference implementations. Every
     # script in this job exits non-zero on a failure (260818Cl: five steps
     # now, and the integrity one guards the cache and the production
-    # checkpoint rather than a kernel).
+    # checkpoint rather than a kernel; 260923Cl: six, with the cache key
+    # wiring test after it).
     # 260922Cl: the author released the bit-identity discipline on 2026-08-28
     # and d19eb9c reordered the Bessel and R arithmetic, after which the first
     # two steps failed on every run. They now follow the author's rule
@@ -91,6 +92,15 @@ jobs:
 
       - name: Cache and production-checkpoint integrity
         run: julia --startup-file=no -t 1 tools/verify_integrity.jl
+
+      # 260923Cl (author decision I78): the SCF cache key wiring -- each getter
+      # reads the key its key function returns, and an SCF retry lands where
+      # the getter reads, for the neutral atom and for the ion -- plus the
+      # numerics hard fail. This script lived outside CI and went stale twice
+      # (against the converged/residual check of b8aeaba and the atom-match
+      # check of df20c24) before anyone noticed. About 30 s (He only).
+      - name: SCF cache key wiring (18 checks)
+        run: julia --startup-file=no -t 1 tools/cache_wiring_test.jl
 
       # The v4 angular fast path: the Q+ hoist, the packed channel arrays and the
       # interleaved Legendre recurrence, all against the preserved oracle.
@@ -151,6 +161,13 @@ jobs:
     # the author. Note what the two measured runs do and do not show: they
     # produced bit-identical numbers on both operating systems, so they
     # establish stability across runs, not the spread of a third CPU.
+    #
+    # 260923Cl (author decisions I77, I78): a third CPU was measured -- two
+    # real Intel hosts (AVX-512 and AVX2) conform, and the AVX2 one is
+    # bit-identical to the Windows runner. Without FMA in the codegen the
+    # three Mott cases move by ~470x the tolerance, so the check asks Julia
+    # first and reports inconclusive (exit 2) when FMA is absent; the
+    # tolerance itself is not loosened.
     name: golden v1 re-run (${{ matrix.os }})
     strategy:
       fail-fast: false

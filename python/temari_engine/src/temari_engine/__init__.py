@@ -12,13 +12,16 @@ from .envelope import Output, read_output, validate_envelope
 from .errors import EngineRunError, EnvelopeError, MembershipError, RoleError, TemariEngineError
 from .run import RunResult, default_repo, run
 from .sets import (ArtifactSet, Member, files_digest, known_sets, load, load_f_channel, load_factors_release, load_set,
-                   verify_f_release)
+                   manifest_digest, media_types_digest, verify_f_release)
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"   # 0.2.0 (2026-09-23、作者決定 I75): temari.artifact_set v2 を読む。
+#   同日 I76 で v2 の digest に media_type を足した (0.2.0 は未公開なので版は据え置き)
 
 __all__ = [
     "ArtifactSet", "EngineRunError", "EnvelopeError", "Member", "MembershipError", "Output", "RoleError", "RunResult",
     "StrictJSONError", "TemariEngineError", "default_repo", "files_digest", "known_sets", "load", "load_f_channel",
-    "load_factors_release", "load_set", "load_strict", "loads_strict", "read_output", "run", "validate_envelope",
+    "load_factors_release", "load_set", "load_strict", "loads_strict", "manifest_digest", "media_types_digest", "read_output",
+    "run",
+    "validate_envelope",
     "verify_f_release",
 ]

@@ -523,6 +523,15 @@ const CACHE_SCHEMA = "v5"   # 260904Cl: SCFAtom に n_iter / stop_drho / stop_de
 # new hardlink/first-wins writers in a disjoint namespace while an older
 # mv(force=true) process may still be draining during fleet rollout.
 const CACHE_PUBLICATION_EPOCH = "fw1"
+# 260923Cl (作者決定 I75、L-C の残差 2): 直列化した payload の**型の名前空間**。M2 (`module Temari`、5ab16af) から
+#   SCFAtom の型パスが `Main.SCFAtom` → `Main.Temari.SCFAtom` に変わった。名前が同じままだと、M2 より前のコードが
+#   M2 以降の書いたファイルを同じ cwd で読んで `UndefVarError` → 隔離して SCF をやり直す (2026-09-22 に He で再現)。
+#   ⇒ 名前を分けて、旧いコードが新しいファイルを見ないようにする (逆向き = 旧いファイルを新しいコードが読むのは M3 の S8 で
+#   WARN 0 だったが、名前が分かれたので新しいコードは旧いファイルを使わず、種ごとに 1 回 SCF をやり直す)。
+#   `CACHE_PUBLICATION_EPOCH` と同じく**ファイル名だけ**に入り、`cache_provenance` も出力も変えない
+#   (`CACHE_SCHEMA` は来歴に出るので上げない)。⚠ 直列化する型の module パスがまた変わったら ns2 へ。
+#   ⚠ M2 から本変更の直前までのコードが旧い名前で書いたファイルは残る (旧いコードがそれを読むと 1 回だけ隔離して書き直す)
+const CACHE_TYPE_NAMESPACE = "ns1"
 # 260809Cl: スキーマを手で上げ忘れても、SCF・束縛解へ入るソースが変われば
 # 自動的に別ファイルへ分かれる。コメントだけの変更でも安全側に失効する。
 # 260908Cl: `l1b_config.jl` を追加 (作者決定 2026-09-08 07:5x の (4))。任意配置 builder は
@@ -567,7 +576,7 @@ const CACHE_SOURCE_FINGERPRINT = cache_source_fingerprint()
 const CACHE_DIR = "atom_cache"
 cache_file(key::Tuple) =
     joinpath(CACHE_DIR,
-             "atom_cache_$(CACHE_SCHEMA)_$(CACHE_PUBLICATION_EPOCH)_$(CACHE_SOURCE_FINGERPRINT)_" *
+             "atom_cache_$(CACHE_SCHEMA)_$(CACHE_PUBLICATION_EPOCH)_$(CACHE_TYPE_NAMESPACE)_$(CACHE_SOURCE_FINGERPRINT)_" *
              "jl$(VERSION.major)$(VERSION.minor)_" *
              join(string.(key), "_") * ".jls")
 

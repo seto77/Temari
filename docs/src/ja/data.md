@@ -270,6 +270,27 @@ E₀ 方向の補間も、出荷している利用側と同じ座標で行われ
 
 何が・どのように検査されているかは[検証](verification.md)を参照してください。
 
+### 終状態の場への感度 { #final-state-field }
+
+終状態は**緩和した**イオンです: 連続状態の電子を解く前に、内殻の空孔を自己無撞着に
+遮蔽させます。よく使われるもう一つの選択 — 凍結した中性原子の場 — は数値の設定では
+なく別の処方で、軽元素では両者が一致しません。
+
+200 keV での σ を Bote–Salvat (Bote et al., 2009) と比べると、緩和の処方は
+**Be K で 25 %、B で 18 %、C で 14 % 低く**、差は Z とともに単調に縮みます —
+Ne で 6 %、Fe K ではほぼ無くなります (1.004 = 0.4 % 高い)。凍結した場で計算し直すと、
+表の F(s) は最大 **4.6 × 10⁻²** 動きます (Be、s = 0.25 Å⁻¹。回折で最も重みの大きい範囲)。
+Fe K では 3.7 × 10⁻³ です。
+
+これは直さずに文書に残しています。凍結のほうが良いとは示せないからです。凍結は
+Dirac GOS データベース (Zhang et al., 2023) を 2–4 %、独立なもう一つの公開計算
+(Segger et al., 2023) を 4–11 % 上回り、Bote–Salvat を 2 % 下回ります。二つの公開計算
+どうしも 1.8–6.4 % 食い違い、どの処方もこの幅の帯の中で判定されることになります。
+元素ごとの実験値の集成 Llovet et al. (2014) は両方向を指し — C と N では凍結、
+O・Ne・Fe では緩和のほうが近い — ばらつきは効果より大きく、選択が最も効く Be と B には
+K 殻の測定が 1 つもありません。上の数値は、この一つの選択に対する表の感度として
+読んでください。表の誤差棒ではありません。
+
 ## 原子散乱因子 f_x(s), f_e(s) — dataset-factors v2.0.0 { #factors }
 
 **中性原子 86 種 (Z = 1–86)** の X 線原子散乱因子 $f_x(s)$ [electrons] と
@@ -549,6 +570,7 @@ Bote et al. (2009) も引用してください。
 - Olukayode, S., Froese Fischer, C. & Volkov, A. (2023). Revisited relativistic Dirac–Hartree–Fock X-ray scattering factors. I. Neutral atoms with Z = 2–118. *Acta Crystallographica A* **79**, 59–79.
 - Oxley, M. P. & Allen, L. J. (2000). Atomic scattering factors for K-shell and L-shell ionization by fast electrons. *Acta Crystallographica A* **56**, 470–490.
 - Peng, L.-M., Ren, G., Dudarev, S. L. & Whelan, M. J. (1996). Robust parameterization of elastic and absorptive electron atomic scattering factors. *Acta Crystallographica A* **52**, 257–276.
+- Segger, L., Guzzinati, G. & Kohl, H. (2023). Generalised Oscillator Strengths for the simulation of EELS spectra, with a broader coverage of high energy and minor edges (version 1.5.0) [Data set]. Zenodo. doi:10.5281/zenodo.7645765
 - Waasmaier, D. & Kirfel, A. (1995). New analytical scattering-factor functions for free atoms and ions. *Acta Crystallographica A* **51**, 416–431.
 - Watson, R. E. (1958). Analytic Hartree–Fock solutions for O²⁻. *Physical Review* **111**, 1108–1110.
 - Zhang, Z., Lobato, I., Jannis, D., Verbeeck, J., Van Aert, S. & Nellist, P. (2023). Generalised oscillator strength for core-shell electron excitation by fast electrons based on Dirac solutions [Data set]. Zenodo. doi:10.5281/zenodo.7729585

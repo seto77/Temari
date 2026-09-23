@@ -59,9 +59,11 @@ julia -t auto ionization.jl 26 K 200 --quick
 python -X utf8 ionization.py selftest       # Python 版 (~2 分)
 ```
 
-SCF の結果は `atom_cache/atom_cache_<schema>_<source指紋>_jl*_*.jls` /
+SCF の結果は `atom_cache/atom_cache_<schema>_<公開の epoch>_<型の名前空間>_<source指紋>_jl*_*.jls` /
 `atom_cache_*.pkl` に保存される。Julia 版は処方・ソース指紋・Julia 版を鍵に含め、
 payload checksum も検証するので、物理変更時の手動削除は不要。旧世代は容量回収時だけ削除する。
+epoch (`fw1`) と型の名前空間 (`ns1` = payload の型が `module Temari` の中にある世代、2026-09-23 から) は
+ファイル名にだけ入り、出力の来歴 (`cache_provenance`) には出ない (`l5_channel.jl` の注記)。
 
 ## 既知の運用上の注意 (実際に踏んだもの)
 

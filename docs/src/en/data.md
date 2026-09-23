@@ -292,6 +292,32 @@ uses — `f_at(ch, 160.0, 2.5)` evaluates a row that does not exist in the file.
 
 See [Verification](verification.md) for what is checked and how.
 
+### Sensitivity to the final-state field { #final-state-field }
+
+The final state is the **relaxed** ion: the core hole is screened
+self-consistently before the continuum electron is solved for. The alternative
+in common use — a frozen neutral field — is a different prescription, not a
+numerical setting, and in light elements the two do not agree.
+
+Measured as our σ against Bote–Salvat (Bote et al., 2009) at 200 keV, the
+relaxed prescription sits **25 % low at Be K, 18 % at B and 14 % at C**, and
+the gap closes monotonically with Z — 6 % at Ne, and nothing left at Fe K
+(1.004, i.e. 0.4 % high). Recomputing with a frozen field moves the tabulated
+F(s) by up to **4.6 × 10⁻²**, at Be and s = 0.25 Å⁻¹, which is the range
+diffraction weights most; at Fe K it moves it by 3.7 × 10⁻³.
+
+This is documented rather than corrected, because frozen is not demonstrably
+better. It overshoots the Dirac GOS database (Zhang et al., 2023) by 2–4 % and
+a second, independent published calculation (Segger et al., 2023) by 4–11 %,
+while undershooting Bote–Salvat by 2 %; those two published calculations differ
+from each other by 1.8–6.4 %, which is the width of the band any prescription
+is being judged inside. The element-by-element experimental compilation of
+Llovet et al. (2014) points both ways — frozen closer for C and N, relaxed
+closer for O, Ne and Fe — with a scatter larger than the effect, and it lists
+no K-shell measurement at all for Be or B, the two elements where the choice
+matters most. Read the figures above as the sensitivity of these tables to that
+one choice, not as an error bar on them.
+
 ## Atomic scattering factors f_x(s), f_e(s) — dataset-factors v2.0.0 { #factors }
 
 The X-ray atomic scattering factor $f_x(s)$ [electrons] and the first-Born
@@ -607,6 +633,7 @@ Bote & Salvat (2008) and Bote et al. (2009) as well.
 - Olukayode, S., Froese Fischer, C. & Volkov, A. (2023). Revisited relativistic Dirac–Hartree–Fock X-ray scattering factors. I. Neutral atoms with Z = 2–118. *Acta Crystallographica A* **79**, 59–79.
 - Oxley, M. P. & Allen, L. J. (2000). Atomic scattering factors for K-shell and L-shell ionization by fast electrons. *Acta Crystallographica A* **56**, 470–490.
 - Peng, L.-M., Ren, G., Dudarev, S. L. & Whelan, M. J. (1996). Robust parameterization of elastic and absorptive electron atomic scattering factors. *Acta Crystallographica A* **52**, 257–276.
+- Segger, L., Guzzinati, G. & Kohl, H. (2023). Generalised Oscillator Strengths for the simulation of EELS spectra, with a broader coverage of high energy and minor edges (version 1.5.0) [Data set]. Zenodo. doi:10.5281/zenodo.7645765
 - Waasmaier, D. & Kirfel, A. (1995). New analytical scattering-factor functions for free atoms and ions. *Acta Crystallographica A* **51**, 416–431.
 - Watson, R. E. (1958). Analytic Hartree–Fock solutions for O²⁻. *Physical Review* **111**, 1108–1110.
 - Zhang, Z., Lobato, I., Jannis, D., Verbeeck, J., Van Aert, S. & Nellist, P. (2023). Generalised oscillator strength for core-shell electron excitation by fast electrons based on Dirac solutions [Data set]. Zenodo. doi:10.5281/zenodo.7729585

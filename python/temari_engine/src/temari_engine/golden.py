@@ -6,7 +6,11 @@ golden の一式 (temari.artifact_set、role = control) の各ファイルは en
   同一 (identical)   : 全部の数が repr で一致し、文字列・真偽・null・構造も一致
   適合 (conforming)  : 構造と文字列は一致し、違う数はどれも許容差の中
   不合格 (fail)      : 構造・文字列の違い、または許容差を超える数
-  判定不能 (inconclusive) : エンジンが走らない・入力 (command) が golden と違う
+  判定不能 (inconclusive) : エンジンが走らない・入力 (command) が golden と違う・その Julia の codegen が FMA を使わない (作者決定 I78)
+
+⚠ 許容差 v3 は FMA のある機 (手元・CI の runner・実物の Intel 2 台) だけで測った。FMA の無い codegen では mott の `dcs_a0_2_sr` が
+許容差の約 470 倍動く (相対 4.7e-10。I77 の (4) の測定)。許容差は緩めず、既定のエンジンで走らせるときは最初に Julia に
+`Core.Intrinsics.have_fma(Float64)` を尋ね、FMA が無い (確かめられない) なら**全 case を判定不能**にする (不合格とは分ける)。
 
 許容差は golden の一式に同梱の `tolerance.json` (manifest に載る = sha256 で固定) から読む。形は 2 通り:
   v1 {"tolerance_version": 1, "rule": "scaled", "default": s0, "by_exit": {exit: {key: s}}}
@@ -25,6 +29,7 @@ golden の一式 (temari.artifact_set、role = control) の各ファイルは en
 import copy
 import math
 import os
+import subprocess
 from dataclasses import dataclass, field
 
 from ._strictjson import StrictJSONError, loads_strict
@@ -296,13 +301,41 @@ def _save(save_dir, name, output):
     os.replace(p + ".tmp", p)
 
 
-def check(golden_dir, run=None, save_dir=None, **run_kwargs):
+def julia_has_fma(julia="julia", timeout=300):
+    """その Julia の codegen が FMA を使うか (作者決定 I78)。`julia` は `run` と同じ実行ファイル名か列 (`-C` などの旗も含めて渡す。
+    FMA の有無は機の命令セットではなく codegen の対象で決まる: 手元の FMA のある機でも `-C sandybridge` なら False)。
+    True / False、問い合わせに失敗したら None"""
+    jl = [julia] if isinstance(julia, str) else list(julia)
+    try:
+        p = subprocess.run(jl + ["--startup-file=no", "-e", "print(Core.Intrinsics.have_fma(Float64))"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return {"true": True, "false": False}.get(p.stdout.strip())
+
+
+FMA_INCONCLUSIVE = ("golden の許容差 (v3) は FMA のある機だけで測った (FMA が無いと mott の dcs_a0_2_sr が許容差の約 470 倍動く。"
+                    "作者決定 I78) ので判定しない")
+
+
+def check(golden_dir, run=None, save_dir=None, fma_probe=None, **run_kwargs):
     """golden を走らせ直して照らす。`run` はエンジンを走らせる関数 (既定 = temari_engine.run)。CaseResult の list を返す。
-    `save_dir` を与えると、走らせ直した出力を 1 本ずつそこへ書く (作者決定 I70: CPU・OS を跨いだ揺れを測るため)"""
+    `save_dir` を与えると、走らせ直した出力を 1 本ずつそこへ書く (作者決定 I70: CPU・OS を跨いだ揺れを測るため)。
+    `fma_probe` は引数なしで True / False / None を返す関数 (作者決定 I78)。省略すると、既定のエンジンのときだけ
+    `julia_has_fma` で尋ねる (`run` を差し替えた試験では尋ねない)。True 以外なら全 case を判定不能にして、エンジンを走らせない"""
+    if fma_probe is None and run is None:
+        fma_probe = lambda: julia_has_fma(run_kwargs.get("julia", "julia"))  # noqa: E731
     if run is None:
         from .run import run as run_engine
         run = run_engine
     s, tol = load_golden(golden_dir)
+    if fma_probe is not None:
+        fma = fma_probe()
+        if fma is not True:
+            why = "この Julia の codegen は FMA を使わない" if fma is False else "この Julia の codegen が FMA を使うか確かめられない"
+            names = [e["file"][:-5] if e["file"].endswith(".json") else e["file"]
+                     for e in s.manifest["files"] if e["file"] != "tolerance.json"]
+            return [CaseResult(n, "inconclusive", problems=["%s — %s" % (why, FMA_INCONCLUSIVE)]) for n in names]
     results = []
     for e in s.manifest["files"]:
         f = e["file"]

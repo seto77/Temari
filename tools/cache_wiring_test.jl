@@ -47,22 +47,37 @@ function run_cache_wiring_test()
             empty!(_cache)
 
             # ---- T1: 取得側が「キー関数の返すキー」を実際に引いているか -------
-            # 番人を置き、それが返ることで鍵の一致を証明する (SCF を回さずに済む)
+            # 本物の原子の写し (=== で見分けられる別の物) を置き、それが返ることで鍵の一致を証明する。
+            # 260923Cl (作者決定 I77): 以前は記号の番人 (:SENTINEL_N) を置いていたが、取り出し口の
+            #   `assert_atom_matches` (df20c24、2026-09-08、作者決定 I5) が「SCFAtom でない」と拒否するので
+            #   T1 で LoadError になっていた (CI の外なので気づかれなかった)。門は正しい = 試験の側を直す。
+            #   He の中性・イオンの SCF は安いので、本物を 1 回ずつ解いてから写しを置く
             println("\n== T1  get_neutral / get_ion が引く鍵 = キー関数の鍵 ==")
-            _cache[nkey()] = :SENTINEL_N
+            a_n = get_neutral(z); a_i = get_ion(z, shell)
+            mark_n = deepcopy(a_n); mark_i = deepcopy(a_i)
+            _cache[nkey()] = mark_n
             check("get_neutral が neutral_cache_key を引く",
-                  get_neutral(z) === :SENTINEL_N)
+                  get_neutral(z) === mark_n)
             delete!(_cache, nkey())
-            _cache[ikey()] = :SENTINEL_I
+            _cache[ikey()] = mark_i
             check("get_ion が ion_cache_key を引く",
-                  get_ion(z, shell) === :SENTINEL_I)
+                  get_ion(z, shell) === mark_i)
             delete!(_cache, ikey())
+            # (負) 別の鍵 (回帰当時の鍵) に置いた写しは返らない = 上の === は鍵の一致で決まっている
+            _cache[old_nkey()] = mark_n
+            check("(負) 別の鍵に置いた写しは返らない",
+                  get_neutral(z) !== mark_n)
+            delete!(_cache, old_nkey())
 
             # ---- T2: 再試行が取得側の読む鍵へ着地するか ----------------------
             println("\n== T2  ensure_converged の再試行が届く (修正後の経路) ==")
             good = get_neutral(z)
             check("素の SCF は収束する (前提)", good.converged)
             poisoned = deepcopy(good); poisoned.converged = false
+            # 260923Cl (I77): b8aeaba (2026-09-04) から、キャッシュの原子は converged と停止時の残差が矛盾しては
+            #   いけない (`cache_validate_scf_common`)。旗だけ倒した毒は置けず T2 で LoadError になっていた
+            #   ⇒ 残差も許容差の上に上げ、「本当に未収束に見える」毒にする
+            poisoned.stop_drho = 10 * poisoned.cfg.tol_rho
             # cache_put is immutable first-wins. Test poison uses the same
             # per-key locked replacement path as the production SCF retry.
             cache_replace(nkey(), poisoned; acceptable=(_ -> false),
@@ -71,9 +86,24 @@ function run_cache_wiring_test()
             ensure_converged(z, shell; need_ion=false)
             check("再試行後は収束済みが返る", get_neutral(z).converged)
 
+            # ---- T2b: イオンの再試行も取得側の読む鍵へ着地するか -------------
+            # 260923Cl (I77、codex2 の指摘・再現済み): T2 は need_ion=false で中性しか見ておらず、`ensure_converged` の
+            #   イオンの書き込み先の鍵だけをずらしても 15/15 PASS だった (d856f3b と同じ型の回帰を片側で見逃す)
+            println("\n== T2b ensure_converged のイオンの再試行が届く ==")
+            good_i = get_ion(z, shell)
+            check("素のイオンの SCF は収束する (前提)", good_i.converged)
+            poisoned_i = deepcopy(good_i); poisoned_i.converged = false
+            poisoned_i.stop_drho = 10 * poisoned_i.cfg.tol_rho    # T2 と同じ理由
+            cache_replace(ikey(), poisoned_i; acceptable=(_ -> false),
+                          reason="test-poison")
+            check("イオンの毒が効いている (前提)", !get_ion(z, shell).converged)
+            ensure_converged(z, shell; need_ion=true)
+            check("イオンの再試行後は収束済みが返る", get_ion(z, shell).converged)
+
             # ---- T3: 旧経路では素通りすること (負のテスト) -------------------
             println("\n== T3  回帰当時のキーだと素通りする (負のテスト) ==")
             poisoned2 = deepcopy(good); poisoned2.converged = false
+            poisoned2.stop_drho = 10 * poisoned2.cfg.tol_rho     # T2 と同じ理由
             cache_replace(nkey(), poisoned2; acceptable=(_ -> false),
                           reason="test-poison")
             let key = old_nkey()

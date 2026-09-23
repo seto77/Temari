@@ -5,6 +5,7 @@ verify : 一式 (dir か manifest.json) か 1 本のファイルの所属と役�
          EXIT 0 = 通常入口で読める / 1 = 所属・役割・envelope の検査で拒否 / 2 = 使い方・読めない / 3 = 道具の欠陥
 golden : golden の一式の入力でエンジンを走らせ直し、出口ごとに 同一 / 適合 / 不合格 / 判定不能 を印字する。
          EXIT 0 = 全部 同一か適合 / 1 = 不合格がある / 2 = 判定不能がある (不合格は無い) / 3 = 道具の欠陥
+         Julia の codegen が FMA を使わない (確かめられない) なら全 case を判定不能にしてエンジンを走らせない (作者決定 I78)。
          `--julia` は "julia +1.11.9" のように空白で区切る。`--save-dir` は走らせ直した出力を 1 本ずつ書く (揺れの測定用、I70)。
 """
 import sys
@@ -29,7 +30,14 @@ def _verify(argv):
         return 3
     role = getattr(r, "role", None) or (r.get("artifact_role") if isinstance(r, dict) else type(r).__name__)
     problems = getattr(r, "problems", [])
-    print("OK role=%s%s" % (role, "" if not problems else " problems=%s" % problems))
+    # 260923Cl (作者決定 I75): temari.artifact_set では role が digest に覆われているかを必ず印字する (v1 は覆われていない)
+    info = getattr(r, "set_info", None)
+    bound = getattr(r, "role_bound", None)
+    if bound is None and isinstance(info, dict):
+        bound = info.get("role_bound")
+    note = "" if bound is None else (" role_bound=yes" if bound else
+                                     " role_bound=no (artifact_role は digest に覆われていない: temari.artifact_set v1 か所属の問題)")
+    print("OK role=%s%s%s" % (role, note, "" if not problems else " problems=%s" % problems))
     return 0
 
 

@@ -37,6 +37,16 @@ that merely claim `computed` without being in the known-sets table. `research=Tr
 the problems it found instead. dataset-factors releases are handed to the loader shipped inside each archive, after its
 sha256 is checked against the table.
 
+Both versions of the set manifest are read. In `set_manifest_version` 2 the digest also covers `kind`, the version,
+`artifact_role`, `series`, `row_schema` and the `media_type` of every file, so a set whose role was edited by hand is
+refused, and so is one whose JSONL file was relabelled to skip the row checks. Version 2 also requires each `media_type`
+to be a lowercase `type/subtype`, a file named `*.jsonl` to be `application/jsonl` (and only such a file), and file
+names made of `[A-Za-z0-9_-]` runs joined by single dots (no trailing dot or space, which Windows would silently drop),
+so a JSONL file cannot be sealed under another media type in the first place. Version 1 (written by the
+first public writer, and used by `verification/golden_v1`) covers only the files; the result says so with
+`role_bound=False`, and `python -m temari_engine verify` prints `role_bound=yes|no`. The digest catches accidental edits
+only: anyone can recompute it. Only sets listed in the known-sets table are protected against deliberate ones.
+
 Specification: `docs/notes/envelope_spec_v1_2026-09-22.md` in the Temari repository.
 
 ## Tests

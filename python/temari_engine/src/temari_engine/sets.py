@@ -6,13 +6,17 @@
 - 研究入口 (research=True) は所属を確かめられなくても読み、分かったことを `role` と `problems` に書いて返す。
 
 扱う一式は 3 種:
-  1. temari.artifact_set v1 (本パッケージと同時に定めた形。Mott CDF など。仕様 §9)
+  1. temari.artifact_set v1・v2 (本パッケージと同時に定めた形。Mott CDF など。仕様 §9)。v2 は digest が見出し
+     (kind・版・artifact_role・series・row_schema) も覆う (作者決定 I75) — files の各行の media_type も (I76)。
+     v2 では名前が .jsonl のファイル ⇔ media_type が application/jsonl (I77)。
+     v1 は role が digest に結ばれていないことを結果の `role_bound = False` で示す
   2. dataset F v7.0.0 (公開済みの書庫。role 欄が無いので known_sets.json の互換表で束縛する。N4-(i))
   3. dataset-factors / dataset-factors-ion (書庫に同梱の loader の `load_release` へ委ねる。loader の sha256 を固定)
 """
 import hashlib
 import json
 import os
+import re
 import sys
 import threading
 import types
@@ -25,7 +29,15 @@ from .errors import MembershipError, RoleError
 
 SET_KIND = "temari.artifact_set"
 _LOADER_LOCK = threading.Lock()   # 同梱の loader の初回読み込み (load_factors_release)
-SET_MANIFEST_VERSION = 1
+SET_MANIFEST_VERSION = 2            # 書き手 (tools/artifact_manifest.jl) がいま書く版
+SET_MANIFEST_VERSIONS = (1, 2)      # 通常入口で読む版 (260923Cl、作者決定 I75: v1 も読み続ける)
+_HEAD_TOKEN = re.compile(r"[A-Za-z0-9._-]+\Z")   # v2 の series・row_schema の字 (digest の行 "<欄>:<値>\n" を曖昧にしない)
+# v2 の media_type の字 (260923Cl、作者決定 I76。書き手の SET_MEDIA_TYPE と同じ): 小文字の type/subtype だけ。':'・改行・空白・引数を
+#   含まない (= "<file>:<media_type>\n" の行が末尾の ':' で一意に分かれる)。大文字を拒むのは JSONL の検査を完全一致で選ぶから
+_MEDIA_TYPE = re.compile(r"[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*\Z")
+# v2 の file 名 (260923Cl、I77。書き手の SET_FILE_NAME と同じ): [A-Za-z0-9_-] の字をドット 1 つずつで区切った形だけ。Windows は末尾の
+#   ドット・空白を落として同じ実体を開くので、"base.jsonl." は .jsonl の規則を逃れた (codex2 の指摘・再現済み)。'~'・':' も締め出す
+_FILE_NAME = re.compile(r"[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*\Z")
 SET_ROLES = ("computed", "experimental", "control")
 SET_KEYS = frozenset(["kind", "set_manifest_version", "artifact_role", "series", "row_schema", "engine", "producer",
                       "command", "files", "rows_total", "rows_ok", "digest_sha256", "digest_note"])
@@ -46,8 +58,44 @@ def _read(path):
 
 
 def files_digest(entries):
-    """dataset F の manifest と同じ規則: sha256 over sorted "<file>:<sha256>\\n" lines"""
+    """dataset F の manifest と同じ規則: sha256 over sorted "<file>:<sha256>\\n" lines (= temari.artifact_set v1 の digest)"""
     return _sha256("".join(sorted("%s:%s\n" % (e["file"], e["sha256"]) for e in entries)).encode("utf-8"))
+
+
+def media_types_digest(entries):
+    """v2 の digest の 7 行目 (作者決定 I76): sha256 over sorted "<file>:<media_type>\\n" lines"""
+    return _sha256("".join(sorted("%s:%s\n" % (e["file"], e["media_type"]) for e in entries)).encode("utf-8"))
+
+
+def _hashable_entries(entries):
+    """files の各行の file・sha256 が、digest の行に書ける (UTF-8 に符号化できる) 文字列か"""
+    try:
+        for e in entries:
+            if not (isinstance(e, dict) and isinstance(e.get("file"), str) and isinstance(e.get("sha256"), str)):
+                return False
+            (e["file"] + e["sha256"]).encode("utf-8")
+    except (TypeError, UnicodeEncodeError):
+        return False
+    return True
+
+
+def manifest_digest(m):
+    """temari.artifact_set の manifest の版に合った digest。v1 = files だけ、v2 = 次の 7 行を連結した UTF-8 の sha256
+    (`tools/artifact_manifest.jl` の `set_digest_v2`、仕様 §9.1。各行の末尾に "\\n"):
+      kind:temari.artifact_set / set_manifest_version:2 / artifact_role:<role> / series:<series> / row_schema:<row_schema> /
+      files_sha256:<files_digest> / media_types_sha256:<media_types_digest> (7 行目は作者決定 I76)
+    知らない版 (真偽値・浮動小数も) は None"""
+    v = m.get("set_manifest_version")
+    if type(v) is not int:
+        return None
+    if v == 1:
+        return files_digest(m["files"])
+    if v == 2:
+        head = ("kind:%s\nset_manifest_version:2\nartifact_role:%s\nseries:%s\nrow_schema:%s\nfiles_sha256:%s\n"
+                "media_types_sha256:%s\n") % (SET_KIND, m["artifact_role"], m["series"], m["row_schema"],
+                                               files_digest(m["files"]), media_types_digest(m["files"]))
+        return _sha256(head.encode("utf-8"))
+    return None
 
 
 @dataclass
@@ -63,12 +111,15 @@ class Member:
 
 @dataclass
 class ArtifactSet:
-    """temari.artifact_set v1 の一式"""
+    """temari.artifact_set v1・v2 の一式"""
     dir: str
     role: str
     manifest: dict
     raws: dict                     # file 名 → 検算したバイト列 (読み直さない)
     problems: list = field(default_factory=list)   # 研究入口で見つかった所属の問題 (通常入口では常に空)
+    # True = role が digest に覆われている (v2 で問題なし)。False = v1 (role は digest に結ばれておらず、role だけの
+    #   書き換えを検出できない。仕様 §9.1) か、所属の問題がある。⚠ 覆うのは事故の書き換えだけ (故意なら digest も作り直せる)
+    role_bound: bool = False
 
     def rows(self, file=None):
         """JSONL のファイルの行を厳密に読んだ list (file を省くと唯一の JSONL)"""
@@ -80,7 +131,7 @@ class ArtifactSet:
         return [loads_strict(ln) for ln in self.raws[file].decode("utf-8").splitlines() if ln.strip()]
 
 
-# ---- 1. temari.artifact_set v1 ------------------------------------------------------------------------------
+# ---- 1. temari.artifact_set v1・v2 ---------------------------------------------------------------------------
 
 def _check_set(mpath, mraw):
     """manifest と、それが指すファイルの整合を検査する。(manifest, raws, problems) を返す"""
@@ -92,12 +143,41 @@ def _check_set(mpath, mraw):
     if not isinstance(m, dict) or m.get("kind") != SET_KIND:
         return None, {}, ["temari.artifact_set の manifest でない"]
     if set(m) != SET_KEYS:
-        problems.append("manifest の欄が v1 と違う: 足りない %s / 知らない %s" % (sorted(SET_KEYS - set(m)), sorted(set(m) - SET_KEYS)))
+        problems.append("manifest の欄が v1・v2 と違う: 足りない %s / 知らない %s" % (sorted(SET_KEYS - set(m)), sorted(set(m) - SET_KEYS)))
         return m, {}, problems
-    if m["set_manifest_version"] != SET_MANIFEST_VERSION or isinstance(m["set_manifest_version"], bool):
-        problems.append("知らない set_manifest_version %r" % (m["set_manifest_version"],))
+    v = m["set_manifest_version"]
+    if type(v) is not int or v not in SET_MANIFEST_VERSIONS:
+        problems.append("知らない set_manifest_version %r" % (v,))
+        v = None
     if m["artifact_role"] not in SET_ROLES:
         problems.append("知らない artifact_role %r" % (m["artifact_role"],))
+        v = None     # 検査を通らなかった値は hash しない (孤立サロゲートの role で encode が例外になった。subagent の指摘、再現済み)
+    if v == 2:
+        bad = [k for k in ("series", "row_schema") if not isinstance(m[k], str) or not _HEAD_TOKEN.match(m[k])]
+        if bad:
+            problems.append("v2 の %s は [A-Za-z0-9._-] の字だけ: %s" % ("・".join(bad), ", ".join(repr(m[k]) for k in bad)))
+            v = None
+    if v == 2:
+        # 260923Cl (I76): media_type も digest の行に入るので、字の規則を外れる値 (欄の欠けも) は hash しない
+        badm = [e.get("file") if isinstance(e, dict) else e for e in m["files"]
+                if not (isinstance(e, dict) and isinstance(e.get("media_type"), str) and _MEDIA_TYPE.match(e["media_type"]))]
+        if badm:
+            problems.append("v2 の media_type は小文字の type/subtype の字 [a-z0-9.+-] だけ: %s" % ", ".join(repr(f) for f in badm))
+            v = None
+    if v == 2:
+        # 260923Cl (I77): file 名の字の規則を外れる行は hash しない (次の .jsonl の規則も当てない)
+        badf = [e.get("file") for e in m["files"] if not (isinstance(e.get("file"), str) and _FILE_NAME.match(e["file"]))]
+        if badf:
+            problems.append("v2 の file は [A-Za-z0-9_-] の字をドット 1 つずつで区切った名前だけ: %s" % ", ".join(repr(f) for f in badf))
+            v = None
+    if v == 2:
+        # 260923Cl (I77): 名前が .jsonl (大小文字を問わない) ⇔ media_type が application/jsonl (書き手と同じ規則)。JSONL の検査は
+        #   後者の行にだけ働くので、JSONL を別の media_type で封じると検査を受けずに通った (codex2 の指摘、再現済み)
+        unpaired = [e["file"] for e in m["files"] if isinstance(e.get("file"), str) and
+                    e["file"].lower().endswith(".jsonl") != (e["media_type"] == "application/jsonl")]
+        if unpaired:
+            problems.append("v2 では名前が .jsonl のファイルと media_type application/jsonl は対にする: %s"
+                            % ", ".join(repr(f) for f in unpaired))
     d = os.path.dirname(os.path.abspath(mpath))
     raws = {}
     names = [e.get("file") for e in m["files"]]
@@ -131,15 +211,25 @@ def _check_set(mpath, mraw):
                 if not isinstance(r, dict) or r.get("schema") != m["row_schema"]:
                     problems.append("%s の %d 行目の schema が row_schema (%s) と違う" % (f, i + 1, m["row_schema"]))
                     break
-    if files_digest(m["files"]) != m["digest_sha256"]:
+    # 260923Cl (I75): 版が分からない・role が語彙の外・v2 の見出しが字の規則を外れる manifest は digest を作り直さない (問題は上で記録済み)
+    # ⚠ files の行の file・sha256 が UTF-8 の文字列でない (欄が無い・孤立サロゲート) と digest の作り直しが KeyError /
+    #   UnicodeEncodeError で落ち、CLI が「道具の欠陥」(EXIT 3) に分類していた。v1 の読み手から在った穴 (再現済み) ⇒ 所属の問題にする
+    if v is not None and not _hashable_entries(m["files"]):
+        problems.append("files の行の file・sha256 が UTF-8 の文字列でないので digest を作り直せない")
+        v = None
+    if v == 1 and files_digest(m["files"]) != m["digest_sha256"]:
         problems.append("digest_sha256 が files から作り直した値と合わない")
+    if v == 2 and manifest_digest(m) != m["digest_sha256"]:
+        problems.append("digest_sha256 が見出し (kind・版・artifact_role・series・row_schema) と files (media_type を含む) から"
+                        "作り直した値と合わない")
     if m["rows_ok"] != m["rows_total"]:
         problems.append("ok でない行がある (%r / %r)" % (m["rows_ok"], m["rows_total"]))
     return m, raws, problems
 
 
 def load_set(manifest_path, research=False):
-    """temari.artifact_set v1 の一式を読む。通常入口は所属の問題・control・既知の表に無い computed を拒否する"""
+    """temari.artifact_set v1・v2 の一式を読む。通常入口は所属の問題・control・既知の表に無い computed を拒否する。
+    v1 は通常入口でも読むが、role が digest に結ばれていないことを `role_bound = False` で返す (作者決定 I75)"""
     mraw = _read(manifest_path)
     m, raws, problems = _check_set(manifest_path, mraw)
     role = m.get("artifact_role", "unknown") if isinstance(m, dict) else "unknown"
@@ -153,7 +243,8 @@ def load_set(manifest_path, research=False):
         if role == "control":
             raise RoleError("control の一式は通常入口では読まない (research=True の研究入口で)")
     return ArtifactSet(dir=os.path.dirname(os.path.abspath(manifest_path)), role=role if not problems else "unknown",
-                       manifest=m, raws=raws, problems=problems)
+                       manifest=m, raws=raws, problems=problems,
+                       role_bound=not problems and m["set_manifest_version"] == 2)
 
 
 # ---- 2. dataset F v7.0.0 (互換表) -------------------------------------------------------------------------------
@@ -298,7 +389,9 @@ def load(path, research=False):
                 if research:
                     return Member(path=p, role="unknown", problems=["一式の manifest に載っていないファイル"])
                 raise MembershipError("一式の manifest に載っていないファイル: %s" % os.path.basename(p))
-            return Member(path=p, role=s.role, set_info={"series": s.manifest["series"], "digest_sha256": s.manifest["digest_sha256"]},
+            return Member(path=p, role=s.role, set_info={"series": s.manifest["series"], "digest_sha256": s.manifest["digest_sha256"],
+                                                         "set_manifest_version": s.manifest["set_manifest_version"],
+                                                         "role_bound": s.role_bound},
                           raw=s.raws[os.path.basename(p)], problems=s.problems)
         return load_f_channel(p, research=research)
     # manifest の無いファイル
