@@ -2,7 +2,7 @@
   "artifact_role": "control",
   "command": ["tools/make_golden.jl", "<outdir>", "--manifest", "--tolerance", "tolerance.json"],
   "digest_note": "sha256 over sorted \"<file>:<sha256>\\n\" lines; independent of file order and timestamps",
-  "digest_sha256": "29c630bc288b659bfdba88138797fb4292a03bb4b3068f7e0eddc72b9c30a8af",
+  "digest_sha256": "473b63fdac61d5ddbf194c16274c555abc24f0dabdd7a5451ca4ba2c1dd4df82",
   "engine": {
     "git_commit": "4eccacff90c09f12b8f66a9245f02d7fee04c932",
     "git_dirty": false,
@@ -42,10 +42,10 @@
     "media_type": "application/json",
     "sha256": "89d002e0a1f50081bc2ef2982e5b1f17deaddcee0e84c4aff2d523afaf57123d"
   }, {
-    "bytes": 233,
+    "bytes": 3564,
     "file": "tolerance.json",
     "media_type": "application/json",
-    "sha256": "6fc3357cbf6b5a3245a6ede90599ce65c5492263c26b520ae497bf854d0a69e0"
+    "sha256": "e61e8df27e18c4d781ff96e6521b77869449c6d49c3823be6db3d5782443f572"
   }],
   "kind": "temari.artifact_set",
   "producer": {

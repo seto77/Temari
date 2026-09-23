@@ -1,7 +1,154 @@
 {
- "by_exit": {},
+ "bound_by_case": {
+  "fx_Au": {
+   "f_e_mb_consistency_maxrel": [
+    1.0713650844144268e-16,
+    1.0713650844144268e-14
+   ],
+   "norm_correction": [
+    1.6666667312925654e-08,
+    1.6666667312925654e-06
+   ]
+  },
+  "fx_C": {
+   "f_e_mb_consistency_maxrel": [
+    3.6032871071337406e-17,
+    3.60328710713374e-15
+   ],
+   "norm_correction": [
+    1.6666667246312274e-08,
+    1.6666667246312272e-06
+   ]
+  },
+  "fx_Fe": {
+   "f_e_mb_consistency_maxrel": [
+    5.2627498039170114e-17,
+    5.262749803917011e-15
+   ],
+   "norm_correction": [
+    1.6666667312925654e-08,
+    1.6666667312925654e-06
+   ]
+  },
+  "mott_Au_20keV": {
+   "closure_rel": [
+    7.482165065025613e-15,
+    7.482165065025613e-13
+   ],
+   "delta_tail": [
+    4.91012349291978e-09,
+    4.91012349291978e-07
+   ],
+   "delta_tail_raw": [
+    1.7088026741013825e-05,
+    0.0017088026741013825
+   ],
+   "max_free_match_resid": [
+    4.445129818585646e-09,
+    4.445129818585646e-07
+   ],
+   "max_free_phase_rad": [
+    2.9706508348795262e-05,
+    0.002970650834879526
+   ],
+   "max_match_resid": [
+    4.45071732000319e-09,
+    4.45071732000319e-07
+   ],
+   "max_target_match_resid": [
+    4.45071732000319e-09,
+    4.45071732000319e-07
+   ],
+   "optical_rel": [
+    7.482165065026174e-15,
+    7.482165065026174e-13
+   ]
+  },
+  "mott_C_1keV": {
+   "closure_rel": [
+    4.3250851855982513e-16,
+    4.3250851855982514e-14
+   ],
+   "delta_tail": [
+    1.7318797342586e-10,
+    1.7318797342586e-08
+   ],
+   "delta_tail_raw": [
+    2.7644479850710225e-06,
+    0.0002764447985071022
+   ],
+   "max_free_match_resid": [
+    3.232908596112307e-09,
+    3.2329085961123075e-07
+   ],
+   "max_free_phase_rad": [
+    5.4191664900247375e-06,
+    0.0005419166490024738
+   ],
+   "max_match_resid": [
+    3.23522022100758e-09,
+    3.23522022100758e-07
+   ],
+   "max_target_match_resid": [
+    3.23522022100758e-09,
+    3.23522022100758e-07
+   ],
+   "optical_rel": [
+    4.32508518559827e-16,
+    4.3250851855982704e-14
+   ]
+  },
+  "mott_Fe_10keV": {
+   "closure_rel": [
+    5.8695328769102764e-15,
+    5.869532876910276e-13
+   ],
+   "delta_tail": [
+    2.544760113894727e-12,
+    2.544760113894727e-10
+   ],
+   "delta_tail_raw": [
+    7.618502715473537e-06,
+    0.0007618502715473537
+   ],
+   "max_free_match_resid": [
+    4.362593610433939e-09,
+    4.3625936104339384e-07
+   ],
+   "max_free_phase_rad": [
+    2.068779931112886e-05,
+    0.0020687799311128858
+   ],
+   "max_match_resid": [
+    4.375114933188338e-09,
+    4.375114933188338e-07
+   ],
+   "max_target_match_resid": [
+    4.375114933188338e-09,
+    4.375114933188338e-07
+   ],
+   "optical_rel": [
+    5.886949888414808e-15,
+    5.886949888414808e-13
+   ]
+  }
+ },
+ "by_exit": {
+  "mott-elastic": {
+   "max_sherman": 2.167127085765421e-11,
+   "sherman": 7.473655065296932e-11
+  },
+  "scattering-factor": {
+   "f_e_A": 3.3102860055964084e-09,
+   "f_e_regular_A": 3.3102860055964084e-09,
+   "f_x": 7.271923803860621e-11,
+   "m2_a0sq": 3.310287310746672e-09,
+   "m4_a0four": 6.046726137931066e-08,
+   "m6_a0six": 4.125191962315465e-07
+  }
+ },
  "default": 1e-12,
- "note": "s = max(10 x max scaled spread over 5 conditions vs Julia 1.11.9 threads 4, 1e-12); docs/notes/lc_e3_golden_plan_2026-09-22.md section 3.1",
- "rule": "scaled",
- "tolerance_version": 1
+ "note": "P (physics) keys, per exit: |delta| <= s x max|golden leaf of that key|, s = max(10 x max scaled spread over the measured conditions, 1e-12). D (diagnostic) keys, per case: lo <= |x| <= hi with [lo, hi] = [M/10, 10 x M], M = max|leaf| over the reference and all conditions of that case. The D/P split is by meaning, not by the measured values. docs/notes/lc_e3_golden_tolerance_v2_preregistration_2026-09-22.md sections 1, 3, 5 and 6",
+ "rule": "scaled+band",
+ "tolerance_version": 3
 }

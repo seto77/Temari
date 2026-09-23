@@ -138,6 +138,16 @@ jobs:
     # the cross-platform spread is measured and a new tolerance is registered,
     # this job only reports (always exit 0) and keeps the re-run outputs as an
     # artifact on Linux and Windows.
+    #
+    # 260923Cl: the spread was measured on run 35744409840 (commit eeffaa1) and
+    # verification/golden_v1/tolerance.json is now v2 ("scaled+bound": physics
+    # keys by scaled difference, diagnostic keys by an upper bound; author
+    # decisions I70 and I71). That run replays as "conforming" under v2. The job
+    # stays report-only for one more run on purpose: the registered criterion is
+    # that the measured run AND the next one both come out conforming, so that
+    # the tolerance is not just fitted to a single run. Turn this back into a
+    # gate (drop "|| rc=$?" and exit rc) once this run reports conforming too;
+    # if it does not, the tolerance is not loosened -- it goes to the author.
     name: golden v1 re-run (report only, ${{ matrix.os }})
     strategy:
       fail-fast: false

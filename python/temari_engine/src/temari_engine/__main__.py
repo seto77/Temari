@@ -55,8 +55,11 @@ def _golden(argv):
         return 3
     for r in results:
         worst = ", ".join("%s %.1e/%.0e" % (k, v[0], v[1]) for k, v in sorted(r.worst.items(), key=lambda x: -x[1][0])[:3])
-        print("%-14s %-12s numbers %5d differ %5d%s" % (r.name, r.verdict, r.n_numbers, r.n_differ,
-                                                        ("  worst " + worst) if worst else ""))
+        # D の鍵は帯 [lo, hi] の端にどれだけ近いかの順 (作者決定 I70・I72)
+        wb = g.format_bounds(r.worst_bound)
+        print("%-14s %-12s numbers %5d differ %5d%s%s" % (r.name, r.verdict, r.n_numbers, r.n_differ,
+                                                          ("  worst " + worst) if worst else "",
+                                                          ("  band " + wb) if wb else ""))
         for p in r.problems[:5]:
             print("    " + p)
     overall = g.summarize(results)

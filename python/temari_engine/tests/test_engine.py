@@ -375,13 +375,21 @@ class FactorsDelegation(unittest.TestCase):
             te.load_factors_release(d)
 
 
-def make_golden_set(d, tol=None, role="control", series="golden_v1", with_tol=True):
+def finite_doc(**over):
+    """診断量 (delta_tail) を有限にした fixture (帯の試験用。nonfinite の欄も空にする)"""
+    doc = envelope_doc(**dict({"delta_tail": 1.0}, **over))
+    doc["temari_envelope"]["nonfinite"] = []
+    return doc
+
+
+def make_golden_set(d, tol=None, role="control", series="golden_v1", with_tol=True, doc=None, tol_bytes=None):
     """golden の一式 (envelope つきの出力 1 本 + tolerance.json + manifest) を組む"""
     os.makedirs(d, exist_ok=True)
-    files = {"mott_C.json": dumps(envelope_doc())}
+    files = {"mott_C.json": dumps(doc or envelope_doc())}
     if with_tol:
-        files["tolerance.json"] = json.dumps(tol or {"tolerance_version": 1, "rule": "scaled", "default": 1e-12,
-                                                     "by_exit": {"mott-elastic": {"sigma_el_a0_2": 1e-9}}}).encode()
+        files["tolerance.json"] = tol_bytes if tol_bytes is not None else json.dumps(
+            tol or {"tolerance_version": 1, "rule": "scaled", "default": 1e-12,
+                    "by_exit": {"mott-elastic": {"sigma_el_a0_2": 1e-9}}}).encode()
     entries = []
     for f, b in files.items():
         wbytes(os.path.join(d, f), b)
@@ -521,6 +529,122 @@ class Golden(unittest.TestCase):
             self.assertEqual(sorted(os.listdir(out)), ["mott_C.json"])
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+    # I70・I72: v3 = D (診断量) を case ごとの両側の帯で照らす。fixture は delta_tail を有限にした版を使う
+    #   (帯を当ててよい鍵は `golden.BOUNDABLE_KEYS` が固定するので、theta_deg のような物理量は帯にできない)
+    TOL3 = {"tolerance_version": 3, "rule": "scaled+band", "default": 1e-12,
+            "by_exit": {"mott-elastic": {"sigma_el_a0_2": 1e-9}},
+            "bound_by_case": {"mott_C": {"delta_tail": [0.1, 10.0]}}}
+
+    def band(self, new, gold=None, tol=None, case="mott_C", **kw):
+        from temari_engine import golden as g
+        gold = gold if gold is not None else te.read_output(dumps(finite_doc()), restore_nonfinite=True).payload
+        return g.compare_payloads(gold, new, "mott-elastic", tol or self.TOL3, case=case, **kw)
+
+    def fpayload(self, **over):
+        p = te.read_output(dumps(finite_doc()), restore_nonfinite=True).payload
+        p.update(over)
+        return p
+
+    def test_G14_band_v3(self):
+        """I70・I72: D の鍵は差ではなく case ごとの帯で見る。v1 なら落ちる揺れが通り、帯の外は上でも下でも落ちる"""
+        wb = {}
+        v, _, nd, _, probs = self.band(self.fpayload(), bounds_out=wb)
+        self.assertEqual((v, nd, probs), ("identical", 0, []))
+        self.assertEqual(wb["delta_tail"], (1.0, [0.1, 10.0]))
+        # 帯の中で動く: v1 なら差で落ちるが v3 では適合
+        moved = self.fpayload(delta_tail=2.0)
+        self.assertEqual(self.band(moved)[0], "conforming")
+        gold_f = self.fpayload()
+        from temari_engine import golden as g
+        self.assertEqual(g.compare_payloads(gold_f, moved, "mott-elastic", self.TOL)[0], "fail")       # v1 は落ちる
+        # 帯の上
+        v, *_, probs = self.band(self.fpayload(delta_tail=11.0))
+        self.assertEqual(v, "fail")
+        self.assertTrue(any("帯の上を超える" in x for x in probs), probs)
+        # 帯の下 (診断量が黙って小さくなる・0 に化ける = I72 が塞いだ穴)
+        for val in (0.05, 0.0):
+            v, *_, probs = self.band(self.fpayload(delta_tail=val))
+            self.assertEqual(v, "fail", val)
+            self.assertTrue(any("帯の下を割る" in x for x in probs), (val, probs))
+        # P の鍵は v3 でも差で見る
+        self.assertEqual(self.band(self.fpayload(sigma_el_a0_2=1.5 * (1 + 1e-6)))[0], "fail")
+
+    def test_G14b_band_nonfinite_and_case(self):
+        """I72: 非有限の診断量は「変わっていなければ通す・変わったら落とす」。case 名が要る"""
+        from temari_engine import golden as g
+        inf = float("inf")
+        self.assertEqual(self.band(self.fpayload(delta_tail=inf), gold=self.fpayload(delta_tail=inf))[0], "identical")
+        v, *_, probs = self.band(self.fpayload(delta_tail=1.0), gold=self.fpayload(delta_tail=inf))
+        self.assertEqual(v, "fail")
+        self.assertTrue(any("診断量の非有限が違う" in x for x in probs), probs)
+        v, *_, probs = self.band(self.fpayload(delta_tail=inf), gold=self.fpayload(delta_tail=1.0))
+        self.assertEqual(v, "fail")
+        # case を渡さなければ呼び出しの誤りとして止まる (黙って帯を飛ばさない)
+        with self.assertRaisesRegex(te.MembershipError, "case 名が要る"):
+            g.compare_payloads(self.fpayload(), self.fpayload(), "mott-elastic", self.TOL3)
+        # 知らない case 名なら帯は無い ⇒ その鍵は P として差で見る (検査が消えるのではなく厳しくなる)
+        self.assertEqual(self.band(self.fpayload(delta_tail=2.0), case="other")[0], "fail")
+        # 帯を指定した鍵が本文に無ければ落ちる (許容差と golden の噛み合わせ)
+        gone = self.fpayload(); del gone["delta_tail"]
+        gold_gone = self.fpayload(); del gold_gone["delta_tail"]
+        v, *_, probs = self.band(gone, gold=gold_gone)
+        self.assertEqual(v, "fail")
+        self.assertTrue(any("帯を指定した診断量が本文に無い" in x for x in probs), probs)
+
+    def test_G15_band_v3_through_check(self):
+        """I72: load_golden が v3 を受け、check が case 名を渡し、帯の外の走行が不合格になる"""
+        from temari_engine import golden as g
+        tmp = tempfile.mkdtemp()
+        try:
+            d = make_golden_set(os.path.join(tmp, "g3"), tol=self.TOL3, doc=finite_doc())
+            _, tol = g.load_golden(d)
+            self.assertEqual(tol["tolerance_version"], 3)
+
+            def fake(args, doc=None, **kw):
+                return te.RunResult(output=te.read_output(dumps(doc or finite_doc())), returncode=0, stdout="", stderr="", argv=tuple(args))
+            r = g.check(d, run=fake)
+            self.assertEqual((r[0].verdict, r[0].worst_bound), ("identical", {"delta_tail": (1.0, [0.1, 10.0])}))
+            for val, msg in ((25.0, "帯の上を超える"), (0.0, "帯の下を割る")):
+                r = g.check(d, run=lambda a, **k: fake(a, finite_doc(delta_tail=val)))
+                self.assertEqual(r[0].verdict, "fail", val)
+                self.assertTrue(any(msg in x for x in r[0].problems), (val, r[0].problems))
+            # 一式に無い case 名を帯に書いたら読めない (打ち間違いで検査が黙って消えない)
+            bad = dict(self.TOL3, bound_by_case={"mott_TYPO": {"delta_tail": [0.1, 10.0]}})
+            with self.assertRaisesRegex(te.MembershipError, "一式に無い case"):
+                g.load_golden(make_golden_set(os.path.join(tmp, "g4"), tol=bad, doc=finite_doc()))
+            # 読めない tolerance.json は「道具の欠陥」ではなく一式の不合格 (subagent の指摘、再現済み)
+            with self.assertRaisesRegex(te.MembershipError, "JSON として読めない"):
+                g.load_golden(make_golden_set(os.path.join(tmp, "g5"), tol_bytes=b"not json", doc=finite_doc()))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_G16_tolerance_v3_shape(self):
+        """I72: v3 の形の検査。v2 は受けない・帯は [lo, hi]・物理量を帯に落とせない"""
+        from temari_engine import golden as g
+        g._check_tolerance(dict(self.TOL3))
+        g._check_tolerance({"tolerance_version": 3, "rule": "scaled+band", "default": 1e-12, "bound_by_case": {}})
+        cases = [
+            ({"tolerance_version": 2, "rule": "scaled+bound", "default": 1e-12, "bound_by_exit": {}}, "v2 は受けない"),
+            ({"tolerance_version": 3, "rule": "scaled", "default": 1e-12, "bound_by_case": {}}, "rule が古い"),
+            ({"tolerance_version": 3, "rule": "scaled+band", "default": 1e-12}, "bound_by_case が無い"),
+            ({"tolerance_version": 3, "rule": "scaled+band", "default": 1e-12,
+              "bound_by_case": {"mott_C": {"sigma_el_a0_2": [0.1, 10.0]}}}, "物理量を帯に"),
+            ({"tolerance_version": 3, "rule": "scaled+band", "default": 1e-12,
+              "bound_by_case": {"mott_C": {"delta_tail": 10.0}}}, "帯が [lo, hi] でない"),
+            ({"tolerance_version": 3, "rule": "scaled+band", "default": 1e-12,
+              "bound_by_case": {"mott_C": {"delta_tail": [10.0, 0.1]}}}, "lo > hi"),
+            ({"tolerance_version": 3, "rule": "scaled+band", "default": 1e-12,
+              "bound_by_case": {"mott_C": {"delta_tail": [-1.0, 10.0]}}}, "lo が負"),
+            ({"tolerance_version": 3, "rule": "scaled+band", "default": 1e-12,
+              "bound_by_case": {"mott_C": {"delta_tail": [0.1, True]}}}, "hi に bool"),
+            ({"tolerance_version": 3, "rule": "scaled+band", "default": 1e-12,
+              "bound_by_case": {"mott_C": {"delta_tail": [0.1, float("inf")]}}}, "hi が無限"),
+            ({"tolerance_version": 3, "rule": "scaled+band", "default": 1e-12, "bound_by_case": {}, "extra": 1}, "知らない欄"),
+        ]
+        for bad, why in cases:
+            with self.assertRaises(te.MembershipError, msg=why):
+                g._check_tolerance(bad)
 
     def test_G7_not_a_golden_set(self):
         from temari_engine import golden as g

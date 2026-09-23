@@ -8,9 +8,18 @@ golden の一式 (temari.artifact_set、role = control) の各ファイルは en
   不合格 (fail)      : 構造・文字列の違い、または許容差を超える数
   判定不能 (inconclusive) : エンジンが走らない・入力 (command) が golden と違う
 
-許容差は golden の一式に同梱の `tolerance.json` (manifest に載る = sha256 で固定) から読む。形:
-  {"tolerance_version": 1, "rule": "scaled", "default": s0, "by_exit": {exit: {key: s}}}
-  鍵 key の葉の差 |Δ| ≤ s · max|golden の key の葉|  (量の最大値に対する割合。零の近くで発散しない)
+許容差は golden の一式に同梱の `tolerance.json` (manifest に載る = sha256 で固定) から読む。形は 2 通り:
+  v1 {"tolerance_version": 1, "rule": "scaled", "default": s0, "by_exit": {exit: {key: s}}}
+  v3 {"tolerance_version": 3, "rule": "scaled+band", "default": s0, "by_exit": {…},
+      "bound_by_case": {case: {key: [lo, hi]}}}
+  P (物理量) の鍵: 葉の差 |Δ| ≤ s · max|golden の key の葉|  (量の最大値に対する割合。零の近くで発散しない)
+  D (診断量) の鍵 = v3 の `bound_by_case` に載っている鍵: 差は見ず、**その case の帯に入っていること**を見る
+    (作者決定 I70・I72): 葉ごとに |x| ≤ hi、鍵ごとに max|x| ≥ lo。残差・閉包・整合・尾の収束のような量は
+    「小さいままであること」が要件で、値が一致することは要件でない (相対差で見ると丸めの揺れが 1 桁の変化に見える)。
+    lo があるのは、片側の上界だと**診断量が 0 に化けても通る**から (実測。事前登録 §6)。
+    分け方は事前登録 `docs/notes/lc_e3_golden_tolerance_v2_preregistration_2026-09-22.md` §1 と §5 で意味から決め、
+    `BOUNDABLE_KEYS` が鍵の名前を固定する (許容差のファイルが物理量を「上界だけ」に落とせないように)。
+  ⚠ v2 (出口ごとの片側の上界) は公開する前に v3 へ差し替えたので受け付けない (同じ番号で 2 つの形を持たせない)。
 比べないもの: `temari_envelope`・`elapsed_s`・`cache_provenance` (走行の記録、I68)。非有限の値は nonfinite で戻してから比べる (位置と種類が一致すること)。
 """
 import copy
@@ -18,7 +27,7 @@ import math
 import os
 from dataclasses import dataclass, field
 
-from ._strictjson import loads_strict
+from ._strictjson import StrictJSONError, loads_strict
 from .envelope import NONFINITE, _resolve, _split_pointer, read_output
 from .errors import EngineRunError, EnvelopeError, MembershipError
 from .sets import load_set
@@ -27,6 +36,18 @@ from .sets import load_set
 #   (コードの同一性は envelope の源指紋が記録する)
 SKIP_TOP = frozenset(["elapsed_s", "cache_provenance"])
 VERDICTS = ("identical", "conforming", "fail", "inconclusive")
+
+# 帯 (D = 診断量) を当ててよい鍵。事前登録 §1 の表 + §5 の改訂 (`n_electrons_raw` は P に戻した) を写したもの。
+#   ⚠ これが無いと、許容差のファイルを書き換えるだけで**物理量を「帯だけ」の検査に落とせる**
+#     (実測: dcs と σ_el を帯に移すと、両方を半分にした走行が「適合」になった) ⇒ 名前をコードで固定する。
+#   ⚠ 新しい出口の診断量を足すときは `tools/golden_tolerance_bands.py` の `D_KEYS` と**両方**直す。
+BOUNDABLE_KEYS = frozenset([
+    # mott-elastic
+    "closure_rel", "optical_rel", "delta_tail", "delta_tail_raw",
+    "max_match_resid", "max_free_match_resid", "max_target_match_resid", "max_free_phase_rad",
+    # scattering-factor
+    "f_e_mb_consistency_maxrel", "norm_correction",
+])
 
 
 def _esc(k):
@@ -80,18 +101,25 @@ class CaseResult:
     verdict: str
     n_numbers: int = 0
     n_differ: int = 0
-    worst: dict = field(default_factory=dict)      # key → (|Δ| / scale, 許容 s)
+    worst: dict = field(default_factory=dict)         # P の鍵 → (|Δ| / scale, 許容 s)
     problems: list = field(default_factory=list)
+    worst_bound: dict = field(default_factory=dict)   # D の鍵 → (max|新しい値|, [lo, hi])
 
 
-def compare_payloads(gold, new, exit_name, tolerance):
-    """本文 2 つを照らして (verdict, n_numbers, n_differ, worst, problems) を返す (エンジンは走らせない)"""
+def compare_payloads(gold, new, exit_name, tolerance, case=None, bounds_out=None):
+    """本文 2 つを照らして (verdict, n_numbers, n_differ, worst, problems) を返す (エンジンは走らせない)。
+    `case` = golden の case 名 (v3 の帯は case ごとなので必須。v1 では使わない)。
+    `bounds_out` に dict を渡すと、D の鍵の 鍵 → (max|新しい値|, [lo, hi]) を入れる"""
     g, n = dict(_leaves(gold)), dict(_leaves(new))
     problems = []
     if set(g) != set(n):
         missing, extra = sorted(set(g) - set(n))[:5], sorted(set(n) - set(g))[:5]
         return "fail", 0, 0, {}, ["構造が違う: 無い %s / 余分 %s" % (missing, extra)]
     rule_by = tolerance.get("by_exit", {}).get(exit_name, {})
+    if "bound_by_case" in tolerance and case is None:
+        raise MembershipError("v3 の許容差は case ごとの帯なので case 名が要る (呼び出しの誤り)")
+    band_by = tolerance.get("bound_by_case", {}).get(case, {})
+    wb = bounds_out if bounds_out is not None else {}
     default = tolerance["default"]
     scale = {}
     for p, v in g.items():
@@ -100,6 +128,7 @@ def compare_payloads(gold, new, exit_name, tolerance):
             scale[k] = max(scale.get(k, 0.0), abs(v))
     nnum = ndiff = 0
     worst = {}
+    seen_band = set()
     for p, a in g.items():
         b = n[p]
         if _is_marker(p):
@@ -119,10 +148,27 @@ def compare_payloads(gold, new, exit_name, tolerance):
                     ndiff += 1
                     problems.append("整数が違う %s: %r / %r" % (p, a, b))
                 continue
-            if repr(a) == repr(b):
-                continue
-            ndiff += 1
             k = _top(p)
+            same = repr(a) == repr(b)
+            if not same:
+                ndiff += 1
+            if k in band_by:
+                # D (診断量、作者決定 I70・I72): 差ではなく「その case の帯に入っているか」で見る。
+                #   一致している葉も測る (golden 自身は帯の中にあるので、ここで落ちたら tolerance.json が golden と噛み合っていない)
+                lo, hi = band_by[k]
+                seen_band.add(k)
+                if not (math.isfinite(a) and math.isfinite(b)):
+                    # 非有限どうしが一致しているなら「変わっていない」= 帯は当てられない (M が作れないので帯も作られない)
+                    if not same:
+                        problems.append("診断量の非有限が違う %s: %r / %r" % (p, a, b))
+                    continue
+                if k not in wb or abs(b) > wb[k][0]:
+                    wb[k] = (abs(b), [lo, hi])
+                if abs(b) > hi:
+                    problems.append("帯の上を超える %s: |x| = %.3e > %.3e" % (p, abs(b), hi))
+                continue
+            if same:
+                continue
             s = rule_by.get(k, default)
             if not (math.isfinite(a) and math.isfinite(b)):
                 problems.append("非有限の値が違う %s: %r / %r" % (p, a, b))
@@ -135,9 +181,27 @@ def compare_payloads(gold, new, exit_name, tolerance):
                 problems.append("許容差を超える %s: |Δ|/max = %.3e > %.3e" % (p, r, s))
         elif type(a) is not type(b) or a != b:      # 数でない: 型も値も一致を要求 (True と 1 も区別)
             problems.append("値が違う %s: %r / %r" % (p, a, b))
+    # 帯の下側は鍵ごとに max|x| で見る (M は max で作ったので同じ測り方)。診断量が 0 や極端に小さい値に化ける変化を落とす
+    for k, (lo, hi) in sorted(band_by.items()):
+        if k not in seen_band:
+            problems.append("帯を指定した診断量が本文に無い: %s (許容差と golden が噛み合っていない)" % k)
+        elif k in wb and wb[k][0] < lo:      # 全部の葉が非有限なら測れない (その枝で判定済み)
+            problems.append("帯の下を割る %s: max|x| = %.3e < %.3e" % (k, wb[k][0], lo))
     if problems:
         return "fail", nnum, ndiff, worst, problems
     return ("identical" if ndiff == 0 else "conforming"), nnum, ndiff, worst, []
+
+
+def format_bounds(worst_bound, n=3):
+    """報告用: D の鍵を「帯の端にどれだけ近いか」の順に n 件並べる。
+    ⚠ 端までの余裕は上と下の小さいほうで測る (上だけで並べると、下を割りかけている鍵が画面に出ない)"""
+    def margin(item):
+        x, (lo, hi) = item[1]
+        up = hi / x if x > 0 else math.inf
+        dn = x / lo if lo > 0 else math.inf
+        return min(up, dn)
+    return ", ".join("%s %.1e in [%.1e, %.1e]" % (k, v[0], v[1][0], v[1][1])
+                     for k, v in sorted(worst_bound.items(), key=margin)[:n])
 
 
 def load_golden(golden_dir):
@@ -155,8 +219,18 @@ def load_golden(golden_dir):
     extra = sorted(f for f in os.listdir(golden_dir) if f not in listed and not f.startswith("."))
     if extra:
         raise MembershipError("golden の dir に manifest に載っていないファイルがある: %s" % extra)
-    tol = loads_strict(s.raws["tolerance.json"])
+    # subagent の指摘 (再現済み): loads_strict の例外がそのまま上がると、CLI が「不合格の一式」ではなく
+    #   「道具の欠陥」(EXIT 3) と分類する。読めない tolerance.json は一式のほうの欠陥 ⇒ MembershipError にする
+    try:
+        tol = loads_strict(s.raws["tolerance.json"])
+    except StrictJSONError as ex:
+        raise MembershipError("tolerance.json が JSON として読めない: %s" % ex) from ex
     _check_tolerance(tol)
+    # 帯の case 名が一式のファイルと噛み合っているか (名前を打ち間違えると、その case は一度も帯で見られない)
+    cases = {e["file"][:-5] for e in s.manifest["files"] if e["file"].endswith(".json") and e["file"] != "tolerance.json"}
+    unknown = sorted(set(tol.get("bound_by_case", {})) - cases)
+    if unknown:
+        raise MembershipError("tolerance.json の bound_by_case に一式に無い case がある: %s" % unknown)
     return s, tol
 
 
@@ -164,20 +238,49 @@ def _ok_tol(x):
     return _is_num(x) and math.isfinite(x) and x >= 0
 
 
-def _check_tolerance(tol):
-    """tolerance.json の形を検査する。codex2 の指摘 (再現済み): 個別の値に true が数として通り、σ 50 % 増が「適合」になった"""
-    if not isinstance(tol, dict) or tol.get("tolerance_version") != 1 or tol.get("rule") != "scaled":
-        raise MembershipError("tolerance.json の形が v1 でない")
-    if set(tol) - {"tolerance_version", "rule", "default", "by_exit", "note"}:
-        raise MembershipError("tolerance.json に知らない欄: %s" % sorted(set(tol) - {"tolerance_version", "rule", "default", "by_exit", "note"}))
-    if not _ok_tol(tol.get("default")):
-        raise MembershipError("tolerance.json の default が非負の有限の数でない: %r" % (tol.get("default"),))
-    by = tol.get("by_exit", {})
+def _check_map(tol, field_name):
+    """`{出口: {鍵: 非負の有限の数}}` であることを検査する"""
+    by = tol.get(field_name, {})
     if not isinstance(by, dict) or not all(isinstance(v, dict) for v in by.values()):
-        raise MembershipError("tolerance.json の by_exit が {出口: {鍵: 数}} でない")
+        raise MembershipError("tolerance.json の %s が {出口: {鍵: 数}} でない" % field_name)
     bad = ["%s.%s=%r" % (e, k, v) for e, d in by.items() for k, v in d.items() if not _ok_tol(v)]
     if bad:
-        raise MembershipError("tolerance.json の by_exit に非負の有限の数でない値: %s" % bad)
+        raise MembershipError("tolerance.json の %s に非負の有限の数でない値: %s" % (field_name, bad))
+
+
+# 版ごとの (rule, 許す欄)。v3 = 作者決定 I70・I72 (D の鍵を case ごとの帯で照らす)。
+#   v2 ("scaled+bound" = 出口ごとの片側の上界) は公開する前に v3 へ差し替えたので受け付けない
+_TOL_SHAPES = {
+    1: ("scaled", {"tolerance_version", "rule", "default", "by_exit", "note"}),
+    3: ("scaled+band", {"tolerance_version", "rule", "default", "by_exit", "bound_by_case", "note"}),
+}
+
+
+def _check_tolerance(tol):
+    """tolerance.json の形を検査する。codex2 の指摘 (再現済み): 個別の値に true が数として通り、σ 50 % 増が「適合」になった"""
+    if not isinstance(tol, dict) or tol.get("tolerance_version") not in _TOL_SHAPES:
+        v = tol.get("tolerance_version") if isinstance(tol, dict) else tol
+        extra = "" if v != 2 else " (v2 = 出口ごとの片側の上界は v3 の case ごとの帯に差し替えた)"
+        raise MembershipError("tolerance.json の版が v1 でも v3 でない: %r%s" % (v, extra))
+    rule, allowed = _TOL_SHAPES[tol["tolerance_version"]]
+    if tol.get("rule") != rule:
+        raise MembershipError("tolerance.json の形が v%d でない (rule = %r、v%d は %r)"
+                              % (tol["tolerance_version"], tol.get("rule"), tol["tolerance_version"], rule))
+    if set(tol) - allowed:
+        raise MembershipError("tolerance.json に知らない欄: %s" % sorted(set(tol) - allowed))
+    if not _ok_tol(tol.get("default")):
+        raise MembershipError("tolerance.json の default が非負の有限の数でない: %r" % (tol.get("default"),))
+    _check_map(tol, "by_exit")
+    if tol["tolerance_version"] >= 3:
+        by_case = tol.get("bound_by_case")
+        if not isinstance(by_case, dict) or not all(isinstance(v, dict) for v in by_case.values()):
+            raise MembershipError("tolerance.json v3 の bound_by_case が {case: {鍵: [lo, hi]}} でない (空でも書く)")
+        for c, d in sorted(by_case.items()):
+            for k, band in sorted(d.items()):
+                if k not in BOUNDABLE_KEYS:
+                    raise MembershipError("tolerance.json が帯を当ててよい鍵でない (物理量を帯に落とせない): %s.%s" % (c, k))
+                if not (isinstance(band, list) and len(band) == 2 and all(_ok_tol(x) for x in band) and band[0] <= band[1]):
+                    raise MembershipError("tolerance.json の帯が [lo, hi] (0 ≤ lo ≤ hi、有限) でない: %s.%s = %r" % (c, k, band))
 
 
 def _save(save_dir, name, output):
@@ -225,8 +328,9 @@ def check(golden_dir, run=None, save_dir=None, **run_kwargs):
             results.append(CaseResult(name, "inconclusive", problems=["入力が golden と違う: %r / %r" % (new.envelope["command"], cmd)]))
             continue
         payload = read_output_from(new)
-        v, nn, nd, worst, probs = compare_payloads(gold.payload, payload, gold.exit, tol)
-        results.append(CaseResult(name, v, nn, nd, worst, probs))
+        wb = {}
+        v, nn, nd, worst, probs = compare_payloads(gold.payload, payload, gold.exit, tol, case=name, bounds_out=wb)
+        results.append(CaseResult(name, v, nn, nd, worst, probs, wb))
     return results
 
 
