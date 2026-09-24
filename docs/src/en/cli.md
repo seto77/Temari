@@ -21,9 +21,10 @@ tools and the independent Python implementation.
 
 ## `src/ionization.jl`
 
-The engine's entry point: a thin loader that includes the L0–L5 layer files in
-dependency order, plus the command line. There is no Julia `module`, so
-`include`-ing this one file exposes every name — which is how `gen_production.jl`,
+The engine's entry point: a thin loader plus the command line. It includes
+`src/Temari.jl` — the L0–L5 layer files, in dependency order, inside one
+`module Temari` — and brings every name into the caller, so `include`-ing this
+one file exposes every name — which is how `gen_production.jl`,
 `gen_factors.jl`, `gui.jl` and everything in `tools/` use it.
 
 ```text

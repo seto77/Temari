@@ -35,10 +35,11 @@ L0  Numerics       spherical Bessel, Coulomb functions, splines, quadrature,
 
 ## 層の置き場所 { #where-the-layers-live }
 
-`src/ionization.jl` は薄いローダとコマンドラインで、層のファイルを依存順に include
-します。Julia の `module` はありません — 名前空間はフラットのままなので、
-`src/ionization.jl` を include したものからはすべての名前が見えますし、ファイルを
-include 順に連結すれば単一ファイル版が再現できます。
+`src/ionization.jl` は薄いローダとコマンドラインです。層のファイルを依存順に
+1 つの `module Temari` の中へ include する `src/Temari.jl` を読み込み、すべての名前を
+呼び出し側へ取り込むので、`src/ionization.jl` を include したものからは今もすべての
+名前が見えます。層のファイル自身は module を宣言しないので、include 順に連結すれば
+今も単一ファイル版が再現できます。Temari は登録されたパッケージではありません。
 
 | ファイル | 層 | 内容 |
 |---|---|---|

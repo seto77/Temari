@@ -61,9 +61,9 @@ they are reproducible and why the family can grow.
     ([Verification](verification.md), [Against the literature](comparison.md)) —
     there is no independent third-party validation yet; the EELS, GOS, phase-shift and
     Mott exits are checked against analytic limits and, where one exists, an
-    external reference — the GOS comparison against the Dirac GOS database
-    leaves a Bethe-ridge discrepancy that the Verification page records as
-    unexplained — and no dataset has been published from them yet.
+    external reference — the Bethe-ridge discrepancy in the GOS comparison
+    against the Dirac GOS database turned out to be on the database side (see
+    Verification) — and no dataset has been published from them yet.
 
 ## What it computes today
 
@@ -129,7 +129,7 @@ datasets, each exposing one exit and keeping its engine to itself:
   still runs on date from the 1980s — Egerton's SIGMAK/SIGMAL (Egerton, 2011)
   and the Hartree–Slater tables of Leapman et al. (1980). One modern, open,
   relativistic reference now exists, the Dirac GOS database (Zhang et al.,
-  2023); it stops at $q = 50$ Å⁻¹ ($s \approx 3.98$ Å⁻¹) and it is a GOS table,
+  2023; from version 1.5 on an adaptive q grid per edge); it is a GOS table,
   not an ionization form-factor table for Bloch-wave or multislice codes.
 - Elastic scattering phase shifts live in separate Fortran packages.
 - Atomic scattering factors are commonly consumed as fitted parameterizations
@@ -147,9 +147,10 @@ output plumbing, not new physics. See
 1. **Zero dependencies.** Julia standard library only. The sole bundled
    third-party data file is the Bote–Salvat cross-section coefficient set
    (public domain).
-2. **Standalone.** No `module`, no package to install: the layer files carry a
-   flat namespace and concatenate in include order, so it stays possible to
-   hand the whole engine to someone as a single file.
+2. **Standalone.** No package to install: the layer files sit inside one
+   `module Temari` whose names `src/ionization.jl` brings into the caller, and
+   they declare no module of their own, so concatenating them in include order
+   still hands the whole engine to someone as a single file.
 3. **MIT licensed code, CC-BY-4.0 data.** A reference implementation should be
    readable and usable; the generated tables carry their own licence and their
    own version line.

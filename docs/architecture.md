@@ -35,10 +35,12 @@ carries the stopping-power contraction (`edge`) and σ_tr (`mott`).
 
 ## Where the layers live
 
-`src/ionization.jl` is a thin loader plus the command line; it includes the
-layer files in dependency order. There is no Julia `module` — the namespace
-stays flat, so anything that includes `src/ionization.jl` sees every name, and
-concatenating the files in include order reproduces a single-file build.
+`src/ionization.jl` is a thin loader plus the command line. It includes
+`src/Temari.jl`, which wraps the layer files, included in dependency order, in
+one `module Temari`, and then brings every name into the caller — so anything
+that includes `src/ionization.jl` still sees every name. The layer files declare
+no module of their own, so concatenating them in include order still
+reproduces a single-file build. Temari is not a registered package.
 
 | File | Layer | Contents |
 |---|---|---|

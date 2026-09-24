@@ -21,8 +21,9 @@ dataset-factors v1.0.0 は 1.12.6 で生成しました ([再現性の規律](re
 
 ## `src/ionization.jl` { #srcionizationjl }
 
-エンジンの入口です。L0–L5 の層ファイルを依存順に include する薄いローダと、
-コマンドライン処理から成ります。Julia の `module` は使っていないので、このファイル
+エンジンの入口です。薄いローダとコマンドライン処理から成ります。L0–L5 の層ファイルを
+依存順に 1 つの `module Temari` へ入れる `src/Temari.jl` を読み込み、すべての名前を
+呼び出し側へ取り込むので、このファイル
 1 本を `include` すればすべての名前が見えます — `gen_production.jl`、`gen_factors.jl`、
 `gui.jl`、そして `tools/` の中身はすべてこの方法でエンジンを使っています。
 

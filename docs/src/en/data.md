@@ -20,7 +20,17 @@ one subshell and one beam energy; it is what a STEM-EDX or ALCHEMI simulation
 needs. $f_x(s)$ and $f_e(s)$ are the ordinary *elastic* atomic scattering
 factors of X-ray and electron crystallography — the numbers that
 Waasmaier & Kirfel (1995) or Peng et al. (1996) parameterize — computed here
-from the same atom instead of read from a fit.
+from Temari's own self-consistent relativistic atom instead of read from a fit.
+
+!!! note "The families were generated with different atomic prescriptions"
+    The engine can compute every quantity with one prescription, but the
+    released families were not generated with the same one:
+    dataset F v7.0.0 uses Xα exchange and a finite nucleus (a uniformly charged
+    sphere with the experimental rms charge radius), while dataset-factors
+    v2.0.0 and dataset-factors-ion 1.0.0 use exchange-only KLI and a point
+    nucleus. A simulation that takes F from one family and $f_e$ from the other
+    therefore combines two atomic models. The size of that mismatch has not
+    been measured.
 
 ## Inner-shell ionization form factors F(s, E₀) — dataset v7.0.0
 
@@ -270,13 +280,18 @@ uses — `f_at(ch, 160.0, 2.5)` evaluates a row that does not exist in the file.
   under-converged for heavy elements (Z ≳ 80, all shells but K; worst Rn M5: F 6.0×10⁻⁵ absolute,
   σ_own 2.4×10⁻⁴; v6 uses 40 nodes). `src/prod_v5_jl/ERRATA.md`, placed beside the released data, is the
   record of both; the MANIFEST is unchanged.
-- ⚠ **External yardsticks are few, and none reaches 16 Å⁻¹.** For the
-  generalized oscillator strength the most recent published database in the
-  field, the Dirac GOS database (Zhang et al., 2023), stops at q = 50 Å⁻¹,
-  which is s = 3.98 Å⁻¹ in this convention. For F(s) itself there are two
-  computed shape tables: Oxley & Allen (2000) to s = 2.5 and the µSTEM shape
-  factors (Allen et al., 2015) to s = 20 — both K and L shells, both from a
-  local-exchange atom with a one-component continuum. Against them the shape
+- ⚠ **External yardsticks are few.** For the generalized oscillator strength
+  the most recent published database in the field, the Dirac GOS database
+  (Zhang et al., 2023), is a diagonal table; its version 1.0, used for the
+  comparison on the [Verification](verification.md) page, stops at
+  q = 50 Å⁻¹ (s = 3.98 Å⁻¹ in this convention), and from version 1.5 on the
+  q grid is adaptive per edge (about 0.14–67 Å⁻¹ for the C K edge). For F(s)
+  itself there are two computed shape tables: Oxley & Allen (2000), tabulated
+  to s = 2.5 with a parameterization for 2.5 ≤ s ≤ 20, and the µSTEM shape
+  factors (Allen et al., 2015) to s = 20, which also cover M and part of the
+  N shells. Both come from Oxley's IONIZER approach — relativistic
+  Hartree–Fock bound states and a one-component Hartree–Slater continuum —
+  and neither resolves the spin–orbit subshells (L2/L3, M4/M5). Against them the shape
   agrees within 1 % up to s ≈ 0.75 (Si K), 2 (Fe K) and 0.3 Å⁻¹ (Fe L shell)
   and falls below them beyond, most of the departure lying above the
   s < 2 Å⁻¹ range the tested observables respond to; the curves are on the
@@ -540,8 +555,10 @@ detail.
    part of the scattering source. For O²⁻ at R = 1.40 Å, switching Q between
    the two values Watson (1958) computed changes the regular part of $f_e$ by
    16–20 % at small s (one measured example, not a band for every species);
-   above s ≈ 0.5 Å⁻¹ the change falls below 1e-4. The radius and its source
-   are recorded per file in `external_field_spec`.
+   above s ≈ 0.5 Å⁻¹ the change falls below 1e-4. That band is the spread
+   *within* the Watson model; a different way of stabilising the ion is
+   compared below. The radius and its source are recorded per file in
+   `external_field_spec`.
 2. **Coordination number is part of the species identity.** The same ion at two
    coordination numbers is two files (`SF_Z<zzz>_<16-hex>.json`, the hex being
    a digest of the electron configuration and the external field), because the
@@ -554,6 +571,24 @@ detail.
    diverge and the difference loses all its digits. `f_e_regular_A` is
    interpolated like the neutral $f_e$ (cubic in t = s², not-a-knot at both
    ends), $f_x$ like the neutral $f_x$.
+
+**Comparison with another calculation.** Copeland, Watanabe & Volkov (2026)
+published X-ray scattering factors of anions that include all eight species
+here, computed as Dirac–Hartree–Fock reference functions for crystallography:
+O²⁻, S²⁻, As³⁻ and Se²⁻ without any confinement, and N³⁻, P³⁻, Sb³⁻ and Te²⁻
+with a weak radial confinement that the authors use as a numerical
+regularisation, not as a model of the environment. The two calculations
+describe different objects — theirs an ion close to the free one, ours an ion
+compensated by a Watson sphere that stands in for the crystal — and neither
+has been validated against experiment. Converted to the regular part of $f_e$,
+they differ strongly at small s: at s = 0.05 Å⁻¹ ours is 37–40 % lower for N³⁻,
+25–27 % for O²⁻ and 11 % for Te²⁻; at s = 0.2 Å⁻¹ the difference is 4–5 % for
+N³⁻ and O²⁻ and at most about 1 % for the others. At the compared nodes with
+0.5 ≤ s ≤ 6 Å⁻¹ they agree to 8.7 × 10⁻⁴ — the same level at which the neutral
+atoms of the two calculations agree. The exchange, basis and stabilisation
+contributions to these differences have not been separated, and none of this
+is an error bound. **Treat the small-s electron factor of a multiply charged
+anion as a model choice.**
 
 Version 1.0.0 is the first release of this family that fixes what the tables
 describe, the verification the release has passed (bound to the shipped bytes),
@@ -627,6 +662,7 @@ Bote & Salvat (2008) and Bote et al. (2009) as well.
 - Alsalman, M. A., Hezam, M. S., Alqahtani, S. M., Baloch, A. A. B. & Alharbi, F. H. (2024). Anions' radii — New data points calibrated to match Shannon's table. *Computational Materials Science* **247**, 113491.
 - Bote, D. & Salvat, F. (2008). Calculations of inner-shell ionization by electron impact with the distorted-wave and plane-wave Born approximations. *Physical Review A* **77**, 042701.
 - Bote, D., Salvat, F., Jablonski, A. & Powell, C. J. (2009). Cross sections for ionization of K, L and M shells of atoms by impact of electrons and positrons with energies up to 1 GeV: Analytical formulas. *Atomic Data and Nuclear Data Tables* **95**, 871–909. Erratum: **97** (2011), 186.
+- Copeland, H., Watanabe, Y. & Volkov, A. (2026). Relativistic Dirac–Hartree–Fock X-ray scattering factors. III. Chemically relevant atomic anions for Z = 1–85. *Acta Crystallographica A* **82**, 200–217. Data: Zenodo doi:10.5281/zenodo.20289472
 - Doyle, P. A. & Turner, P. S. (1968). Relativistic Hartree–Fock X-ray and electron scattering factors. *Acta Crystallographica A* **24**, 390–397.
 - Krieger, J. B., Li, Y. & Iafrate, G. J. (1992). Construction and application of an accurate local spin-polarized Kohn–Sham potential with integer discontinuity: Exchange-only theory. *Physical Review A* **45**, 101–126.
 - Llovet, X., Powell, C. J., Salvat, F. & Jablonski, A. (2014). Cross sections for inner-shell ionization by electron impact. *Journal of Physical and Chemical Reference Data* **43**, 013102.

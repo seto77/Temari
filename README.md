@@ -136,10 +136,13 @@ separate tools and datasets, and the off-diagonal one is the hardest to obtain:
   SIGMAK/SIGMAL, Leapman's Hartree–Slater tables) and are non-relativistic.
   A modern, open, relativistic GOS database *does* now exist — Zhang *et al.*
   (2023 dataset; 2025 paper), CC-BY — but it tabulates the **diagonal** GOS
-  df/dE(q) only, and stops at q = 50 Å⁻¹ (s ≈ 3.98 Å⁻¹). We have not identified
-  another public, general-purpose dataset of the **off-diagonal** (mixed
-  dynamic form factor) quantity that EDX mapping and ALCHEMI need, as a
-  function of the difference vector between two Bloch waves
+  df/dE(q) only (from version 1.5 on an adaptive q grid per edge). For the
+  **off-diagonal** (mixed dynamic form factor) quantity that EDX mapping and
+  ALCHEMI need, as a function of the difference vector between two Bloch
+  waves, the other sources we know of are the tables of Oxley & Allen (2000)
+  (K and L shells) and the µSTEM parameterization built on the same approach
+  (K, L, M and part of the N shells, distributed with µSTEM); neither resolves
+  the spin–orbit subshells (L2/L3, M4/M5)
 - Elastic scattering phase shifts live in separate Fortran packages
 - Atomic scattering factors are commonly consumed as fitted parameterizations
   rather than as something you can recompute for an arbitrary ion
@@ -150,7 +153,9 @@ Temari puts the engine in the open and adds exits to it.
 
 One engine, six exits — the same self-consistent atom, the same relativistic
 bound orbitals and the same distorted continuum waves, differing only in the
-operator and in what is reported:
+operator and in what is reported (the released datasets, however, were not all
+generated with the same exchange and nuclear model — see the
+[Data page](https://seto77.github.io/Temari/data/)):
 
 - **Inner-shell ionization form factors** F(s, E₀) for K, L1–L3, M1–M5 —
   relativistic j-resolved bound orbitals, relaxed core-hole continuum,
@@ -183,9 +188,12 @@ Planned, in rough order (see the
 
 1. **Zero dependencies.** Julia standard library only. The sole bundled data
    file is the Bote–Salvat cross-section coefficient set (public domain).
-2. **Standalone.** No package module and no third-party dependency: the layer
-   files carry a flat namespace and concatenate in include order, while
-   `Project.toml` declares only Julia standard libraries.
+2. **Standalone.** No third-party dependency and nothing to install: the layer
+   files are wrapped in one `module Temari` (`src/Temari.jl`), which
+   `src/ionization.jl` includes and whose names it brings into the caller, so
+   every tool sees the same flat set of names. Temari is not a registered
+   package; `Project.toml` declares an environment of Julia standard libraries
+   only.
 3. **MIT licensed code, CC-BY-4.0 data.** A reference implementation should be
    readable and usable; the generated tables carry their own licence and their
    own version line.
@@ -209,9 +217,12 @@ Three tiers, all reproducible from this repository:
 3. **External references** where they exist — the K-shell form factors are
    compared against Oxley–Allen (2000) and µSTEM, the scattering factors
    against the numerical Dirac–Hartree–Fock table OFFV1. How close the
-   agreement is depends on the channel and on s, external coverage is sparse,
-   and one discrepancy — the Bethe ridge against the Dirac GOS database — is
-   recorded as unexplained. The curves and the numbers are on the
+   agreement is depends on the channel and on s, and external coverage is
+   sparse. The Bethe-ridge discrepancy against the Dirac GOS database (12–36 %
+   against its version 1.0) turned out to be on the database side: against the
+   current version the ridge band agrees within 0.998–1.023 on all eight edges
+   compared, and the differences that remain are recorded. The curves and the
+   numbers are on the
    [Against the literature](https://seto77.github.io/Temari/comparison/) and
    [Verification](https://seto77.github.io/Temari/verification/) pages
 

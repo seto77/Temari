@@ -19,7 +19,16 @@ F と散乱因子は、別の系統の数値です。$F(s, E_0)$ は、ある元
 STEM-EDX や ALCHEMI のシミュレーションが必要とする量です。$f_x(s)$ と $f_e(s)$ は、
 X 線結晶学・電子線結晶学で普通に使われる*弾性*散乱の原子散乱因子 —
 Waasmaier & Kirfel (1995) や Peng et al. (1996) がパラメータ化している数値 — で、
-ここではフィットから読み出す代わりに、同じ原子から計算しています。
+ここではフィットから読み出す代わりに、Temari 自身の自己無撞着な相対論的原子から
+計算しています。
+
+!!! note "系統ごとに原子の処方が違います"
+    エンジンはどの量も 1 つの処方で計算できますが、公開した系統は同じ処方で
+    生成していません。dataset F v7.0.0 は Xα 交換と有限核 (実験の rms 電荷半径を
+    持つ一様帯電球)、dataset-factors v2.0.0 と dataset-factors-ion 1.0.0 は
+    交換だけの KLI と点核です。ある系統の F と別の系統の $f_e$ を組み合わせる
+    シミュレーションは、2 つの原子模型を混ぜることになります。その食い違いの
+    大きさは測っていません。
 
 ## 内殻イオン化形状因子 F(s, E₀) — dataset v7.0.0
 
@@ -250,13 +259,16 @@ E₀ 方向の補間も、出荷している利用側と同じ座標で行われ
   次世代 (v6) で処方を変えます。同日に、ε 求積の閾値側区間 (20 点) が重元素 (Z ≳ 80) の K 以外の殻で
   未収束であることも分かりました (最悪 Rn M5 で F の絶対差 6.0×10⁻⁵、σ_own 2.4×10⁻⁴。v6 では 40 点)。
   出荷データの隣に置いた `src/prod_v5_jl/ERRATA.md` が正本です (MANIFEST は不変)。
-- ⚠ **外部の物差しは少なく、16 Å⁻¹ に届くものは 1 つもありません**。一般化振動子
-  強度については、この分野で最も新しい公開データベースである Dirac GOS
-  データベース (Zhang et al., 2023) が q = 50 Å⁻¹ で止まり、これはこの規約では
-  s = 3.98 Å⁻¹ です。F(s) そのものについては、計算された形状表が 2 つあります:
-  s = 2.5 までの Oxley & Allen (2000) と、s = 20 までの µSTEM の形状因子
-  (Allen et al., 2015) で、どちらも K 殻と L 殻、どちらも局所交換の原子と
-  1 成分の連続状態によるものです。これらに対して形状は s ≈ 0.75 (Si K)、
+- ⚠ **外部の物差しは少ないです**。一般化振動子強度については、この分野で最も新しい
+  公開データベースである Dirac GOS データベース (Zhang et al., 2023) は対角の表で、
+  [検証](verification.md)ページの比較に使った版 1.0 は q = 50 Å⁻¹ (この規約では
+  s = 3.98 Å⁻¹) で止まり、版 1.5 からは q の格子が端ごとに適応的です (C K 端で
+  約 0.14–67 Å⁻¹)。F(s) そのものについては、計算された形状表が 2 つあります:
+  s = 2.5 までの表と 2.5 ≤ s ≤ 20 のパラメータ化を持つ Oxley & Allen (2000) と、
+  s = 20 までで M 殻と N 殻の一部も覆う µSTEM の形状因子 (Allen et al., 2015)
+  です。どちらも Oxley の IONIZER の方法 — 相対論的 Hartree–Fock の束縛状態と
+  1 成分の Hartree–Slater の連続状態 — によるもので、どちらもスピン軌道の副殻
+  (L2/L3、M4/M5) を分けません。これらに対して形状は s ≈ 0.75 (Si K)、
   2 (Fe K)、0.3 Å⁻¹ (Fe L 殻) まで 1 % 以内で一致し、その先では下回ります。
   乖離の大部分は、試験した観測量が反応する s < 2 Å⁻¹ の範囲より上にあります。
   曲線は[比較ページ](comparison.md#f-s)にあります。高 s 領域についてそれ以外に
@@ -484,8 +496,9 @@ Sb³⁻、Te²⁻ を、Alsalman et al. (2024) が陰イオン半径を表にし
    球殻 — で安定化しています。球は自己無撞着場には入りますが、散乱源には**含めません**。
    O²⁻ (R = 1.40 Å) で、Q を Watson (1958) が計算した 2 つの値の間で切り替えると、
    $f_e$ の正則部は小さい s で 16–20 % 変わります (測った 1 例であって、全種に対する
-   幅ではありません)。s ≈ 0.5 Å⁻¹ より上では変化は 1e-4 未満です。半径とその出典は、
-   ファイルごとに `external_field_spec` に記録しています。
+   幅ではありません)。s ≈ 0.5 Å⁻¹ より上では変化は 1e-4 未満です。これは Watson
+   模型の*中での*幅で、陰イオンを安定化する別のやり方との比較は下にあります。
+   半径とその出典は、ファイルごとに `external_field_spec` に記録しています。
 2. **配位数は種の同一性の一部です**。同じイオンでも配位数が違えば別のファイルです
    (`SF_Z<zzz>_<16-hex>.json`。16 進の部分は電子配置と外場の要約です)。結晶学的な
    サイトは利用者が知っていることで、表が知っていることではないからです。
@@ -495,6 +508,20 @@ Sb³⁻、Te²⁻ を、Alsalman et al. (2024) が陰イオン半径を表にし
    引いて正則部を作り直さないでください — s = 0 の近くでは両方が発散し、差の桁が
    すべて失われます。`f_e_regular_A` は中性の $f_e$ と同じ補間 (t = s² の 3 次、両端
    not-a-knot)、$f_x$ は中性の $f_x$ と同じ補間です。
+
+**別の計算との比較**。Copeland, Watanabe & Volkov (2026) は、ここの 8 化学種を
+すべて含む陰イオンの X 線散乱因子を、結晶学で使う Dirac–Hartree–Fock の参照関数と
+して公開しました。O²⁻・S²⁻・As³⁻・Se²⁻ は閉じ込めなし、N³⁻・P³⁻・Sb³⁻・Te²⁻ は
+弱い動径方向の閉じ込めつきで、著者はこれを環境の模型ではなく数値の正則化として
+使っています。2 つの計算は別のものを記述しています — 先方は自由イオンに近いもの、
+こちらは結晶の代わりとなる Watson 球で補償したイオン — そして、どちらも実験では
+確かめられていません。$f_e$ の正則部に直すと、小さい s で大きく違います:
+s = 0.05 Å⁻¹ ではこちらが N³⁻ で 37–40 %、O²⁻ で 25–27 %、Te²⁻ で 11 % 小さく、
+s = 0.2 Å⁻¹ では N³⁻ と O²⁻ で 4–5 %、それ以外は大きくても約 1 % です。
+0.5 ≤ s ≤ 6 Å⁻¹ の比べた節点では 8.7 × 10⁻⁴ 以内で一致します — 2 つの計算の
+中性原子どうしが一致するのと同じ水準です。この差の交換・基底・安定化の寄与は
+分けておらず、どれも誤差上界ではありません。**多価陰イオンの小さい s の電子線散乱
+因子は、模型の選択として扱ってください。**
 
 1.0.0 は、この系統で初めて、表が何を記述するか・release が通った検証 (出荷した
 バイト列に結び付けたもの)・利用の規約 (全表 computed、厳密な誤差上界は主張しない) の
@@ -564,6 +591,7 @@ Bote et al. (2009) も引用してください。
 - Alsalman, M. A., Hezam, M. S., Alqahtani, S. M., Baloch, A. A. B. & Alharbi, F. H. (2024). Anions' radii — New data points calibrated to match Shannon's table. *Computational Materials Science* **247**, 113491.
 - Bote, D. & Salvat, F. (2008). Calculations of inner-shell ionization by electron impact with the distorted-wave and plane-wave Born approximations. *Physical Review A* **77**, 042701.
 - Bote, D., Salvat, F., Jablonski, A. & Powell, C. J. (2009). Cross sections for ionization of K, L and M shells of atoms by impact of electrons and positrons with energies up to 1 GeV: Analytical formulas. *Atomic Data and Nuclear Data Tables* **95**, 871–909. Erratum: **97** (2011), 186.
+- Copeland, H., Watanabe, Y. & Volkov, A. (2026). Relativistic Dirac–Hartree–Fock X-ray scattering factors. III. Chemically relevant atomic anions for Z = 1–85. *Acta Crystallographica A* **82**, 200–217. Data: Zenodo doi:10.5281/zenodo.20289472
 - Doyle, P. A. & Turner, P. S. (1968). Relativistic Hartree–Fock X-ray and electron scattering factors. *Acta Crystallographica A* **24**, 390–397.
 - Krieger, J. B., Li, Y. & Iafrate, G. J. (1992). Construction and application of an accurate local spin-polarized Kohn–Sham potential with integer discontinuity: Exchange-only theory. *Physical Review A* **45**, 101–126.
 - Llovet, X., Powell, C. J., Salvat, F. & Jablonski, A. (2014). Cross sections for inner-shell ionization by electron impact. *Journal of Physical and Chemical Reference Data* **43**, 013102.

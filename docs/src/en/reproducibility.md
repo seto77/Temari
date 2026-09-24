@@ -1,9 +1,27 @@
 ---
 description: >-
-  Why bit-identical output outranks speed here: which optimizations were refused, how a dataset is pinned to a commit and a Julia release, and what regeneration does and does not guarantee.
+  What reproducibility means here: shipped numbers must be reproducible to a declared tolerance (bit identity was the rule until 2026-08-28), how a dataset is pinned to a commit and a Julia release, and what regeneration does and does not guarantee.
 ---
 
 # Reproducibility
+
+!!! warning "The bit-identity rule was withdrawn on 2026-08-28"
+    Much of this page describes the rule that applied until then: the same
+    input had to produce the same bits, and reassociation, `muladd`/`fma` and
+    any change of summation order were forbidden. **That rule has been
+    withdrawn.** The same commit had already produced different last bits on
+    different CPUs, so the guarantee is now stated as a tolerance: two runs of
+    the same input, on the same or different CPUs, must agree to **absolute
+    10⁻¹⁵** on every shipped value. Reassociation, `muladd`/`fma` and `@simd`
+    reductions are allowed; a change is gated against the reassociation bound
+    (n − 1)·ε·Σ|terms| of the sums involved, and a difference outside it is
+    settled with an independent high-precision reference, not by adjusting the
+    bound. Non-determinism is still a bug, and the verification discipline
+    (pre-registered criteria, negative tests, independent references) is
+    unchanged. The current procedure is in
+    [CONTRIBUTING](https://github.com/seto77/Temari/blob/main/CONTRIBUTING.md);
+    the sections below are kept as the record of the earlier policy and of the
+    measurements behind it until this page is rewritten.
 
 A generated table is a scientific product. **The same input must produce the
 same bits** — within the scope written down below, which was arrived at by

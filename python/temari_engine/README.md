@@ -47,7 +47,7 @@ first public writer, and used by `verification/golden_v1`) covers only the files
 `role_bound=False`, and `python -m temari_engine verify` prints `role_bound=yes|no`. The digest catches accidental edits
 only: anyone can recompute it. Only sets listed in the known-sets table are protected against deliberate ones.
 
-Specification: `docs/notes/envelope_spec_v1_2026-09-22.md` in the Temari repository.
+Specification: the envelope is described in the command-line reference of the documentation site (<https://seto77.github.io/Temari/cli/>) and its schema is `schema/temari_envelope_v1.schema.json`; the set manifest (`temari.artifact_set`) is described in the header of `tools/artifact_manifest.jl`, which writes it. Both files are in the Temari repository.
 
 ## Tests
 

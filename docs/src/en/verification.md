@@ -214,9 +214,11 @@ page.
 The generalized oscillator strengths were checked against the Dirac GOS
 database (Zhang et al., 2023; CC-BY-4.0), computed with the Flexible Atomic
 Code from self-consistent Dirac–Fock–Slater orbitals — the modern open GOS
-reference used here. It stops at $q = 50$ Å⁻¹ ($s \approx 3.98$ Å⁻¹ in the
-convention of this site), which bounds the range of this comparison (the F(s)
-references above reach further).
+reference used here. Its version 1.0, used for the comparison below, stops at
+$q = 50$ Å⁻¹ ($s \approx 3.98$ Å⁻¹ in the convention of this site), which
+bounds the range of that comparison (the F(s) references above reach further);
+from version 1.5 the q grid is adaptive per edge. The comparison was repeated
+against version 1.7 — see [the update below](#ridge-update).
 
 The unit convention was pinned without assuming it, using **hydrogen**, where our
 own GOS is already verified against the exact dipole limit and the Bethe sum rule
@@ -267,7 +269,30 @@ does **not** follow that the Fe and Au discrepancies are the database's — ther
 is no exact surface for those atoms to settle it — nor that the database is
 wrong in general (its medians are as good as ours), nor that our GOS is
 verified because T11b passes (see the note under Tier 1). The ridge discrepancy
-stays open, and it is recorded here rather than smoothed over.
+stayed open at this point, and it is recorded here rather than smoothed over.
+
+#### Update (2026-09-20): the ridge discrepancy is in the database version { #ridge-update }
+
+The same GOS surfaces — none of ours recomputed — were compared against the
+database's version 1.7 on the same cells as version 1.0, for eight edges
+(C K, Fe K, Fe L1, Fe L3, Ag L3, Au L3, Au M5 and Sn K). The main GOS file of
+version 1.7 is byte-identical to that of version 1.6.1; version 1.0 was the
+archive also shipped unchanged with versions 1.1 and 1.2. In the ridge band
+(0.8 ≤ ρ < 1.5) the database's own values rose by 10.6–40.5 % from version 1.0
+to version 1.7, and the ratio of ours to version 1.7 is 0.9998–1.0291 — so
+nearly all of the 12–40 % was on the database side. With our own q range then
+extended to 1.3 times the upper end of the version 1.7 grid, the ridge band
+agrees within **0.998–1.023 on all eight edges**, including Sn K at 30 keV,
+which version 1.0 could not reach at all (1.0061). Three differences remain and
+are not explained by the version:
+
+- **C K, optical and pre-ridge bands: ours is 8–13 % lower**, whichever version
+  is used. The size follows the final-state field (relaxed versus frozen core
+  hole) and grows towards light elements; see
+  [Data](data.md#final-state-field).
+- **Fe L1 above the ridge (ρ > 1.5): ratio 1.18.**
+- **Au M5: a spread**, with the 10th percentile of the cell ratios at
+  0.75–0.85, so no single ratio describes it.
 
 What it would mean for the *shipped* quantity has been estimated, not bounded:
 $F(s) = N(K)/N(0)$ is a ratio, so any error uniform in ρ cancels exactly, and
@@ -487,7 +512,7 @@ what matters here is the taxonomy it enforces.
 | Direct measurement | Measured under stated conditions | refcheck, 9.0×10⁻⁸ |
 | Observed maximum over a sample | The largest value *seen*, not a bound on the population | C6 on the shipped bytes, 1.16×10⁻³ |
 | Discrepancy against an external reference | A difference, with no attribution of blame | the shape against µSTEM |
-| Unexplained discrepancy | The same, with the cause not identified | the Bethe ridge, 12–36 % |
+| Unexplained discrepancy | The same, with the cause not identified | the Fe L1 band above the Bethe ridge, 18 % (the ridge itself, 12–36 %, was traced to the reference's version) |
 | Scenario sensitivity | "If all of it were ours, then…" | the propagated ≤1.2×10⁻⁴ |
 | Not measured | An empty row, kept visible | the ρ ∈ [0.3, 0.8) band |
 
@@ -530,10 +555,25 @@ advance:
   statement of which knob differs.
 
 The specification spends most of its length on the traps, because the ones that
-bite are not physics: the CLI's quadrature default is PROD and not the shipping
-HIGH, the function defaults correspond to no shipped generation at all, `X_ALPHA`
-is 1.0 rather than 2/3, the transverse term is absent by construction, and the
-edge energies must come from Bote–Salvat or every row shifts.
+bite are not physics: the single-channel CLI cannot reach the shipped
+prescription at all (`--high` selects the v6 quadrature and a point nucleus; the
+only entry to the v7.0.0 recipe is the generator's `--profile v7_high` or the
+library call it makes), the function defaults correspond to no shipped
+generation at all, `X_ALPHA` is 1.0 rather than 2/3, the transverse term is
+absent by construction, the nuclear radius is the uniform-sphere outer radius
+√(5/3)·r_rms and not the rms value, and the edge energies must come from
+Bote–Salvat or every row shifts.
+
+The specification was revised on 2026-09-18 (v2) to target dataset F v7.0.0
+(finite nucleus, `PRESC_V7` + `HIGH_SETTINGS_V7`), which is what the reference
+CSV has contained since 2026-09-09. The original v1 described the v5.0.0 recipe
+(point nucleus, v5 quadrature); computed that way, seven of the ten channels
+fall outside the 10⁻⁵ gate, and the revised specification tabulates those
+expected deviations so a reproducer can tell a recipe mismatch from a real
+disagreement. Recomputing the 170 points with the v7.0.0 recipe through
+`tools/benchmark_recompute.jl` reproduces the CSV to within its rounding on
+every channel — a self-consistency check of the specification, not an
+independent reproduction.
 
 ## What is deliberately not verified here
 
@@ -546,13 +586,12 @@ edge energies must come from Bote–Salvat or every row shifts.
 
 ## Open items
 
-- **The Bethe-ridge discrepancy in the GOS** (above) is unexplained. It is no
-  longer a blocker for the partial cross section — the integrated σ(β, Δ)
-  comparison on every channel (above) is what gates that, and the ridge band
-  carries at most a few percent of it — but whether to pursue the cause further
-  (the two channels whose comparison window straddles the ridge on both sides,
-  Fe L1 and Au M5, where the difference is one of shape rather than amplitude)
-  or to record it as an unexplained discrepancy is an open decision.
+- **What remains of the GOS discrepancy.** The Bethe-ridge part was traced to
+  the reference's version ([update above](#ridge-update)). What is left is
+  narrower: the C K optical and pre-ridge bands (8–13 %, sensitive to the
+  final-state field), the Fe L1 band above the ridge (1.18) and a spread in
+  Au M5. None of it is a blocker for the partial cross section — the
+  integrated σ(β, Δ) comparison on every channel (above) is what gates that.
 - **The oscillator-strength sum rule as a diagnostic.** T11 verifies it; what is
   still worth building on top of it is the intended use — the deficit against the
   occupancy at low $Q$ is a direct measure of the missing white-line strength,
