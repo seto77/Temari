@@ -17,6 +17,14 @@ class RoleError(TemariEngineError):
     """通常入口が読まない役割 (control・既知の表に無い computed・所属の無い単発の出力)"""
 
 
+class XraylibError(TemariEngineError):
+    """xraylib (Python の束縛) が無い、または要るデータを返さない (線ごとの応答 `xray_lines` の任意の依存)"""
+
+
+class LineResponseError(TemariEngineError):
+    """線ごとの応答を出せない (E₀ が表の行に無い・対応しない線・strict で供給元の殻が無い など)"""
+
+
 class EngineRunError(TemariEngineError):
     """Julia のエンジンの実行が失敗した (起動できない・非 0 終了・出力が無い / 壊れている)"""
 
