@@ -49,6 +49,55 @@ only: anyone can recompute it. Only sets listed in the known-sets table are prot
 
 Specification: the envelope is described in the command-line reference of the documentation site (<https://seto77.github.io/Temari/cli/>) and its schema is `schema/temari_envelope_v1.schema.json`; the set manifest (`temari.artifact_set`) is described in the header of `tools/artifact_manifest.jl`, which writes it. Both files are in the Temari repository.
 
+## Use the published tables (no repository, no Julia)
+
+`temari_engine.data` fetches the three published series, checks them against hashes pinned inside this package, and
+evaluates them with readers ported from the reference loaders:
+
+| series | what | archive |
+|---|---|---|
+| `"F"` | dataset F v7.0.0: inner-shell ionization form factors F(s, E0), 525 channels (K, L1-L3, M1-M5) | 96 MB |
+| `"factors"` | dataset-factors v2.0.0: f_x and f_e for 86 neutral atoms | 12 MB |
+| `"factors-ion"` | dataset-factors-ion 1.0.0: f_x and f_e for 22 ion species | 3 MB |
+
+```python
+from temari_engine import data as td
+
+f = td.open("F")                           # downloads once, then reads from the cache
+r = f.channel(79, "L3").f(200.0, 1.0)      # E0 = 200 keV, s = 1.0 1/Angstrom (q = 4*pi*s)
+r.value, r.region, r.tail_bound            # region: "tabulated", "unrecorded" (0 with an upper bound) or "impossible"
+r.source.doi, r.source.version             # "10.5281/zenodo.22643468", "7.0.0"
+f.path                                     # verified directory, e.g. for xray_lines.line_response(79, 200.0, f.path)
+
+fac = td.open("factors")
+fac.element(26).fx(0.5), fac.element(26).fe(0.5)     # electrons, Angstrom; s in [0, 6] 1/Angstrom
+
+ion = td.open("factors-ion")
+ion.find(8, charge=-2)                     # several O2- tables (different coordination numbers)
+ion.element(8, species_tag=ion.find(8, charge=-2)[0].species_tag).fx(0.5)
+```
+
+- **Where the bytes come from.** The GitHub Release asset first, then the Zenodo record. Neither copy is trusted: the
+  archive and each manifest must match the sha256 pinned in `known_sets.json`, and every table file is checked against
+  its manifest entry when it is first read. The bytes that were checked are the bytes that are parsed. Code shipped
+  inside an archive is never run.
+- **Cache.** `cache_dir=`, else the environment variable `TEMARI_CACHE_DIR`, else the usual per-user cache directory of the
+  operating system. `offline=True` (or `TEMARI_OFFLINE=1`) never touches the network and fails with `OfflineError` if
+  the archive is not cached. `td.open_archive(path)` and `td.open_dir(path, series)` read a copy you brought yourself;
+  a directory can only be checked against its manifest, and the result says so (`source.verified == "manifest"`).
+- **Roles.** Only `computed` sets are returned. The point-nucleus control set inside the dataset F archive needs
+  `research=True` and carries no version or DOI.
+- **What is claimed.** These are computed values with no certified error bound. `tail_bound` is the stored bound on the
+  zero-filled tail beyond `s_cert`, not an accuracy guarantee. The values reproduce the reference loaders
+  (`tools/temari_contract.py`, `tools/temari_factors_contract.py`) bit for bit on the same platform; the spline code
+  squares with `** 2`, which goes through the C library, so the last bit can differ between operating systems.
+- **Known edge.** For a charged species, `fe(s)` for s below about 1e-155 1/Angstrom returns -inf or raises
+  `ZeroDivisionError`, as the reference loader does.
+- **Command line.** `python -m temari_engine data info`, `... data fetch F`, `... data verify F` (checks every file),
+  `... data value F 79 L3 200 1.0`, `... data value factors 26 fx 0.5`.
+- **Citing.** Cite the version DOI in `source.doi` (`source.citation()` prints a line). The data are CC BY 4.0; this
+  package is MIT.
+
 ## Per-line X-ray response (optional, needs xraylib)
 
 ```python

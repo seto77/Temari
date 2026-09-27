@@ -40,11 +40,15 @@ docs/notes/contract_conformance_split_2026-08-18.md):
     python tools/temari_factors_contract.py DIR --values-from ALT --make-golden my_oracle.json
                                                                # 差し替え値に対する oracle を出す
 
-loader として使う:
-    from temari_factors_contract import load_element
-    el = load_element("prod_factors_v1", 26); el.fx(1.234); el.fe(0.01)
+loader として使う (260914Cl、作者決定 I43):
+    from temari_factors_contract import load_release
+    rel = load_release("prod_factors_v1")    # 通常入口: 信頼する release 台帳に載った公開物だけを読む
+    el = rel.element(26); el.fx(1.234); el.fe(0.01)
+    # 研究入口 (所属を確かめない): load_element(DIR, 26, research=True) / Element(doc)
+    # ⚠ どちらの入口でも、表が自分で名乗る certified は認証として扱わない (is_certified() は台帳の方針が certified のときだけ真)
 """
 import bisect
+import copy
 import glob
 import hashlib
 import json
@@ -54,6 +58,7 @@ import os
 import re
 import struct
 import sys
+import types
 
 # ⚠ 出力に非 ASCII (², ×, ⚠ など) を含むので、stdout がパイプ/ファイルで legacy コードページ
 #   (Windows の cp932 等) のときに UnicodeEncodeError で落ちないよう UTF-8 に固定する
@@ -72,6 +77,8 @@ Z_RANGE = range(1, 87)
 DIGITS = 11
 # 出荷版の受理: 契約 (schema_version 1) は 1.x.y の全 patch/minor で不変。ハードコード 1.0.0 にしない
 SHIP_VERSION_RE = re.compile(r"^1\.\d+\.\d+$")
+# 260917Cl: 出荷版の正規形は schema ごと (下の C2 の注)。schema v2 の中性は 2.x.y (作者決定 I40)
+SHIP_VERSION_RE_BY_SCHEMA = {1: SHIP_VERSION_RE, 2: re.compile(r"^2\.\d+\.\d+$")}
 SYMBOLS = ("H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn "
            "Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd "
            "Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn").split()
@@ -216,7 +223,7 @@ def _round_sig(x, d=DIGITS):
 class Element:
     """1 元素の表 + 契約どおりの補間。fx(s) [electrons] / fe(s) [Å]。"""
 
-    def __init__(self, doc, check=True, expect_z=None):
+    def __init__(self, doc, check=True, expect_z=None, _release=None, _token=None):
         """loader は**通常の読み込みでも**最小限を検査する (codex 指摘 2026-08-16): dataset /
         schema_version / charge 0 / 内部 z (期待値があれば一致) / 節点 SHA / 配列長 / 有限値。
         ファイル名だけを信じない。"""
@@ -232,7 +239,34 @@ class Element:
         # ⚠ artifact_role — 認証済みと計算値の境界 (作者決定 I9、2026-09-09)。
         #   v1 は欄が無くて当然なので "certified" とみなす (⚠ 公開済み 86 本は書き換えられない)。
         #   v2 は required で、欠けていたら fail-closed。
-        self.artifact_role = "certified"
+        # 260914Cl (作者決定 I43): ⚠ 既定を unknown にした。以前の「v1 は欄が無くて当然なので certified」は廃止
+        #   (新しい loader は schema v1 だけを根拠に certified としない。所属は load_release が確かめる)
+        self.artifact_role = "unknown"
+        # 260911Cl (I12 / I31): ⭐ **なぜ computed なのか**を読めるようにする。
+        #   ⚠ 門 (`is_certified`) は変えない — role の 3 値のまま。これは理由の欄で、
+        #   研究入口の利用者が「認証前」と「認証を試みて判定不能だった」を区別できるようにする。
+        #   ⚠ v1 には無くて当然なので None (v1 の読み方は 1 文字も変えない)。
+        self.certification_status = None
+        # ⚠⚠ 260913Cl: **役割は `check` に依らず読む。** ここより前は既定が "certified" なので、
+        #   `check=False` で読むと `computed` の表が `is_certified()` を通っていた
+        #   (ion v0.4.0 の SF_Z008_8d89ba1ef6e035bb.json で再現。codex2 thread `01a096b2`)。
+        #   ⚠ `check=False` は「検査を飛ばす」入口なので**例外は投げない** — 読めない・裏づけが
+        #   無いときは `"unknown"` にして **certified を名乗らせない** (fail-closed)。
+        #   ⚠ 番兵は Julia 側 (`tools/factors_loader.jl`) と**同じ文字列**にする —
+        #   言語間検査 (`contract_ion_cross_language_test.jl`) が `role` を直接比べている。
+        #   ⚠ `ver == 1` の枝は 1 文字も変えない (公開済み 86 本は欄が無くて当然なので "certified")。
+        if ver != 1:
+            _role = doc.get("artifact_role")
+            _cs = doc.get("certification_status")
+            if isinstance(_role, str) and _role in ("certified", "computed", "control"):
+                self.artifact_role = _role
+            else:
+                self.artifact_role = "unknown"   # 欄が無い / 未知の値 ⇒ 名乗らせない
+            if isinstance(_cs, str):
+                self.certification_status = _cs
+            # `certified` を名乗るなら理由の欄が要る (I12 と同じ規則を check=False でも適用)
+            if self.artifact_role == "certified" and _cs != "certified":
+                self.artifact_role = "unknown"
         if check:
             if doc.get("dataset") != "temari-factors" or ver not in (1, 2):
                 raise ValueError("dataset/schema_version が契約と違う")
@@ -246,6 +280,24 @@ class Element:
                 if role not in ("certified", "computed", "control"):
                     raise ValueError("artifact_role が未知の値: %r" % (role,))
                 self.artifact_role = role
+                # 260911Cl: 理由の欄。⚠ 欄が無い v2 (I12 より前に作った表) も読めるように
+                #   None を許すが、**あるなら role と食い違ってはならない** (fail-closed)。
+                cs = doc.get("certification_status")
+                # ⚠⚠ 260912Cl: **`certified` を名乗るなら理由の欄を必須にする** (codex2 thread `01a09119`)。
+                #   欄が無いときに certified を通していたので、I12 より前に作った v2 の表 (欄なし) の
+                #   role を書き換えるだけで `is_certified()` が true になった (再現済み)。
+                #   ⚠ `computed` / `control` は欄が無くても読める — 公開前の v2 (ion v0.1.0 / v0.2.0) は
+                #   すべて computed なので、この条件で既存の読み手は壊れない。
+                if cs is None and role == "certified":
+                    raise ValueError("schema v2 で artifact_role=certified を名乗るなら "
+                                     "certification_status が要る (I12)")
+                if cs is not None:
+                    if not isinstance(cs, str):
+                        raise ValueError("certification_status が文字列でない: %r" % (cs,))
+                    if (role == "certified") != (cs == "certified"):
+                        raise ValueError("artifact_role (%s) と certification_status (%s) が食い違う"
+                                         % (role, cs))
+                    self.certification_status = cs
                 if float(self.z) - float(doc.get("n_electrons")) != self.charge:
                     raise ValueError("n_electrons ≠ Z − charge")
             if expect_z is not None and self.z != expect_z:
@@ -255,6 +307,28 @@ class Element:
                 raise ValueError("s 格子の定義/SHA が契約と違う")
             if nodes_sha256(self.s) != g["sha256_f64le"]:
                 raise ValueError("s 節点の再構成が sha256 と合わない")
+        # 260914Cl (作者決定 I43、I38 の手順 4b-4): ⭐⭐ **自己申告の certified を認証として扱わない。**
+        #   表が名乗る役割と状態は declared_* に残し、loader が返す現在の役割は次で決める:
+        #   ・通常入口 (load_release) を通った表 = 信頼する release 台帳の方針 (いまは全部 computed)
+        #   ・研究入口 (Element を直接 / load_element(..., research=True)) = v1 と certified を名乗る v2 は unknown、
+        #     computed / control はそのまま。⚠ Julia 側 (`tools/factors_loader.jl`) と同じ規則
+        self.declared_artifact_role = doc.get("artifact_role") if ver != 1 else None
+        self.declared_certification_status = doc.get("certification_status") if ver != 1 else None
+        self._release_policy = None
+        self.release = None
+        if _release is not None:
+            # 260914Cl (節目の検算 4): ⚠ release の方針を渡せるのは load_release の経路だけ (偽の方針で認証を作らせない)
+            if _token is not _RELEASE_TOKEN:
+                raise ReleaseMembershipError("_release は通常入口 (load_release) だけが渡す")
+            self._release_policy = _release["role_policy"]
+            self.artifact_role = _release["role_policy"]
+            self.release = dict(_release)
+        elif ver == 1 or self.artifact_role == "certified":
+            self.artifact_role = "unknown"
+        # 260914Cl (節目の検算、codex2 thread `01a09fca` の 1): ⚠ **現在の状態欄**にも旧い certified を残さない
+        #   (以前は役割だけを unknown にし、certification_status は 'certified' のままだった)。名乗った値は declared_* に残る
+        if self.certification_status == "certified" and self._release_policy != "certified":
+            self.certification_status = "unknown"
         self.fx_nodes = [float(v) for v in doc["f_x"]]
         raw_fe = doc["f_e_A"]
         if len(self.fx_nodes) != N_NODES or len(raw_fe) != N_NODES:
@@ -327,11 +401,55 @@ class Element:
         ⚠ 中性では f_e と同じ値になる (単極子が厳密に 0 のため)。"""
         return self._fe_reg(self._guard(s) ** 2)
 
-    def is_certified(self):
-        """⭐ 通常入口が読んでよいか (作者決定 I9)。
+    # 260915Cl (修正の確認 3 巡目、codex2 thread `01a09fca` の 1): ⚠ deepcopy の memo で役割・状態・方針を差し替えさせない。
+    #   以前は公開の artifact_role と非公開の方針が同じ文字列オブジェクトで、copy.deepcopy(e, {id(e.artifact_role): "certified"})
+    #   が両方を置き換え、is_certified() が真になった。⇒ これらの欄は deepcopy を通さず、元の値をそのまま写す
+    #   (数値の配列などの残りの欄は、通常どおり deepcopy する)
+    _COPY_AS_IS = ("_release_policy", "artifact_role", "certification_status",
+                   "declared_artifact_role", "declared_certification_status", "release")
 
-        ⚠ `computed` (認証前) と `control` (対照) は**研究入口だけ**が読む。"""
-        return self.artifact_role == "certified"
+    def __deepcopy__(self, memo):
+        new = object.__new__(type(self))
+        memo[id(self)] = new
+        for k, v in self.__dict__.items():
+            if k in Element._COPY_AS_IS:
+                new.__dict__[k] = dict(v) if isinstance(v, dict) else v
+            else:
+                new.__dict__[k] = copy.deepcopy(v, memo)
+        return new
+
+    # 260915Cl (修正の確認 4 巡目、codex2 thread `01a09fca`): ⚠ 所属の主張は直列化を越えて持ち越さない。
+    #   以前は pickle.Pickler の memo を差し替えると、公開の役割と非公開の方針 (同じ文字列オブジェクト) が両方
+    #   "certified" になって戻り、is_certified() が真になった。⇒ pickle から戻した要素は、研究入口と同じ規則で役割と状態を
+    #   決め直す (方針と release は持たない)。copy.copy (__copy__) と deepcopy (__deepcopy__) は所属を保つ
+    def __copy__(self):
+        new = object.__new__(type(self))
+        new.__dict__.update(self.__dict__)
+        return new
+
+    def __getstate__(self):
+        return {k: v for k, v in self.__dict__.items() if k not in ("_release_policy", "release")}
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        doc = self.__dict__.get("doc")
+        doc = doc if isinstance(doc, dict) else {}
+        ver = doc.get("schema_version")
+        role = doc.get("artifact_role") if ver != 1 else None
+        cs = doc.get("certification_status") if ver != 1 else None
+        self._release_policy = None
+        self.release = None
+        self.declared_artifact_role = role
+        self.declared_certification_status = cs
+        self.artifact_role = role if (isinstance(role, str) and role in ("computed", "control")) else "unknown"
+        cs = cs if isinstance(cs, str) else None
+        self.certification_status = "unknown" if cs == "certified" else cs
+
+    def is_certified(self):
+        """認証状態の述語 (作者決定 I43 で残した)。⚠ 260914Cl: **信頼する release 台帳の方針が certified のときだけ真**。
+        いまの台帳に certified の release は無い (I35 / I36) ので常に偽。⚠ 通常入口が読んでよいかの門ではない —
+        その門は load_release (release への所属)。"""
+        return self.artifact_role == "certified" and self._release_policy == "certified"
 
 
 # ---------------------------------------------------------------------------
@@ -376,11 +494,282 @@ def overlay_values(base, alt, z):
     return doc, ignored
 
 
-def load_element(pdir, z, check=True, values_from=None):
-    with open(os.path.join(pdir, "SF_Z%03d.json" % z), encoding="utf-8") as f:
+# ---------------------------------------------------------------------------
+# release への所属 (通常入口の門。作者決定 I43、I38 の手順 4b-4。260914Cl)
+# ---------------------------------------------------------------------------
+
+# ⭐⭐ **信頼の根拠はこの定数そのもの** — 同梱の JSON を信じない (書庫の中身を書き換えられる相手は、
+#   表・manifest・台帳を全部作り直せる。codex2 thread `01a09fca` の指摘)。loader のコード自体の改変は契約の外。
+#   ⚠ 1 件 = 公開した書庫の manifest.json の**生バイト**の sha256 と、その中の overall_digest・件数・版。
+#     (overall_digest は `file:sha256` の行しか覆わず、manifest の他の欄を守らないので、生バイトで固定する)
+#   ⚠ status が released のものだけを通常入口が読む。candidate / superseded は理由を名指して拒否する。
+#   ⚠ 新しい版は、書庫を組み、公開の条件 (I41 など) を満たして作者が公開を決めてから released で足す。梱包で自動には足さない。
+#   ⚠ Julia 側 (`tools/factors_loader.jl` の FL_TRUSTED_RELEASES) と**同じ中身**にする (note を除く)。
+TRUSTED_RELEASES = (
+    {"series": "neutral", "dataset_version": "1.0.0", "schema_version": 1,
+     "manifest_sha256": "4395e80a20c58ca102348bc1990217eeba32dcf60a4b704862a8c0779b201a42",
+     "overall_digest": "5aa766ce94f5dcdb58d815f436dd4fbfe852b8cc5c026e11b097d1e0ff391d1e",
+     "n_files": 86, "status": "released", "role_policy": "computed",
+     "note": "dataset-factors v1.0.0 (2026-08-17; DOI 10.5281/zenodo.22644248). Read as computed: the stopping-error "
+             "bound claim was withdrawn (author decisions I34 / I36)."},
+    {"series": "ion_series2", "dataset_version": "0.1.0", "schema_version": 2,
+     "manifest_sha256": "b176f5b5b10fec42e3bee9e1ba05ce031d69d838910542114e3136e9a7887526",
+     "overall_digest": "1a4af31a6d11724cb21cdfffc29f4862d605252f5cefe2ce131806d9423d8c90",
+     "n_files": 22, "status": "released", "role_policy": "computed",
+     "note": "dataset-factors-ion v0.1.0 (2026-09-09; GitHub Release, no DOI). Computed tables from the earlier "
+             "numerical treatment of the Watson-shell kink; kept readable because it was published (author decision I28)."},
+    # 260917Cl: 作者が公開を決めた (2026-09-17 19:5x、公開の段取りの段 9) ので、2 版を released で足す。
+    #   manifest の生バイトの sha256 は、出荷の dir (src/prod_factors_v2・src/prod_factors_ion_v1) の manifest.json の実物から取った。
+    #   表は 2026-09-17 の本走の出力で、検収 (採否規則 I38 v1.1) に合格したバイトそのもの (tools/release_bytes_binding.py)。
+    {"series": "neutral", "dataset_version": "2.0.0", "schema_version": 2,
+     "manifest_sha256": "d43230df627065fd5bcc872c4f19926d0a92caa4a147edbd9179ecda9ca68c5c",
+     "overall_digest": "fc5c45c2d167606ebf9ab7e9103db532dc1dcf1d31e21bad1c43eb012772c2f9",
+     "n_files": 86, "status": "released", "role_policy": "computed",
+     "note": "dataset-factors v2.0.0 (2026-09; DOI on the Zenodo record of the release, series 10.5281/zenodo.22644247). "
+             "Schema v2; every table computed / not_certified. Same prescription as v1.0.0 (author decisions I36 / I40)."},
+    {"series": "ion_series2", "dataset_version": "1.0.0", "schema_version": 2,
+     "manifest_sha256": "461b747eec30a502ebef78178d6ba0081249b75bed6f8818865fe57d036e5ef2",
+     "overall_digest": "31c0b730c03d14a6f3bce3d2a32523dd9bfd80d2e8a017876a45e981cb51f809",
+     "n_files": 22, "status": "released", "role_policy": "computed",
+     "note": "dataset-factors-ion 1.0.0 (2026-09; DOI on the Zenodo record of the release). Every table computed / "
+             "not_certified; numbers bit-identical to the unpublished v0.2.0-v0.4.0 (author decisions I41 / I45)."},
+)
+DIGEST_RULE = "sha256 over concat of sorted 'file:sha256\\n' lines"
+SF_NAME_RE = re.compile(r"^SF_Z(\d{3})(?:_([0-9a-f]{16}))?\.json$")
+
+# 260914Cl (節目の検算、codex2 thread `01a09fca` の 4): ⚠ 台帳の行を実行時に書き換えて認証を付け直せた
+#   (タプルの中の dict は変更可能) ⇒ 読み取り専用の写しにする。loader のコード自体や非公開の名前への手出しは契約の外
+TRUSTED_RELEASES = tuple(types.MappingProxyType(dict(r)) for r in TRUSTED_RELEASES)
+
+
+class ReleaseMembershipError(ValueError):
+    """通常入口の門で拒否した (所属不明・不一致・control などを名乗る表・差し替え値)"""
+
+
+def _reject_dup_keys(pairs):
+    d = {}
+    for k, v in pairs:
+        if k in d:
+            raise ReleaseMembershipError("JSON の鍵 %r が重複している" % (k,))
+        d[k] = v
+    return d
+
+
+def _reject_constant(name):
+    raise ReleaseMembershipError("JSON に %s がある (規格外)" % name)
+
+
+def _strict_json(raw, what):
+    """重複キー・NaN / Infinity・末尾のゴミ・カンマの欠けを拒否して読む"""
+    try:
+        return json.loads(raw.decode("utf-8"), object_pairs_hook=_reject_dup_keys,
+                          parse_constant=_reject_constant)
+    except ReleaseMembershipError:
+        raise
+    except (UnicodeDecodeError, ValueError) as e:
+        raise ReleaseMembershipError("%s を JSON として読めない: %s" % (what, e))
+
+
+_RELEASE_TOKEN = object()   # 260914Cl (節目の検算 4): Element に release の方針を渡せるのは load_release の経路だけ
+
+
+class Release:
+    """通常入口で検証した 1 つの release。⚠ 表は**照合したバイトから**組む (照合の後にファイルを開き直さない)。
+
+    260914Cl (節目の検算、codex2 thread `01a09fca` の 4): ⚠ 判定に使う台帳の行と表のバイトは非公開に持ち、
+    公開の `release` は写しを返す (書き換えても判定は変わらない)。表は取り出すたびに sha256 を照合して読む。"""
+
+    def __init__(self, pdir, release, raws, shas, index, _token=None):
+        # 260914Cl (修正の確認、codex2 thread `01a09fca`): ⚠ 公開のコンストラクタで、照合していない方針やバイトから
+        #   release を作らせない (以前は Release(...) に certified の方針を渡すと is_certified() が真になった)
+        if _token is not _RELEASE_TOKEN:
+            raise ReleaseMembershipError("Release は load_release だけが作る (照合していない方針やバイトから作らない)")
+        self.pdir = pdir
+        self._release = release
+        self._raws = dict(raws)
+        self._shas = types.MappingProxyType(dict(shas))     # 照合の正本の sha (読み取り専用。バイトと一緒に差し替えさせない)
+        self._index = types.MappingProxyType(dict(index))
+
+    @property
+    def release(self):
+        return dict(self._release)
+
+    @property
+    def files(self):
+        return sorted(self._raws)
+
+    def keys(self):
+        """(Z, species_tag) の一覧。中性は species_tag = "" """
+        return sorted(self._index)
+
+    def element(self, z, species_tag=""):
+        # 260914Cl (節目の検算 5): ⚠ 型を厳密に見る (以前は int(z) で 8.9 → 8、True → 1 を返し、species_tag=False を中性と読んだ)
+        if isinstance(z, bool) or not isinstance(z, int):
+            raise ReleaseMembershipError("Z は整数 (bool 不可): %r" % (z,))
+        if not isinstance(species_tag, str):
+            raise ReleaseMembershipError("species_tag は文字列: %r" % (species_tag,))
+        k = (z, species_tag)
+        if k not in self._index:
+            raise ReleaseMembershipError("release %s %s に (Z=%d, species_tag=%r) の表が無い"
+                                         % (self._release["series"], self._release["dataset_version"], k[0], k[1]))
+        fname = self._index[k]
+        raw = self._raws[fname]
+        if hashlib.sha256(raw).hexdigest() != self._shas[fname]:
+            raise ReleaseMembershipError("%s の保持したバイトが照合した sha256 と違う" % fname)
+        doc = _strict_json(raw, fname)
+        if doc.get("species_tag", "") != species_tag:
+            raise ReleaseMembershipError("%s の species_tag が求めた種 (%r) と違う" % (fname, species_tag))
+        return Element(doc, check=True, expect_z=z, _release=self._release, _token=_RELEASE_TOKEN)
+
+
+def load_release(pdir):
+    """⭐⭐ **通常入口** (作者決定 I43、2026-09-13): 信頼する release 台帳 (TRUSTED_RELEASES) に載った公開物の dir だけを読む。
+
+    確かめること (1 つでも外れたら ReleaseMembershipError):
+      1. manifest.json の生バイトの sha256 が台帳に載り、状態が released
+      2. manifest を厳密な JSON として読め、digest_rule・版・schema が台帳と一致
+      3. entries (形・件数・名前の重複なし) から overall_digest を作り直すと manifest と台帳に一致
+      4. dir の SF の表の集合 = entries の集合 (余分も欠けも拒否。SF 以外のファイルは許す)
+      5. 各表は**読んだバイト**の sha256 が manifest と一致し、そのバイトを厳密に読む (開き直さない)
+      6. 表の中の z・版・schema が名前と台帳に一致。schema v2 は species_tag と、artifact_role が台帳の方針 (computed) と一致
+      7. 同じ (Z, species_tag) の表が 2 つ無い
+    ⚠ 研究入口 (所属を確かめない) は Element(doc) と load_element(..., research=True)。自動では切り替えない。"""
+    return _load_release_with_registry(pdir, TRUSTED_RELEASES)
+
+
+def _load_release_with_registry(pdir, registry):
+    """⚠ 試験専用 — 台帳を差し替えて奥の門まで届かせるため。利用者は load_release を使うこと"""
+    mpath = os.path.join(pdir, "manifest.json")
+    try:
+        with open(mpath, "rb") as f:
+            mraw = f.read()
+    except OSError as e:
+        raise ReleaseMembershipError("所属を確かめられない: manifest.json が読めない (%s): %s" % (mpath, e))
+    msha = hashlib.sha256(mraw).hexdigest()
+    rel = next((r for r in registry if r["manifest_sha256"] == msha), None)
+    if rel is None:
+        raise ReleaseMembershipError("manifest.json (sha256 %s…) は信頼する release 台帳に無い — 公開物への所属を"
+                                     "確かめられないので読まない (研究入口は Element / load_element(..., research=True))"
+                                     % msha[:16])
+    if rel["status"] != "released":
+        raise ReleaseMembershipError("この release (%s %s) の状態は %s — 通常入口は released だけを読む"
+                                     % (rel["series"], rel["dataset_version"], rel["status"]))
+    m = _strict_json(mraw, "manifest.json")
+    if not isinstance(m, dict):
+        raise ReleaseMembershipError("manifest.json がオブジェクトでない")
+    if m.get("digest_rule") != DIGEST_RULE:
+        raise ReleaseMembershipError("digest_rule が既知の規則と違う: %r" % (m.get("digest_rule"),))
+    for k in ("dataset_version", "schema_version"):
+        if isinstance(m.get(k), bool) or m.get(k) != rel[k]:
+            raise ReleaseMembershipError("manifest の %s=%r が台帳 (%r) と違う" % (k, m.get(k), rel[k]))
+    ents = m.get("entries")
+    if not isinstance(ents, list) or len(ents) != rel["n_files"]:
+        raise ReleaseMembershipError("manifest の entries が台帳の件数 %d と違う" % rel["n_files"])
+    names = []
+    for e in ents:
+        if not (isinstance(e, dict) and isinstance(e.get("file"), str) and SF_NAME_RE.match(e["file"])
+                and isinstance(e.get("sha256"), str) and re.fullmatch(r"[0-9a-f]{64}", e["sha256"])):
+            raise ReleaseMembershipError("manifest の entries の形が違う: %r" % (e,))
+        names.append(e["file"])
+    if len(set(names)) != len(names) or len({n.lower() for n in names}) != len(names):
+        raise ReleaseMembershipError("manifest の entries にファイル名の重複 (大文字小文字の違いを含む) がある")
+    cat = "".join("%s:%s\n" % (e["file"], e["sha256"]) for e in sorted(ents, key=lambda x: x["file"]))
+    od = hashlib.sha256(cat.encode("utf-8")).hexdigest()
+    if not (od == m.get("overall_digest") == rel["overall_digest"]):
+        raise ReleaseMembershipError("overall_digest が合わない (作り直し %s… / manifest %s… / 台帳 %s…)"
+                                     % (od[:16], str(m.get("overall_digest"))[:16], rel["overall_digest"][:16]))
+    try:
+        listing = os.listdir(pdir)
+    except OSError as e:
+        raise ReleaseMembershipError("dir を読めない: %s" % e)
+    present = sorted(n for n in listing if n.lower().startswith("sf_z") and n.lower().endswith(".json"))
+    if present != sorted(names):
+        raise ReleaseMembershipError("dir の SF の表が manifest と違う (余分 %s / 欠け %s)"
+                                     % (sorted(set(present) - set(names))[:5], sorted(set(names) - set(present))[:5]))
+    # 260914Cl (節目の検算、codex2 thread `01a09fca` の 6): manifest の species (schema v2) / entries の z・symbol (schema v1) と
+    #   表の本体を照合する (設計 §4.2 の 6。以前は実装から落ちていた)
+    # 260917Cl (公開の段取りの段 10 で露見): species の照合は「schema v2 なら」ではなく「**manifest に species があれば**」。
+    #   中性の schema v2 の manifest (v2.0.0) は species を持たず、entries の z・symbol で結ぶ (schema v1 と同じ形)。以前は schema v2 の
+    #   release に必ず species を要求したので、台帳に載せた中性 v2.0.0 を通常入口が「species が entries と同じ件数の配列でない」で拒んだ
+    #   (検収は中性の schema v2 の一式を通常入口で読む経路を踏んでいなかった)。⚠ manifest の生バイトは台帳の sha256 で固定してあるので、
+    #   species を消した manifest は「台帳に無い」で先に落ちる。species の鍵があるのに配列でない・件数が違うものは従来どおり拒む
+    species_by_file = {}
+    has_species = "species" in m
+    if has_species:
+        sp_list = m.get("species")
+        if not isinstance(sp_list, list) or len(sp_list) != len(ents):
+            raise ReleaseMembershipError("manifest の species が entries と同じ件数の配列でない")
+        for s in sp_list:
+            if not (isinstance(s, dict) and isinstance(s.get("file"), str)) or s["file"] in species_by_file:
+                raise ReleaseMembershipError("manifest の species の形が違う (file の欠け・重複): %r" % (s,))
+            species_by_file[s["file"]] = s
+        if sorted(species_by_file) != sorted(names):
+            raise ReleaseMembershipError("manifest の species と entries のファイルの集合が違う")
+    raws, shas, index = {}, {}, {}
+    for e in ents:
+        p = os.path.join(pdir, e["file"])
+        if os.path.islink(p) or not os.path.isfile(p):
+            raise ReleaseMembershipError("%s が通常のファイルでない" % e["file"])
+        try:
+            with open(p, "rb") as f:
+                raw = f.read()
+        except OSError as ex:                         # 260914Cl (節目の検算 5): 表の読み取りの失敗も門の拒否として返す
+            raise ReleaseMembershipError("%s を読めない: %s" % (e["file"], ex))
+        if hashlib.sha256(raw).hexdigest() != e["sha256"]:
+            raise ReleaseMembershipError("%s の sha256 が manifest と違う (改竄または破損)" % e["file"])
+        doc = _strict_json(raw, e["file"])
+        mt = SF_NAME_RE.match(e["file"])
+        z, tag = int(mt.group(1)), (mt.group(2) or "")
+        if not isinstance(doc, dict) or isinstance(doc.get("z"), bool) or doc.get("z") != z:
+            raise ReleaseMembershipError("%s の中の z が名前 (Z=%d) と違う" % (e["file"], z))
+        for k in ("dataset_version", "schema_version"):
+            if isinstance(doc.get(k), bool) or doc.get(k) != rel[k]:
+                raise ReleaseMembershipError("%s の %s=%r が台帳 (%r) と違う" % (e["file"], k, doc.get(k), rel[k]))
+        if rel["schema_version"] >= 2:
+            if doc.get("species_tag", "") != tag:
+                raise ReleaseMembershipError("%s の species_tag %r が名前 (%r) と違う" % (e["file"], doc.get("species_tag"), tag))
+            if doc.get("artifact_role") != rel["role_policy"]:
+                raise ReleaseMembershipError("%s の artifact_role=%r が release の方針 (%s) と違う — control・unknown・"
+                                             "certified を名乗る表は通常入口で読まない"
+                                             % (e["file"], doc.get("artifact_role"), rel["role_policy"]))
+        if has_species:
+            s = species_by_file[e["file"]]
+            for k in ("z", "configuration_sha256", "external_field"):
+                if isinstance(s.get(k), bool) or s.get(k) != doc.get(k):
+                    raise ReleaseMembershipError("%s の %s が manifest の species と違う" % (e["file"], k))
+        elif e.get("z") != z or e.get("symbol") != doc.get("symbol"):
+            raise ReleaseMembershipError("%s の z / symbol が manifest の entries と違う" % e["file"])
+        if (z, tag) in index:
+            raise ReleaseMembershipError("同じ鍵 (Z=%d, species_tag=%r) の表が 2 つある" % (z, tag))
+        index[(z, tag)] = e["file"]
+        raws[e["file"]] = raw
+        shas[e["file"]] = e["sha256"]
+    return Release(pdir, rel, raws, shas, index, _token=_RELEASE_TOKEN)
+
+
+def load_element(pdir, z, check=True, values_from=None, species_tag="", research=False):
+    """⭐ 260914Cl (作者決定 I43、I38 の手順 4b-4): **既定は通常入口** — load_release(pdir) を通し、
+    信頼する release に所属する表だけを返す。⚠ 通常入口は values_from (差し替え値) と check=False を受けない
+    (差し替えた物に所属を引き継がせない / 所属の照合と役割の判定は省けない)。
+
+    研究入口 (research=True) は以前の読み方 (名前でファイルを開き、所属を確かめない)。
+    返す Element の役割は、v1 と certified を名乗る v2 では unknown になる。"""
+    if isinstance(z, bool) or not isinstance(z, int):           # 260914Cl (節目の検算 5): 型を厳密に見る
+        raise ReleaseMembershipError("Z は整数 (bool 不可): %r" % (z,))
+    if not isinstance(species_tag, str):
+        raise ReleaseMembershipError("species_tag は文字列: %r" % (species_tag,))
+    if not research:
+        if values_from is not None:
+            raise ReleaseMembershipError("通常入口は values_from (差し替え値) を受けない — 差し替えは research=True で"
+                                         " (所属は引き継がない)")
+        if not check:
+            raise ReleaseMembershipError("通常入口は check=False を受けない (所属の照合と役割の判定は省けない)")
+        return load_release(pdir).element(z, species_tag)
+    name = "SF_Z%03d.json" % z if not species_tag else "SF_Z%03d_%s.json" % (z, species_tag)
+    with open(os.path.join(pdir, name), encoding="utf-8") as f:
         doc = json.load(f)
     if values_from is not None:                      # 主張 A のモード。値だけ差し替える
-        with open(os.path.join(values_from, "SF_Z%03d.json" % z), encoding="utf-8") as f:
+        with open(os.path.join(values_from, name), encoding="utf-8") as f:
             doc = overlay_values(doc, json.load(f), z)[0]
     return Element(doc, check=check, expect_z=z)
 
@@ -451,10 +840,18 @@ def contract(pdir, allow_dev=False, verbose=True, values_from=None):
         z = int(d["z"])
         tag = "Z=%d" % z
         # ---- C2: 固定フィールド ------------------------------------------------
-        if d.get("schema_version") != 1 or d.get("dataset") != "temari-factors":
+        # 260912Cl (I12 / I31): ⚠ **1 だけの固定をやめた** — 中性の出し直し (v1.1.0) は schema v2 で出る。
+        #   ⚠ これは**一式の検査**であって、v1 のファイルを読む経路 (Element) は 1 文字も変えていない
+        #   (`tools/contract_v1_unchanged_test.py` が 86 ファイル 1978 値で実演する)。
+        if d.get("schema_version") not in (1, 2) or d.get("dataset") != "temari-factors":
             ng += _fail("C2 %s: schema_version/dataset" % tag)
-        if not allow_dev and not SHIP_VERSION_RE.match(str(d.get("dataset_version"))):
-            ng += _fail("C2 %s: dataset_version %r (出荷は 1.x.y)" % (tag, d.get("dataset_version")))
+        # 260917Cl (公開の段取りの試走で露見): 出荷版の正規形は **schema で決める** — schema v1 = 1.x.y (公開済み v1.0.0)、
+        #   schema v2 = 2.x.y (作者決定 I40: 保証の名乗りと読み込みの規約が変わったので major)。QC (`tools/check_factor_tables.jl`) は
+        #   4c の C9 で同じ形に直してあったが、こちらは 1.x.y の決め打ちのままで、v2.0.0 の 86 表を全部 C2 で落としていた
+        #   (検収は中性 v2.0.0 をこの契約テストの本体に通していなかった)。⚠ 組み上がった v1.1.0 (schema v2) は出さない書庫なので落ちてよい
+        ship_re = SHIP_VERSION_RE_BY_SCHEMA.get(d.get("schema_version"))
+        if not allow_dev and (ship_re is None or not ship_re.match(str(d.get("dataset_version")))):
+            ng += _fail("C2 %s: dataset_version %r (出荷は schema v1 なら 1.x.y、schema v2 なら 2.x.y)" % (tag, d.get("dataset_version")))
         if d.get("charge") != 0 or float(d.get("n_electrons")) != float(z):
             ng += _fail("C2 %s: 中性でない" % tag)
         if int(re.search(r"SF_Z(\d{3})\.json$", f).group(1)) != z:
@@ -664,7 +1061,7 @@ def make_golden(pdir, values_from=None):
                       for f in glob.glob(os.path.join(values_from or pdir, "SF_Z???.json")))
         print("⚠ golden 元素 %s が無いので手元の %s で代用 (出荷 golden ではない)" % (list(GOLDEN_Z), have))
     for z in have:
-        el = load_element(pdir, z, values_from=values_from)
+        el = load_element(pdir, z, values_from=values_from, research=True)   # 260914Cl (I43): 内部の検査は研究入口
         out["elements"][str(z)] = {
             "model_id": el.doc["model_id"], "dataset_version": el.doc["dataset_version"],
             "generator_source_sha256": el.doc["generator_source_sha256"],
@@ -688,7 +1085,7 @@ def check_golden(pdir, golden, verbose=True, strict=True):
         if golden.get("s_grid_sha256") != S_GRID_SHA256 or golden.get("digits") != DIGITS:
             ng += _fail("X13: golden の格子 SHA / 桁数が契約と違う")
     for zs, g in golden["elements"].items():
-        el = load_element(pdir, int(zs))
+        el = load_element(pdir, int(zs), research=True)   # 260914Cl (I43): 内部の検査は研究入口
         if strict:
             if [p["s"] for p in g["points"]] != list(GOLDEN_S):
                 ng += _fail("X13 Z=%s: golden の s 点列が規定と違う" % zs)
@@ -733,7 +1130,7 @@ def scipy_crosscheck(pdir, verbose=True, values_from=None):
     if not zs:                                       # 空集合の突き合わせが「通った」ことになる事故を防ぐ
         return _fail("scipy: 突き合わせる元素が 1 つも無い")
     for z in zs:
-        el = load_element(pdir, z, values_from=values_from)
+        el = load_element(pdir, z, values_from=values_from, research=True)   # 260914Cl (I43): 内部の検査は研究入口
         sx = SciCS(np.array(el.s), np.array(el.fx_nodes), bc_type=((1, 0.0), "not-a-knot"))
         se = SciCS(np.array(el._t), np.array(el.fe_nodes), bc_type="not-a-knot")
         for p in GOLDEN_S:
@@ -792,7 +1189,7 @@ def negative_tests(pdir, verbose=True, values_from=None):
         if not cands:
             return _fail("負のミュータント: 実演に使える元素が 1 つも無い")
         z = max(cands)
-    el = load_element(pdir, z, values_from=values_from)
+    el = load_element(pdir, z, values_from=values_from, research=True)   # 260914Cl (I43): 内部の検査は研究入口
     s = el.s; t = el._t; fx = el.fx_nodes; fe = el.fe_nodes
     probes = [p for p in GOLDEN_S if 0.0 < p < S_MAX]
     thr = 10.0 * GOLDEN_TOL_REL
@@ -1002,6 +1399,8 @@ def main(argv):
               % ("ALL PASS" if ng == 0 else "FAILED", ng,
                  "" if "--negative" in argv else "、ミュータント未実施"))
     else:
+        # 260914Cl (I43): ⚠ 契約テストが示すのは表の構造と補間の規約への適合であって、release への所属ではない
+        print("⚠ この契約テストは release への所属 (通常入口の門) を検査していない — 所属は load_release(DIR) で確かめる")
         print("契約テスト %s (%d 件 NG)" % ("ALL PASS" if ng == 0 else "FAILED", ng))
     return 0 if ng == 0 else 1
 

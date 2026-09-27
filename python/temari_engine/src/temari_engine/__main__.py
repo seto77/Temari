@@ -1,5 +1,6 @@
 """python -m temari_engine verify <path> [--research]
 python -m temari_engine golden <golden_dir> [--julia CMD] [--threads N] [--save-dir DIR]
+python -m temari_engine data {info,fetch,verify,value} ...   (公開した 3 系列。`python -m temari_engine data` で使い方)
 
 verify : 一式 (dir か manifest.json) か 1 本のファイルの所属と役割を確かめて印字する。
          EXIT 0 = 通常入口で読める / 1 = 所属・役割・envelope の検査で拒否 / 2 = 使い方・読めない / 3 = 道具の欠陥
@@ -80,6 +81,9 @@ def main(argv):
         return _verify(argv[1:])
     if len(argv) >= 2 and argv[0] == "golden":
         return _golden(argv[1:])
+    if len(argv) >= 1 and argv[0] == "data":   # 260927Cl: 公開した 3 系列の取得・検証・値 (temari_engine.data、I93)
+        from . import data
+        return data.main(argv[1:])
     print(__doc__)
     return 2
 

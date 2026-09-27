@@ -33,3 +33,23 @@ class EngineRunError(TemariEngineError):
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
+
+
+class FetchError(TemariEngineError):
+    """公開物を取得できない (どの写しからも取れない・大きさや sha256 が台帳と合わない・HTTPS でない URL など)。`temari_engine.data`"""
+
+
+class OfflineError(TemariEngineError):
+    """offline の指定 (引数 `offline=True` か環境変数 `TEMARI_OFFLINE=1`) で、要る公開物が cache に無い。`temari_engine.data`"""
+
+
+class ArchiveError(TemariEngineError):
+    """書庫を安全に展開できない (危ない要素・想定外の形・展開の失敗)。`temari_engine.data`"""
+
+
+class SpeciesLookupError(TemariEngineError):
+    """元素と電荷などから表の種を 1 つに決められない (候補が無い・2 つ以上ある)。`candidates` に候補の一覧を持つ"""
+
+    def __init__(self, message, candidates=()):
+        super().__init__(message)
+        self.candidates = tuple(candidates)

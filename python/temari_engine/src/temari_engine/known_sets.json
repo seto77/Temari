@@ -1,6 +1,6 @@
 {
   "known_sets_version": 1,
-  "note": "Compatibility table (L-C E1-3, author decision I65 / N4-(i)). The published v7.0.0 archive cannot carry artifact_role, so its two manifests are bound here by digest. factors releases delegate to the loader shipped inside each archive; its sha256 is pinned here.",
+  "note": "Compatibility table (L-C E1-3, author decision I65 / N4-(i)). The published v7.0.0 archive cannot carry artifact_role, so its two manifests are bound here by digest. factors releases delegate to the loader shipped inside each archive; its sha256 is pinned here. releases (260927Cl, author decision I93): what temari_engine.data may fetch; the archive and each manifest are trusted only through the sha256 pinned here, never through a mirror.",
   "f_dataset": [
     {
       "dataset": "temari-dataset",
@@ -43,6 +43,92 @@
       "manifest_sha256": "461b747eec30a502ebef78178d6ba0081249b75bed6f8818865fe57d036e5ef2",
       "loader_path": "tools/temari_factors_contract.py",
       "loader_sha256": "cc72d3a7a6cf9afa586921cb9645869bf3b1e474306adf8a9f85087566fd1267"
+    }
+  ],
+  "releases": [
+    {
+      "series": "F",
+      "title": "dataset F (inner-shell ionization form factors F(s, E0))",
+      "version": "7.0.0",
+      "doi": "10.5281/zenodo.22643468",
+      "concept_doi": "10.5281/zenodo.21872049",
+      "license": "CC-BY-4.0",
+      "archive": {
+        "name": "temari-dataset-v7.0.0.tar.gz",
+        "bytes": 96474535,
+        "sha256": "1e80b1d13e014c95a28c7f3487f2e45c430a8563f42093971892affa599f96b8",
+        "top_dir": "temari-dataset-v7.0.0",
+        "urls": [
+          "https://github.com/seto77/Temari/releases/download/dataset-v7.0.0/temari-dataset-v7.0.0.tar.gz",
+          "https://zenodo.org/api/records/22643468/files/temari-dataset-v7.0.0.tar.gz/content"
+        ]
+      },
+      "sets": [
+        {
+          "set": "release",
+          "artifact_role": "computed",
+          "manifest_path": "manifest.json",
+          "manifest_sha256": "003874179bc05194a549499596b024b6d71b9835cc3a873472076189de6e25cc"
+        },
+        {
+          "set": "control_point_nucleus",
+          "artifact_role": "control",
+          "manifest_path": "control_point_nucleus/manifest.json",
+          "manifest_sha256": "f416da59555c0aa2881802a8d73b4a92c292fca4fe634da1a69bd3396a34dd6e"
+        }
+      ]
+    },
+    {
+      "series": "factors",
+      "title": "dataset-factors (f_x and f_e for 86 neutral atoms)",
+      "version": "2.0.0",
+      "doi": "10.5281/zenodo.22820415",
+      "concept_doi": "10.5281/zenodo.22644247",
+      "license": "CC-BY-4.0",
+      "archive": {
+        "name": "temari-factors-v2.0.0.tar.gz",
+        "bytes": 12440852,
+        "sha256": "0f6f71821a37ccb8846636f2c8ffeff8854294e73f8006b274edc6c4bb38d70a",
+        "top_dir": "temari-factors-v2.0.0",
+        "urls": [
+          "https://github.com/seto77/Temari/releases/download/dataset-factors-v2.0.0/temari-factors-v2.0.0.tar.gz",
+          "https://zenodo.org/api/records/22820415/files/temari-factors-v2.0.0.tar.gz/content"
+        ]
+      },
+      "sets": [
+        {
+          "set": "release",
+          "artifact_role": "computed",
+          "manifest_path": "manifest.json",
+          "manifest_sha256": "d43230df627065fd5bcc872c4f19926d0a92caa4a147edbd9179ecda9ca68c5c"
+        }
+      ]
+    },
+    {
+      "series": "factors-ion",
+      "title": "dataset-factors-ion (f_x and f_e for ions)",
+      "version": "1.0.0",
+      "doi": "10.5281/zenodo.22820492",
+      "concept_doi": "10.5281/zenodo.22820491",
+      "license": "CC-BY-4.0",
+      "archive": {
+        "name": "temari-factors-ion-v1.0.0.tar.gz",
+        "bytes": 3278513,
+        "sha256": "3e94c0a0318c683d66bed73087f51bb99feb00bf3aa41e167849a791d4142163",
+        "top_dir": "temari-factors-ion-v1.0.0",
+        "urls": [
+          "https://github.com/seto77/Temari/releases/download/dataset-factors-ion-v1.0.0/temari-factors-ion-v1.0.0.tar.gz",
+          "https://zenodo.org/api/records/22820492/files/temari-factors-ion-v1.0.0.tar.gz/content"
+        ]
+      },
+      "sets": [
+        {
+          "set": "release",
+          "artifact_role": "computed",
+          "manifest_path": "manifest.json",
+          "manifest_sha256": "461b747eec30a502ebef78178d6ba0081249b75bed6f8818865fe57d036e5ef2"
+        }
+      ]
     }
   ]
 }

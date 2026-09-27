@@ -11,19 +11,20 @@
 """
 from ._strictjson import StrictJSONError, load_strict, loads_strict
 from .envelope import Output, read_output, validate_envelope
-from .errors import (EngineRunError, EnvelopeError, LineResponseError, MembershipError, RoleError, TemariEngineError,
-                     XraylibError)
+from .errors import (ArchiveError, EngineRunError, EnvelopeError, FetchError, LineResponseError, MembershipError,
+                     OfflineError, RoleError, SpeciesLookupError, TemariEngineError, XraylibError)
 from .run import RunResult, default_repo, run
 from .sets import (ArtifactSet, Member, files_digest, known_sets, load, load_f_channel, load_factors_release, load_set,
                    manifest_digest, media_types_digest, verify_f_release)
 
-__version__ = "0.3.0"   # 0.3.0 (2026-09-25、作者決定 I83・I84): 線ごとの X 線の応答 xray_lines (xraylib は任意の依存)。
+__version__ = "0.4.0"   # 0.4.0 (2026-09-27、作者決定 I93): 公開した 3 系列の取得・検証・読み込み・補間 temari_engine.data。
+#   0.3.0 (2026-09-25、作者決定 I83・I84): 線ごとの X 線の応答 xray_lines (xraylib は任意の依存)。
 #   0.2.0 (2026-09-23、作者決定 I75): temari.artifact_set v2 を読む。
 #   同日 I76 で v2 の digest に media_type を足した (0.2.0 は未公開なので版は据え置き)
 
 __all__ = [
     "ArtifactSet", "EngineRunError", "EnvelopeError", "LineResponseError", "Member", "MembershipError", "Output", "RoleError",
-    "RunResult", "XraylibError",
+    "RunResult", "XraylibError", "ArchiveError", "FetchError", "OfflineError", "SpeciesLookupError",
     "StrictJSONError", "TemariEngineError", "default_repo", "files_digest", "known_sets", "load", "load_f_channel",
     "load_factors_release", "load_set", "load_strict", "loads_strict", "manifest_digest", "media_types_digest", "read_output",
     "run",

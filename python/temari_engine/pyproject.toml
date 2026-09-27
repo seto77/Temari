@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "temari-engine"
-version = "0.3.0"
+version = "0.4.0"
 description = "Run the Temari engine from Python, read its outputs and published sets with membership and artifact_role checks, and turn dataset F into per-line X-ray responses"
 requires-python = ">=3.10"
 license = {text = "MIT"}
