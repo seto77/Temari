@@ -622,6 +622,24 @@ class LocksAndRaces(Base):
 # ---- A: tar の規則 ------------------------------------------------------------------------------------------------
 
 LONG = "d" * 250
+
+
+def _negsize_expected():
+    """負の大きさ (pax) の要素を 1 つ持つ書庫を、走っている tarfile がどう読むかを測って、予定の規則を返す (260927Cl)。
+    古い tarfile (手元の CPython 3.10.9・3.12.7) は負の大きさのまま要素を渡す ⇒ bad_size。新しい tarfile (公開側の CI の 3.12.14、3.14.5) は
+    見出しを自分で捨てる ⇒ 要素が無く empty_archive。読めない例外を投げる版なら unreadable。どれでも書庫は拒まれる"""
+    blob = make_tar([(TOP + "/neg", "negsize")])
+    try:
+        with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as t:
+            ms = list(t)
+    except tarfile.TarError:
+        return "unreadable"
+    if any(m.size < 0 for m in ms):
+        return "bad_size"
+    return "empty_archive" if not ms else "unexpected"
+
+
+NEGSIZE_EXPECTED = _negsize_expected()
 RULE_CASES = (
     # (rule, 何の場合か, 要素, 上書き)
     ("too_many_members", "3 要素に上限 2", [(TOP, "dir"), (TOP + "/a", "file"), (TOP + "/b", "file")], {"max_members": 2}),
@@ -681,14 +699,27 @@ class TarRules(unittest.TestCase):
     def test_A1_each_rule_names_itself(self):
         for rule, what, entries, over in RULE_CASES:
             with self.subTest(rule=rule, case=what):
+                # 260927Cl: 負の大きさの書庫は、走っている tarfile の版で予定が変わる (NEGSIZE_EXPECTED の注)
+                want = NEGSIZE_EXPECTED if rule == "bad_size" else rule
                 with self.assertRaises(ArchiveError) as cm:
                     self.check(entries, **over)
                 e = cm.exception
-                self.assertEqual(e.rule, rule)
-                self.assertIn("[rule=%s]" % rule, str(e))
+                self.assertEqual(e.rule, want)
+                self.assertIn("[rule=%s]" % want, str(e))
                 self.assertEqual(str(e).count("[rule="), 1)
                 if rule == "not_regular":
                     self.assertIn(what.split(" (")[0], str(e))    # どの型かを名指す
+
+    def test_A5_bad_size_rule_without_tarfile(self):
+        # 260927Cl: bad_size の規則そのものを、tarfile の解析を通さずに試す (新しい tarfile は負の大きさの要素を渡さないので、書庫を通すと
+        #   この規則に届かない。古い tarfile では届く)。check_members は要素を順に読むだけなので、TarInfo の list を渡せる
+        ti = tarfile.TarInfo(TOP + "/neg")
+        ti.size = -5
+        with self.assertRaises(ArchiveError) as cm:
+            _archive.check_members([ti], TOP, self.tmp, 1 << 30, 1000)
+        self.assertEqual(cm.exception.rule, "bad_size")
+        self.assertIn("[rule=bad_size]", str(cm.exception))
+        self.assertEqual(str(cm.exception).count("[rule="), 1)
 
     def test_A2_every_declared_rule_has_a_case(self):
         self.assertEqual({c[0] for c in RULE_CASES}, set(_archive.MEMBER_RULES))
