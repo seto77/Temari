@@ -1,0 +1,157 @@
+# Install the built wheel in a fresh Ubuntu 24.04 container that has no Temari
+# checkout and no Julia.  This is intentionally manual because it downloads
+# and fully verifies the three published data archives (about 112 MB compressed).
+name: temari_engine Linux install acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: temari-engine-linux-install-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-wheel:
+    name: build the distributable wheel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and seal the wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/install-inputs"
+          mkdir -p "$stage"
+          python -m pip wheel --disable-pip-version-check --no-deps \
+            --wheel-dir "$stage" ./python/temari_engine
+          cp tools/temari_engine_install_acceptance.py "$stage/"
+          cd "$stage"
+          mapfile -t wheels < <(find . -maxdepth 1 -type f -name '*.whl' -print)
+          test "${#wheels[@]}" -eq 1
+          sha256sum "${wheels[0]}" > wheel.sha256
+          cat wheel.sha256
+
+      - name: Pass only the wheel and acceptance script to the clean runner
+        uses: actions/upload-artifact@v4
+        with:
+          name: temari-engine-install-inputs
+          path: ${{ runner.temp }}/install-inputs/
+          if-no-files-found: error
+          retention-days: 7
+
+  linux-install:
+    name: install and read all published data in clean Ubuntu 24.04
+    needs: build-wheel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      # Deliberately no checkout in this job.  Its only project inputs are the
+      # wheel and the acceptance script transferred from build-wheel.
+      - uses: actions/download-artifact@v4
+        with:
+          name: temari-engine-install-inputs
+          path: ${{ runner.temp }}/install-inputs
+
+      - name: Start a Julia-free Ubuntu 24.04 container
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e "$GITHUB_WORKSPACE/.git"
+          results="$RUNNER_TEMP/install-results"
+          mkdir -p "$results"
+          cp "$RUNNER_TEMP/install-inputs/wheel.sha256" "$results/"
+          setup() {
+            docker run --detach --name temari-install-acceptance \
+              --volume "$RUNNER_TEMP:/runner" \
+              ubuntu:24.04 sleep infinity
+            docker exec temari-install-acceptance bash -euxo pipefail -c '
+              apt-get update
+              apt-get install --yes --no-install-recommends ca-certificates python3 python3-venv
+              test ! -e /workspace
+              ! command -v julia
+              {
+                cat /etc/os-release
+                python3 --version
+                echo "julia=absent"
+              } > /runner/install-results/environment.txt
+              cd /runner/install-inputs
+              sha256sum --check wheel.sha256
+              mapfile -t wheels < <(find . -maxdepth 1 -type f -name "*.whl" -print)
+              test "${#wheels[@]}" -eq 1
+              python3 -m venv /runner/acceptance-venv
+              py=/runner/acceptance-venv/bin/python
+              "$py" -m pip install --disable-pip-version-check --no-cache-dir \
+                "${wheels[0]}" "xraylib==4.3.0"
+              "$py" --version >> /runner/install-results/environment.txt
+              "$py" -m pip freeze > /runner/install-results/pip-freeze.txt
+            '
+          }
+          set +e
+          setup 2>&1 | tee "$results/setup.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          exit "$status"
+
+      - name: Fetch, verify and read the three published series
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker exec temari-install-acceptance bash -euo pipefail -c '
+            mkdir -p /runner/temari-cache /runner/install-run
+            cd /runner/install-run
+            env -u PYTHONPATH -u TEMARI_OFFLINE \
+              TEMARI_CACHE_DIR=/runner/temari-cache \
+              /runner/acceptance-venv/bin/python -I -W error \
+                /runner/install-inputs/temari_engine_install_acceptance.py \
+                --forbid-path /workspace \
+                --output /runner/install-results/online.json \
+              2>&1 | tee /runner/install-results/online.log
+          '
+
+      - name: Read the cache in a separate process with network disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker network disconnect bridge temari-install-acceptance
+          test "$(docker inspect --format '{{json .NetworkSettings.Networks}}' temari-install-acceptance)" = '{}'
+          docker exec temari-install-acceptance bash -euo pipefail -c '
+            test "$(wc -l < /proc/net/route)" -eq 1
+            cp /proc/net/route /runner/install-results/offline-network-routes.txt
+            cd /runner/install-run
+            env -u PYTHONPATH \
+              TEMARI_CACHE_DIR=/runner/temari-cache TEMARI_OFFLINE=1 \
+              HTTP_PROXY=http://localhost:9 HTTPS_PROXY=http://localhost:9 \
+              ALL_PROXY=http://localhost:9 NO_PROXY= \
+              http_proxy=http://localhost:9 https_proxy=http://localhost:9 \
+              all_proxy=http://localhost:9 no_proxy= \
+              /runner/acceptance-venv/bin/python -I -W error \
+                /runner/install-inputs/temari_engine_install_acceptance.py \
+                --forbid-path /workspace \
+                --expect-offline \
+                --compare-with /runner/install-results/online.json \
+                --output /runner/install-results/offline.json \
+              2>&1 | tee /runner/install-results/offline.log
+          '
+
+      - name: Keep the acceptance record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: temari-engine-linux-install-results
+          path: ${{ runner.temp }}/install-results/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Remove the acceptance container
+        if: always()
+        shell: bash
+        run: docker rm --force temari-install-acceptance 2>/dev/null || true
