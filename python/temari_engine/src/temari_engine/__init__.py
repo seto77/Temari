@@ -7,7 +7,7 @@
 - `xray_lines.line_response(z, e0_keV, dataset_dir)` : dataset F v7.0.0 の殻ごとの σ と F(s) に xraylib の空孔の連鎖・蛍光収率・
   放射遷移の割合を掛けた、線ごとの X 線の応答 (作者決定 I83。xraylib は実行時の任意の依存)
 
-依存は標準ライブラリだけ (xray_lines だけ任意で xraylib)。仕様 = Temari の `docs/notes/envelope_spec_v1_2026-09-22.md`。
+依存は NumPy (xray_lines の実行時だけ任意で xraylib)。仕様 = Temari の `docs/notes/envelope_spec_v1_2026-09-22.md`。
 """
 from ._strictjson import StrictJSONError, load_strict, loads_strict
 from .envelope import Output, read_output, validate_envelope
@@ -17,7 +17,10 @@ from .run import RunResult, default_repo, run
 from .sets import (ArtifactSet, Member, files_digest, known_sets, load, load_f_channel, load_factors_release, load_set,
                    manifest_digest, media_types_digest, verify_f_release)
 
-__version__ = "0.4.0"   # 0.4.0 (2026-09-27、作者決定 I93): 公開した 3 系列の取得・検証・読み込み・補間 temari_engine.data。
+__version__ = "0.5.0"   # 0.5.0 (2026-09-29〜10-01、作者決定 I93・I96): NumPy の batch 評価 (FChannel.f_many・
+#   FactorsDataset.evaluate_many。NumPy 2.2.6 以上が必須の依存になった)、イオン種の列挙と配位数による明示的な選択、data の CLI の
+#   一覧と検分、SPDX のライセンスの metadata。
+#   0.4.0 (2026-09-27、作者決定 I93): 公開した 3 系列の取得・検証・読み込み・補間 temari_engine.data。
 #   0.3.0 (2026-09-25、作者決定 I83・I84): 線ごとの X 線の応答 xray_lines (xraylib は任意の依存)。
 #   0.2.0 (2026-09-23、作者決定 I75): temari.artifact_set v2 を読む。
 #   同日 I76 で v2 の digest に media_type を足した (0.2.0 は未公開なので版は据え置き)

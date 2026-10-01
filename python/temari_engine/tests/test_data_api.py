@@ -217,6 +217,27 @@ class RolesAndSpecies(Base):
         el = ion.element(8, tfr.TAG_O4)
         self.assertEqual(bits(el.fx(0.5)), bits(_factors_reader.Element.from_bytes(tfr.ANION_BYTES).fx(0.5)))
 
+    def test_API09b_species_by_coordination_number(self):
+        ion = self.open("factors-ion")
+        self.assertEqual([e.species_tag for e in ion.find(8, charge=-2, coordination_number=4)], [tfr.TAG_O4])
+        el = ion.find_one(8, charge=-2, coordination_number=4)
+        self.assertEqual((el.species_tag, bits(el.fx(0.5))),
+                         (tfr.TAG_O4, bits(_factors_reader.Element.from_bytes(tfr.ANION_BYTES).fx(0.5))))
+        with self.assertRaises(SpeciesLookupError) as cm:
+            ion.find_one(8, charge=-2, coordination_number=5)
+        self.assertEqual(cm.exception.candidates, ())
+        self.assertIn("CN=4", str(cm.exception))
+        for bad in (True, 4.0, "4"):
+            with self.assertRaises(TypeError):
+                ion.find(8, charge=-2, coordination_number=bad)
+        with self.assertRaises(ValueError):
+            ion.find(8, charge=-2, coordination_number=0)
+        duplicate = ion.find(8, charge=-2)[0]
+        with mock.patch.object(ion, "find", return_value=[duplicate, duplicate]):
+            with self.assertRaises(SpeciesLookupError) as cm2:
+                ion.find_one(8, charge=-2, coordination_number=2)
+        self.assertEqual(len(cm2.exception.candidates), 2)
+
     def test_API10_no_silent_type_coercion(self):
         fac = self.open("factors")
         for z in (26.9, True, "26"):
@@ -251,6 +272,126 @@ class CommandLine(Base):
         self.assertIn("OfflineError", err)
         rc, _, _ = self.run_cli(["nonsense"])
         self.assertEqual(rc, 2)
+
+    def test_API12_species_cli_and_value_by_coordination_number(self):
+        self.open("factors-ion")
+        common = ["--offline", "--cache-dir", self.cache]
+        rc, out, err = self.run_cli(["species", "factors-ion", "8", "--charge", "-2"] + common)
+        self.assertEqual((rc, err), (0, ""))
+        rows = json.loads(out)["species"]
+        self.assertEqual([(r["coordination_number"], r["species_tag"]) for r in rows],
+                         [(2, tfr.TAG_O2), (4, tfr.TAG_O4), (6, tfr.TAG_O6)])
+
+        rc, out, err = self.run_cli(["value", "factors-ion", "8", "fx", "0.5", "--charge", "-2",
+                                      "--coordination-number", "4"] + common)
+        self.assertEqual((rc, err), (0, ""))
+        got = json.loads(out)
+        self.assertEqual((got["species_tag"], got["charge"], got["coordination_number"], got["radius_A"],
+                          bits(got["value"])),
+                         (tfr.TAG_O4, -2.0, 4, 1.38,
+                          bits(_factors_reader.Element.from_bytes(tfr.ANION_BYTES).fx(0.5))))
+
+        rc, _, err = self.run_cli(["value", "factors-ion", "8", "fx", "0.5", "--charge", "-2"] + common)
+        self.assertEqual(rc, 2)
+        self.assertIn("SpeciesLookupError", err)
+        rc, _, err = self.run_cli(["value", "factors-ion", "8", "fx", "0.5", "--coordination-number", "4"] + common)
+        self.assertEqual(rc, 2)
+        self.assertIn("--charge", err)
+
+    def test_API13_selectors_are_rejected_where_they_are_not_applied(self):
+        cases = [
+            ["info", "--charge", "-2"],
+            ["fetch", "F", "--coordination-number", "4"],
+            ["channels", "F", "--charge", "-2"],
+            ["channel-info", "F", "26", "K", "--charge", "-2"],
+            ["species", "factors-ion", "8", "--species", tfr.TAG_O4],
+            ["value", "F", "26", "K", "40", "1.0", "--charge", "-2"],
+        ]
+        for argv in cases:
+            with self.subTest(argv=argv):
+                rc, out, err = self.run_cli(argv)
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn("使えない引数", err)
+
+    def test_API14_channels_cli_lists_and_filters_F_channels(self):
+        self.open("F")
+        common = ["--offline", "--cache-dir", self.cache]
+        rc, out, err = self.run_cli(["channels", "F"] + common)
+        self.assertEqual((rc, err), (0, ""))
+        got = json.loads(out)
+        self.assertEqual(got["channels"], [{"z": 26, "shell": "K"}])
+        self.assertEqual(got["source"]["doi"], "10.0000/synthetic.F")
+
+        rc, out, err = self.run_cli(["channels", "F", "27"] + common)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(json.loads(out)["channels"], [])
+
+    def test_API14b_channel_info_reports_per_row_coverage(self):
+        self.open("F")
+        common = ["--offline", "--cache-dir", self.cache]
+        rc, out, err = self.run_cli(["channel-info", "F", "26", "K"] + common)
+        self.assertEqual((rc, err), (0, ""))
+        got = json.loads(out)
+        self.assertEqual((got["series"], got["z"], got["shell"], got["e_th_keV"], got["model_id"]),
+                         ("F", 26, "K", tf.ETH, "synthetic-test"))
+        self.assertEqual(got["e0_range_keV"], [tf.ROWS[0][0], tf.ROWS[-1][0]])
+        self.assertEqual(got["rows"], [{"e0_keV": e0, "s_cert_A_inv": s_cert, "tail_bound": eps}
+                                        for e0, s_cert, eps in tf.ROWS])
+        self.assertEqual(got["s_grid_A_inv"], tf.S_GRID)
+        self.assertEqual(got["source"]["doi"], "10.0000/synthetic.F")
+
+        rc, _, err = self.run_cli(["channel-info", "F", "27", "K"] + common)
+        self.assertEqual(rc, 2)
+        self.assertIn("dataset F に無いチャネル", err)
+        rc, _, _ = self.run_cli(["channel-info", "F", "26", "K", "extra"] + common)
+        self.assertEqual(rc, 2)
+
+        with mock.patch.object(td, "open") as open_ds:
+            rc, out, err = self.run_cli(["channel-info", "F", "not-an-int", "K"] + common)
+            self.assertEqual((rc, out), (2, ""))
+            self.assertIn("ValueError", err)
+            self.assertNotIn("OfflineError", err)
+            open_ds.assert_not_called()
+
+            rc, out, err = self.run_cli(["channel-info", "F", "26", "bad-shell"] + common)
+            self.assertEqual((rc, out), (2, ""))
+            self.assertIn("shell は", err)
+            open_ds.assert_not_called()
+
+            rc, out, err = self.run_cli(["channel-info", "F", "26", "K", "--cache-dir", "--offline"])
+            self.assertEqual((rc, out), (2, ""))
+            self.assertIn("--cache-dir に値が要る", err)
+            open_ds.assert_not_called()
+
+    def test_API15_species_cli_catalogs_all_Z_without_reading_tables(self):
+        common = ["--offline", "--cache-dir", self.cache]
+        self.open("factors-ion")
+        self.open("factors")
+        with mock.patch.object(td._Store, "read", side_effect=AssertionError("catalog must not read table files")):
+            rc, out, err = self.run_cli(["species", "factors-ion"] + common)
+            self.assertEqual((rc, err), (0, ""))
+            got = json.loads(out)
+            rows = got["species"]
+            self.assertIsNone(got["z"])
+            self.assertEqual(got["source"]["doi"], "10.0000/synthetic.factors-ion")
+            self.assertEqual([r["species_tag"] for r in rows],
+                             [e[3] for e in sorted(tfr.ION_SPECIES, key=lambda e: (e[0], e[2], e[4] is None,
+                                                                                    e[4] or 0, e[3]))])
+            self.assertEqual({r["z"] for r in rows}, {e[0] for e in tfr.ION_SPECIES})
+
+            rc, out, err = self.run_cli(["species", "factors-ion", "--charge", "-2",
+                                          "--coordination-number", "4"] + common)
+            self.assertEqual((rc, err), (0, ""))
+            rows = json.loads(out)["species"]
+            self.assertEqual([(r["z"], r["charge"], r["coordination_number"], r["species_tag"]) for r in rows],
+                             [(8, -2.0, 4, tfr.TAG_O4)])
+
+            rc, out, err = self.run_cli(["species", "factors"] + common)
+            self.assertEqual((rc, err), (0, ""))
+            got = json.loads(out)
+            self.assertIsNone(got["z"])
+            self.assertEqual(len(got["species"]), len(tfr.neutral_manifest()["entries"]))
+            self.assertEqual({r["z"] for r in got["species"]}, {1, 8, 26})
 
 
 if __name__ == "__main__":

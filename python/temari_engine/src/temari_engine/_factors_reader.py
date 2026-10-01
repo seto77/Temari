@@ -2,7 +2,7 @@
 
 Temari の repo の参照実装 `tools/temari_factors_contract.py` から、**値の算法だけ**を写した。写した関数は参照実装と同じ式・
 同じ演算の順で書いてあり、同じ Python の上では参照実装と**ビットで同じ**値を返す (符号つきの 0、例外の型と文も同じ)。
-書庫に同梱の loader は**実行しない** (読み手はこの module だけ)。依存は標準ライブラリだけ。
+書庫に同梱の loader は**実行しない** (読み手はこの module だけ)。NumPy は batch 補間に使う。
 
 写し元 (固定):
   REFERENCE_PATH の commit REFERENCE_COMMIT。改行を LF にしたバイトの sha256 = REFERENCE_SHA256_LF。
@@ -34,12 +34,16 @@ Temari の repo の参照実装 `tools/temari_factors_contract.py` から、**�
 import bisect
 import copy
 import hashlib
+import itertools
 import math
 import numbers
+import operator
 import re
 import struct
 from dataclasses import dataclass
 from typing import Optional
+
+import numpy as np
 
 from ._strictjson import StrictJSONError, loads_strict
 from .errors import MembershipError, SpeciesLookupError
@@ -209,6 +213,56 @@ class CubicSpline:
         s2 = (e00 * y0 + e01 * y1) / h ** 2 + (e10 * m0 + e11 * m1) / h
         s3 = (12 * y0 - 12 * y1) / h ** 3 + (6 * m0 + 6 * m1) / h ** 2
         return s0, s1, s2, s3
+
+
+_SQUARE_CHUNK = 1 << 16
+
+
+def _square_like_scalar(values):
+    """``v ** 2`` for every element, through Python's float power (the C library pow), as the scalar path computes it.
+
+    261001Cl: NumPy >= 2 computes ``np.power(x, 2)`` as ``x * x``, but the C pow does not round ``x ** 2`` like ``x * x``
+    everywhere (about 0.05 % of uniform arguments differ with Windows' UCRT, about 0.08 % with glibc 2.39). Squaring with
+    NumPy made batch values differ from the scalar and reference values in the last bits (on Windows up to 4 ULP for
+    fe_regular, and thousands of ULP near the sign change of a charged species' fe). Chunks bound the temporary Python
+    floats (at most two chunks are alive at once)."""
+    flat = np.ascontiguousarray(values, dtype=np.float64).reshape(-1)
+    out = np.empty(flat.shape, dtype=np.float64)
+    for start in range(0, flat.size, _SQUARE_CHUNK):
+        part = flat[start:start + _SQUARE_CHUNK].tolist()
+        out[start:start + len(part)] = np.fromiter(map(operator.pow, part, itertools.repeat(2)), dtype=np.float64,
+                                                   count=len(part))
+    return out.reshape(np.shape(values))
+
+
+def _spline_basis_many(x, xq):
+    """Interval index, width and Hermite basis of ``CubicSpline.__call__`` for validated float64 points (same operations)."""
+    i = np.clip(np.searchsorted(x, xq, side="right") - 1, 0, len(x) - 2)
+    h = x[i + 1] - x[i]
+    t = (xq - x[i]) / h
+    one_minus_t_sq = _square_like_scalar(1.0 - t)
+    return i, h, (1.0 + 2.0 * t) * one_minus_t_sq, t * one_minus_t_sq, t * t * (3.0 - 2.0 * t), t * t * (t - 1.0)
+
+
+def _cubic_spline_many(spline, xq, cache=None):
+    """Vector counterpart of ``CubicSpline.__call__`` for validated float64 inputs (bit-identical to it).
+
+    261001Cl: the basis depends only on the knots and the query points, and every table shares the s grid, so ``cache``
+    (a dict owned by one evaluate_many call) computes it once for all species. The key is the bytes of both arrays, not
+    their ``id`` (a freed array's id can be reused)."""
+    xq = np.asarray(xq, dtype=np.float64)
+    x = np.asarray(spline.x, dtype=np.float64)
+    if cache is None:
+        basis = _spline_basis_many(x, xq)
+    else:
+        key = ("basis", x.tobytes(), xq.tobytes())
+        basis = cache.get(key)
+        if basis is None:
+            basis = cache[key] = _spline_basis_many(x, xq)
+    i, h, h00, h10, h01, h11 = basis
+    y = np.asarray(spline.y, dtype=np.float64)
+    m = np.asarray(spline.m, dtype=np.float64)
+    return h00 * y[i] + h10 * h * m[i] + h01 * y[i + 1] + h11 * h * m[i + 1]
 
 
 # ---------------------------------------------------------------------------
@@ -413,6 +467,39 @@ class Element:
         (C の pow) で、pow が正しく丸めない環境 (Windows の UCRT で実測: [0, 6] の一様な乱数の約 0.05 %、7681 節点のうち 2 点)
         では最後の桁が違う。参照実装と同じ演算なので、同じ環境では参照実装とビットで同じ。"""
         return self._fe_reg(self._guard(s) ** 2)
+
+    def _evaluate_many(self, quantity, s_values, cache=None):
+        """Evaluate one supported quantity on a previously validated s array.
+
+        ``cache`` belongs to one evaluate_many call (one s array) and shares the squares and spline bases between species."""
+        if cache is None:
+            cache = {}
+        if quantity == "fx":
+            return _cubic_spline_many(self._fx, s_values, cache)
+        if quantity == "fe_regular":
+            if "s**2" not in cache:
+                cache["s**2"] = _square_like_scalar(s_values)
+            return _cubic_spline_many(self._fe_reg, cache["s**2"], cache)
+        if quantity != "fe":
+            raise ValueError("quantity は 'fx', 'fe', 'fe_regular' のいずれか: %r" % quantity)
+
+        if "s*s" not in cache:
+            cache["s*s"] = s_values * s_values
+        t = cache["s*s"]
+        regular = _cubic_spline_many(self._fe_reg, t, cache)
+        if self.charge == 0.0:
+            return regular
+        underflow = (s_values > 0.0) & (t == 0.0)
+        if np.any(underflow):
+            # Preserve the scalar ZeroDivisionError and its message.
+            self.fe(float(s_values[int(np.flatnonzero(underflow)[0])]))
+        out = regular.copy()
+        zero = s_values == 0.0
+        out[zero] = math.inf if self.c_mono > 0.0 else -math.inf
+        nonzero = ~zero
+        with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+            out[nonzero] = self.c_mono / t[nonzero] + regular[nonzero]
+        return out
 
 
 def _check_against_entry(doc, entry):

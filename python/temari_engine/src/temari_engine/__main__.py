@@ -1,6 +1,6 @@
 """python -m temari_engine verify <path> [--research]
 python -m temari_engine golden <golden_dir> [--julia CMD] [--threads N] [--save-dir DIR]
-python -m temari_engine data {info,fetch,verify,value} ...   (公開した 3 系列。`python -m temari_engine data` で使い方)
+python -m temari_engine data {info,fetch,verify,channels,channel-info,species,value} ...   (公開した 3 系列。`python -m temari_engine data` で使い方)
 
 verify : 一式 (dir か manifest.json) か 1 本のファイルの所属と役割を確かめて印字する。
          EXIT 0 = 通常入口で読める / 1 = 所属・役割・envelope の検査で拒否 / 2 = 使い方・読めない / 3 = 道具の欠陥

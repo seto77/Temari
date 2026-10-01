@@ -1,6 +1,7 @@
 # Minimal CI: the verification ladder that the repository already ships.
-# Nothing here needs a package registry - Temari depends on the Julia standard
-# library only, so every job is "check out, install Julia, run a script".
+# The Julia jobs need no package registry - the engine depends on the Julia
+# standard library only, so each is "check out, install Julia, run a script".
+# The temari_engine job installs setuptools and NumPy from PyPI.
 name: CI
 
 on:
@@ -109,10 +110,8 @@ jobs:
 
   engine-api:
     # 260922Cl (L-C E1-E2, author decision I65): the --json envelope, the set
-    # manifest writer, the engine source list, and the Python reader
-    # (python/temari_engine). The dataset F / dataset-factors archive tests and
-    # the Julia-launching run() tests skip by name here (no dist/ in CI).
-    name: engine API (envelope, set manifests, temari_engine)
+    # manifest writer and the engine/factors source lists.
+    name: engine API (envelope and set manifests)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -121,10 +120,6 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: "1.11.9"
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
 
       - name: envelope unit test
         run: julia --startup-file=no --project=. tools/cli_envelope_test.jl
@@ -135,9 +130,47 @@ jobs:
       - name: engine and factors source lists
         run: julia --startup-file=no --project=. tools/factors_source_files_test.jl
 
-      - name: temari_engine (Python)
-        env:
-          PYTHONPATH: python/temari_engine/src
+  python-batch-api:
+    # NumPy is a required dependency of the published-data batch APIs. Run the
+    # package suite under the minimum supported Python (3.10), 3.12 and the
+    # newest CPython (3.14).
+    name: temari_engine (Python ${{ matrix.python }}, NumPy batch APIs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: build and install package wheel
+        shell: bash
+        run: |
+          wheel_dir="${RUNNER_TEMP}/temari-engine-wheel"
+          mkdir -p "$wheel_dir"
+          cmp LICENSE python/temari_engine/LICENSE
+          python -m pip wheel --no-deps --wheel-dir "$wheel_dir" python/temari_engine
+          python -m pip install "$wheel_dir"/temari_engine-*.whl
+
+      - name: verify installed wheel and batch APIs
+        run: >-
+          python -c "from importlib.metadata import metadata; from pathlib import Path;
+          import sysconfig, numpy, temari_engine;
+          from temari_engine._f_reader import FChannel;
+          from temari_engine.data import FactorsDataset;
+          package_metadata = metadata('temari-engine');
+          assert Path(temari_engine.__file__).resolve().is_relative_to(Path(sysconfig.get_path('purelib')).resolve());
+          assert callable(FChannel.f_many) and callable(FactorsDataset.evaluate_many);
+          assert package_metadata['License-Expression'] == 'MIT';
+          assert package_metadata.get_all('License-File') == ['LICENSE'];
+          print('wheel', temari_engine.__version__, 'NumPy', numpy.__version__, temari_engine.__file__)"
+
+      - name: temari_engine tests (warnings are errors)
         run: python -W error -m unittest discover -s python/temari_engine/tests -v
 
   golden:

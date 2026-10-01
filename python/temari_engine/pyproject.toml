@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "temari-engine"
-version = "0.4.0"
+version = "0.5.0"
 description = "Run the Temari engine from Python, read its outputs and published sets with membership and artifact_role checks, and turn dataset F into per-line X-ray responses"
 requires-python = ">=3.10"
-license = {text = "MIT"}
-dependencies = []
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = ["numpy>=2.2.6"]
 
 [project.optional-dependencies]
 xray = ["xraylib>=4.2.1"]   # temari_engine.xray_lines only (4.3.0 if tests run under python -W error)

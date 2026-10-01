@@ -1,6 +1,6 @@
 """dataset F (内殻のイオン化の形状因子 F(s, E0)) の索引・読み手・補間 — `temari_engine.data` の F の部分 (260927Cl、作者決定 I93)。
 
-設計 = Temari の `docs/notes/temari_engine_data_design_2026-09-27.md` §5〜§8。依存は標準ライブラリだけ。
+設計 = Temari の `docs/notes/temari_engine_data_design_2026-09-27.md` §5〜§8。NumPy は `f_many` の配列経路に使う。
 
 **写し元 (参照実装)** = Temari の `tools/temari_contract.py`。改行を LF に揃えたバイトの sha256 を `REFERENCE_SHA256` に、
 最後にその file を変えた commit を `REFERENCE_COMMIT` に固定する。算法は補助の関数・定数・浮動小数の演算の順まで写し、
@@ -48,6 +48,9 @@ import types
 from dataclasses import dataclass, field
 from typing import NamedTuple
 
+import numpy as np
+
+from ._batch import as_float64_1d
 from ._strictjson import StrictJSONError, loads_strict
 from .errors import MembershipError
 from .sets import files_digest
@@ -158,6 +161,13 @@ class FGrid(NamedTuple):
     eps: float
 
 
+class FEnergyRow(NamedTuple):
+    """1 行の使用範囲メタデータ。`tail_bound` は stored `tail.eps` (精度保証ではない)。"""
+    e0_keV: float
+    s_cert_A_inv: float
+    tail_bound: float
+
+
 @dataclass(frozen=True)
 class FResult:
     """`FChannel.f(e0_keV, s)` の返り値 (変えられない)。
@@ -187,6 +197,32 @@ class FResult:
     z: int
     shell: str
     source: object = field(default=None, compare=False)
+
+
+@dataclass(frozen=True)
+class FBatchResult:
+    """Vector result for :meth:`FChannel.f_many`; all three arrays match input shape."""
+    values: object
+    regions: object
+    tail_bounds: object
+    e0_keV: float
+    s_cert_A_inv: float
+    s_kin_A_inv: float
+    z: int
+    shell: str
+    source: object = field(default=None, compare=False)
+
+    @property
+    def value(self):
+        return self.values
+
+    @property
+    def region(self):
+        return self.regions
+
+    @property
+    def tail_bound(self):
+        return self.tail_bounds
 
 
 # ---------------------------------------------------------------------------------------------------------------------------
@@ -352,6 +388,7 @@ class FChannel:
     """dataset F の 1 チャネル (Z, 殻)。`FChannel.from_bytes(b, entry=None, source=None)` で作る。
 
       grid(e0_keV)   → FGrid (F, s_cert, eps)。写し元 grid_at と同じ
+      energy_rows    → 各収録 E0 行の (E0, s_cert, stored tail.eps)
       f(e0_keV, s)   → FResult (value・region・tail_bound と e0_keV・s・s_cert_A_inv・s_kin_A_inv・z・shell・source)。写し元 f_at と同じ
       s_kin(e0_keV)  → 1/λ [Å⁻¹]
 
@@ -443,6 +480,7 @@ class FChannel:
         self._z, self._shell, self._eth, self._s = z, shell, eth, s
         self._e0s = e0s
         self._rows_eps = [(r["e0_keV"], r["tail"]["eps"]) for r in rows]
+        self._energy_rows = tuple(FEnergyRow(r["e0_keV"], r["s_cert_A_inv"], r["tail"]["eps"]) for r in rows)
         self._bases = bases
         self._dataset_version = doc.get("dataset_version")
         self._model_id = doc.get("model_id")
@@ -525,6 +563,53 @@ class FChannel:
         return FResult(_pchip_eval(st.xs, st.ys, ds, sq), REGION_TABULATED, 0.0, e0, sq, st.s_cert, st.s_kin, self._z,
                        self._shell, self._source)
 
+    def f_many(self, e0_keV, s_values):
+        """Evaluate a one-dimensional s array at one fixed E0 without broadcasting.
+
+        The tabulated branch uses the same PCHIP coefficients and Horner order as
+        :meth:`f`; both tail regions retain the scalar thresholds and stored
+        upper-bound semantics. Validation completes before results are produced.
+        """
+        e0 = _finite(e0_keV, "e0_keV")
+        s_arr = as_float64_1d(s_values, "s_values", lambda v: _finite(v, "s"))
+        negative = np.flatnonzero(s_arr < 0.0)
+        if negative.size:
+            bad_s = float(s_arr[int(negative[0])])
+            raise ValueError("s は 0 以上 [1/Å]: %r" % bad_s)
+
+        st = self._state(e0)
+        values = np.zeros(s_arr.shape, dtype=np.float64)
+        regions = np.full(s_arr.shape, REGION_TABULATED, dtype="U11")
+        tail_bounds = np.zeros(s_arr.shape, dtype=np.float64)
+        impossible = s_arr > st.s_kin + 1e-12
+        unrecorded = (~impossible) & (s_arr > st.s_cert + 1e-12)
+        regions[unrecorded] = REGION_UNRECORDED
+        tail_bounds[unrecorded] = st.eps
+        regions[impossible] = REGION_IMPOSSIBLE
+        tail_bounds[impossible] = np.nan
+
+        tabulated = ~(impossible | unrecorded)
+        if np.any(tabulated):
+            ds = st.ds
+            if ds is None:
+                if len(st.xs) < 2:
+                    raise ValueError("E0=%r では表の s ノードに 1 つも届かない (E0 補間の基底の外。s_cert = 0): Z=%d %s"
+                                     % (e0, self._z, self._shell))
+                ds = st.ds = _pchip_slopes(st.xs, st.ys)
+            x = np.asarray(st.xs, dtype=np.float64)
+            y = np.asarray(st.ys, dtype=np.float64)
+            d = np.asarray(ds, dtype=np.float64)
+            sq = s_arr[tabulated]
+            i = np.clip(np.searchsorted(x, sq, side="right") - 1, 0, len(x) - 2)
+            h = x[i + 1] - x[i]
+            slope = (y[i + 1] - y[i]) / h
+            c0 = (d[i] + d[i + 1] - 2.0 * slope) / (h * h)
+            c1 = (3.0 * slope - 2.0 * d[i] - d[i + 1]) / h
+            dx = sq - x[i]
+            values[tabulated] = ((c0 * dx + c1) * dx + d[i]) * dx + y[i]
+
+        return FBatchResult(values, regions, tail_bounds, e0, st.s_cert, st.s_kin, self._z, self._shell, self._source)
+
     def s_kin(self, e0_keV):
         """運動学の上限 1/λ [Å⁻¹] (E0 [keV] > 0 の有限の数。チャネルの E0 の範囲には縛らない)"""
         e0 = _finite(e0_keV, "e0_keV")
@@ -550,6 +635,14 @@ class FChannel:
     def e0_nodes_keV(self):
         """表の行の E0 [keV] (昇順。チャネルごとに違う、C4)"""
         return tuple(self._e0s)
+
+    @property
+    def energy_rows(self):
+        """各 E0 行の (E0, s_cert, stored tail.eps) を昇順の immutable tuple で返す。
+
+        tail_bound は零埋めした未収録 tail の保存上界で、表値全体の精度保証ではない。
+        """
+        return self._energy_rows
 
     @property
     def s_grid_A_inv(self):

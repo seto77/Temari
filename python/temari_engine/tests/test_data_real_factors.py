@@ -24,8 +24,11 @@ import tempfile
 import types
 import unittest
 
+import numpy as np
+
 import temari_engine as te
 from temari_engine import _factors_reader as fr
+from temari_engine import data as td
 from temari_engine.errors import SpeciesLookupError
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -109,6 +112,15 @@ def outcome(fn, x):
     if math.isinf(v):
         return ("inf", v > 0)
     return ("finite", struct.pack("<d", v))
+
+
+def _ordered_float_bits(value):
+    bits = struct.unpack(">Q", struct.pack(">d", float(value)))[0]
+    return (~bits & ((1 << 64) - 1)) if bits >> 63 else (bits | (1 << 63))
+
+
+def ulp_distance(left, right):
+    return abs(_ordered_float_bits(left) - _ordered_float_bits(right))
 
 
 def points():
@@ -224,6 +236,46 @@ class _Real:
                             ", ".join("%s %d" % kv for kv in sorted(stats.items())), n_arrays,
                             ", ".join("%s %d" % (k, len(xs)) for k, xs in pts), len(bad)))
         self.assertEqual(bad[:10], [])
+
+    def test_R4_batch_is_bit_identical_to_scalar_and_reference(self):
+        """All shipped species: batch rows match both the scalar reader and the independent loader bit for bit.
+
+        261001Cl: 等間隔の 129 点は全部が節点 (t = 0) で、batch の 2 乗の違い (NumPy の x*x と C の pow) が見えなかった。区間の
+        中点・この機の pow(s, 2) が s*s と違う節点・固定の種の乱数・荷電種の fe の符号が変わる所の近く (±1e-3) を足した"""
+        ref = reference()
+        dataset = td.open_dir(self.dir, self.SERIES, verify="lazy")
+        elements = [dataset.element(e.z, e.species_tag) for e in self.index.entries]
+        reference_elements = [ref.Element(ref._strict_json(self.raws[e.file], e.file), check=True, expect_z=e.z)
+                              for e in self.index.entries]
+        named = dict(points())
+        near_zero = []
+        for element in elements:
+            if element.charge == 0.0 or not element.fe(1e-3) < 0.0 < element.fe(fr.S_MAX):
+                continue
+            lo, hi = 1e-3, fr.S_MAX
+            for _ in range(80):
+                mid = 0.5 * (lo + hi)
+                lo, hi = (mid, hi) if element.fe(mid) < 0.0 else (lo, mid)
+            near_zero.append(np.linspace(lo - 1e-3, lo + 1e-3, 201))
+        if self.SERIES == "factors-ion":
+            self.assertEqual(len(near_zero), COUNT[self.SERIES])                # 22 種とも陰イオンで、fe の符号が変わる
+        s_values = np.unique(np.concatenate([np.linspace(0.0, 6.0, 129), named["midpoints"], named["pow!=mul nodes"],
+                                             np.random.default_rng(20261001).uniform(0.0, 6.0, 1000)] + near_zero))
+        bad = []
+        for quantity in METHODS:
+            batch = dataset.evaluate_many(elements, quantity, s_values)
+            self.assertEqual(batch.values.shape, (COUNT[self.SERIES], len(s_values)))
+            self.assertEqual(batch.quantity, quantity)
+            self.assertEqual([(x.z, x.species_tag) for x in batch.species], [e.key for e in self.index.entries])
+            for row, element, reference_element in zip(batch.values, elements, reference_elements):
+                for actual, s in zip(row.tolist(), s_values.tolist()):
+                    scalar = outcome(getattr(element, quantity), s)
+                    independent = outcome(getattr(reference_element, quantity), s)
+                    if scalar != independent or scalar != outcome(lambda _: actual, s):
+                        bad.append((element.z, element.species_tag, quantity, s, actual, scalar, independent))
+        sys.stderr.write("\n  [R4 %s] %d species x %d points x %d methods; mismatches %d\n"
+                         % (self.SERIES, len(elements), len(s_values), len(METHODS), len(bad)))
+        self.assertEqual(bad[:5], [])
 
 
 @unittest.skipUnless(HAVE_REF, "SKIP[R*]: 参照実装 %s が無い (repo の外)" % fr.REFERENCE_PATH)

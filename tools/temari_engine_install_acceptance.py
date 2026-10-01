@@ -13,6 +13,7 @@ import math
 import os
 from pathlib import Path
 import shutil
+import struct
 import sys
 import time
 import traceback
@@ -21,8 +22,10 @@ import temari_engine as te
 from temari_engine import data as td
 
 
+BATCH_POINTS = 2000
+
 EXPECTED = {
-    "temari_engine": "0.4.0",
+    "temari_engine": "0.5.0",
     "F": {
         "version": "7.0.0",
         "doi": "10.5281/zenodo.22643468",
@@ -80,6 +83,44 @@ def _is_below(path, parent):
         return True
     except ValueError:
         return False
+
+
+def _ulp(left, right):
+    def ordered(value):
+        bits = struct.unpack(">Q", struct.pack(">d", float(value)))[0]
+        return (~bits & ((1 << 64) - 1)) if bits >> 63 else (bits | (1 << 63))
+    return abs(ordered(left) - ordered(right))
+
+
+def _batch_measure(au_l3, factor_sets):
+    """0.5.0: the NumPy batch APIs on the published tables against the scalar methods on this platform.
+
+    F batch values are promised within 2 ULP of scalar (same regions); dataset-factors batch values are bit-identical."""
+    import numpy as np
+
+    s_values = np.random.default_rng(20261001).uniform(0.0, 6.0, BATCH_POINTS)
+    many = au_l3.f_many(200.0, s_values)
+    scalar = [au_l3.f(200.0, s) for s in s_values.tolist()]
+    cells = mismatches = 0
+    species = []
+    for dataset in factor_sets:
+        elements = [dataset.element(z, tag) for z, tag in dataset.species()]
+        species.append(len(elements))
+        for quantity in ("fx", "fe", "fe_regular"):
+            rows = dataset.evaluate_many(elements, quantity, s_values).values.tolist()
+            for row, element in zip(rows, elements):
+                method = getattr(element, quantity)
+                for actual, s in zip(row, s_values.tolist()):
+                    cells += 1
+                    mismatches += struct.pack("<d", actual) != struct.pack("<d", method(s))
+    return {
+        "points": len(scalar),
+        "F_Au_L3_200keV_max_ulp": max(_ulp(a, b.value) for a, b in zip(many.values.tolist(), scalar)),
+        "F_Au_L3_200keV_regions_equal": list(many.regions) == [b.region for b in scalar],
+        "factors_species": species,
+        "factors_cells": cells,
+        "factors_bit_mismatches": mismatches,
+    }
 
 
 def _measure():
@@ -145,6 +186,7 @@ def _measure():
         "factors": factors_result,
         "factors-ion": ions_result,
         "Au_LA": line_result,
+        "batch": _batch_measure(au_l3, (factors, ions)),
     }
 
 
@@ -153,7 +195,16 @@ def _data_checks(data):
     factors = data["factors"]
     ions = data["factors-ion"]
     la = data["Au_LA"]
+    batch = data["batch"]
     return {
+        "batch_api": (
+            batch["points"] == BATCH_POINTS
+            and batch["F_Au_L3_200keV_max_ulp"] <= 2
+            and batch["F_Au_L3_200keV_regions_equal"] is True
+            and batch["factors_species"] == [86, 22]
+            and batch["factors_cells"] == BATCH_POINTS * 3 * (86 + 22)
+            and batch["factors_bit_mismatches"] == 0
+        ),
         "F_identity": (
             f["files_verified"] == EXPECTED["F"]["files"]
             and f["doi"] == EXPECTED["F"]["doi"]

@@ -19,6 +19,8 @@ import struct
 import types
 import unittest
 
+import numpy as np
+
 from temari_engine import _f_reader as fr
 from temari_engine.errors import MembershipError
 
@@ -61,6 +63,15 @@ def call(fn, *args):
         return fn(*args), None
     except Exception as e:  # noqa: BLE001 — 例外の型を比べる
         return None, type(e)
+
+
+def _ordered_float_bits(value):
+    bits = struct.unpack(">Q", struct.pack(">d", float(value)))[0]
+    return (~bits & ((1 << 64) - 1)) if bits >> 63 else (bits | (1 << 63))
+
+
+def _ulp_distance(left, right):
+    return abs(_ordered_float_bits(left) - _ordered_float_bits(right))
 
 
 # ---------------------------------------------------------------------------------------------------------------------------
@@ -651,6 +662,58 @@ class FIndexChecks(unittest.TestCase):
         for name, d in cases.items():
             with self.assertRaises(MembershipError, msg=name):
                 fr.FIndex.from_manifest_bytes(json.dumps(d).encode("utf-8"))
+
+
+class FBatchChecks(unittest.TestCase):
+    def test_batch_matches_scalar_and_keeps_all_regions(self):
+        source = object()
+        ch, doc = channel(make_doc(), source=source)
+        e0 = 200.0
+        s_kin = ch.s_kin(e0)
+        s_values = np.concatenate((np.linspace(0.0, 6.0, 1201),
+                                   np.asarray([6.0 + 2e-12, 7.0, s_kin + 2e-12])))
+        got = ch.f_many(e0, s_values)
+        scalar = [ch.f(e0, float(s)) for s in s_values]
+
+        self.assertEqual(got.values.shape, s_values.shape)
+        self.assertEqual(got.regions.shape, s_values.shape)
+        self.assertEqual(got.tail_bounds.shape, s_values.shape)
+        self.assertEqual(got.values.dtype, np.dtype("float64"))
+        self.assertEqual(got.tail_bounds.dtype, np.dtype("float64"))
+        self.assertIs(got.source, source)
+        self.assertEqual((got.z, got.shell, got.e0_keV), (ch.z, ch.shell, e0))
+        self.assertEqual(set(got.regions), {fr.REGION_TABULATED, fr.REGION_UNRECORDED, fr.REGION_IMPOSSIBLE})
+        max_ulp = max(_ulp_distance(a.value, float(b)) for a, b in zip(scalar, got.values))
+        self.assertLessEqual(max_ulp, 2)
+        self.assertEqual(list(got.regions), [r.region for r in scalar])
+        for actual, expected in zip(got.tail_bounds, scalar):
+            if math.isnan(expected.tail_bound):
+                self.assertTrue(math.isnan(float(actual)))
+            else:
+                self.assertEqual(float(actual), expected.tail_bound)
+        if not HAVE_REF:                     # 261001Cl: repo の外では参照との比較だけを名指しで飛ばす (scalar との比較は済んだ)
+            self.skipTest(SKIP_REF)
+        ref, _ = load_reference()
+        for i in (0, 317, 1200, 1201, 1202, 1203):
+            expected = ref.f_at(doc, e0, float(s_values[i]))
+            self.assertLessEqual(_ulp_distance(got.values[i], expected[0]), 2)
+            self.assertEqual(got.regions[i], expected[2])
+            if math.isnan(expected[1]):
+                self.assertTrue(math.isnan(float(got.tail_bounds[i])))
+            else:
+                self.assertEqual(float(got.tail_bounds[i]), expected[1])
+
+    def test_batch_rejects_invalid_arrays_before_returning(self):
+        ch, _ = channel(make_doc())
+        for values, error in (([[0.1]], TypeError), ([0.1, -0.1], ValueError),
+                              ([0.1, math.nan], ValueError), ([0.1, math.inf], ValueError),
+                              ([0.1, True], TypeError), ([0.1, np.bool_(True)], TypeError),
+                              ([0.1, "0.2"], TypeError)):
+            with self.subTest(values=values), self.assertRaises(error):
+                ch.f_many(200.0, values)
+        with self.assertRaises(ValueError):
+            ch.f_many(math.inf, [0.0])
+        self.assertEqual(ch.f_many(200.0, np.asarray([], dtype=np.float64)).values.shape, (0,))
 
 
 if __name__ == "__main__":

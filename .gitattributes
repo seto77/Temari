@@ -84,3 +84,7 @@ docs/notes/data/deep_v3_seal_20260831/** -text
 tools/dummy/** text eol=lf
 tools/dummy/dummy_cost.json -text
 tools/dummy/dummy_identity.json -text
+
+# Python data API is distributed and tested on Windows; keep source, tests, and docs LF.
+python/temari_engine/** text=auto eol=lf
+.github/workflows/ci.yml text=auto eol=lf

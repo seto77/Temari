@@ -8,10 +8,12 @@
     from temari_engine import data as td
     f = td.open("F")                             # 要れば取得 (GitHub Release か Zenodo の写し) → 検証 → FDataset
     r = f.channel(79, "L3").f(200.0, 1.0)        # FResult: value・region・tail_bound と来歴 (r.source)
+    b = f.channel(79, "L3").f_many(200.0, s_values)  # 同じ E0 の 1 次元 s 配列
     fac = td.open("factors")
     fac.element(26).fx(1.234)                    # f_x [electrons]
     ion = td.open("factors-ion")
-    ion.find(8, charge=-2)                       # 候補の一覧 (O2- は配位数の違う表が 5 つ。1 つに決めるのは species_tag)
+    ion.find(8, charge=-2)                       # 候補の一覧 (O2- は配位数の違う表が 5 つ)
+    ion.find_one(8, charge=-2, coordination_number=6)  # 物理的な配位数を明示して選ぶ (正規の鍵は species_tag)
 
 信頼の置き方 (設計 §3〜§5):
   - 書庫と manifest は、台帳に固定した sha256 だけで信頼する。写し (GitHub Release・Zenodo) は信頼しない。
@@ -25,14 +27,20 @@
 """
 import builtins
 import hashlib
+import numbers
 import os
 import threading
 from dataclasses import dataclass, field
 from typing import Optional
 
+import numpy as np
+
 from . import _archive, _f_reader, _factors_reader, _fetch
-from .errors import MembershipError, RoleError
+from ._batch import as_float64_1d
+from .errors import MembershipError, RoleError, SpeciesLookupError
 from .sets import known_sets
+
+FBatchResult = _f_reader.FBatchResult
 
 SERIES = ("F", "factors", "factors-ion")
 VERIFY_MODES = ("lazy", "full")
@@ -212,11 +220,41 @@ class FDataset(_Dataset):
             return ch
 
 
+@dataclass(frozen=True)
+class FactorSpeciesInfo:
+    """Species identity carried by one row of a :class:`FactorsBatchResult`."""
+    z: int
+    species_tag: str
+    symbol: str
+    charge: float
+    coordination_number: Optional[int]
+
+
+@dataclass(frozen=True)
+class FactorsBatchResult:
+    """Matrix result from :meth:`FactorsDataset.evaluate_many` (rows=species, columns=s)."""
+    values: object
+    quantity: str
+    species: tuple
+    source: object = field(default=None, compare=False)
+
+
 class FactorsDataset(_Dataset):
     """dataset-factors (中性) と dataset-factors-ion の一式。正規の入口は `element(z, species_tag)` (中性は空のタグ)"""
 
     def species(self):
         return sorted((int(_get(e, "z")), str(_get(e, "species_tag"))) for e in self._index.entries)
+
+    def catalog(self, charge=None, coordination_number=None):
+        """全 Z の候補索引を返す。表のファイルは読まず、電荷・配位数で絞れる。
+
+        `find(z, ...)` と同じく返る行は候補であり、値を読むときの正規の鍵は species_tag。
+        """
+        cands = list(self._index.entries)
+        if charge is not None:
+            q = _factors_reader._check_charge(charge)
+            cands = [e for e in cands if e.charge == q]
+        return _filter_coordination_number(cands, coordination_number)
 
     def element(self, z, species_tag=""):
         # 型の検査は索引が行う (ここで int()・str() に丸めると 8.9 が Z = 8 に、None がタグ "None" になる。260927Cl)
@@ -230,14 +268,90 @@ class FactorsDataset(_Dataset):
                 self._cache[key] = el
             return el
 
-    def find(self, z, charge=None):
-        """候補の索引の要素の一覧 (電荷で絞る。1 つに決めるのは species_tag)"""
-        return list(self._index.find(z, charge))
+    def evaluate_many(self, elements, quantity, s_values):
+        """Evaluate a 1-D s array for an explicit, ordered sequence of Elements.
 
-    def find_one(self, z, charge):
-        """(z, charge) の候補がちょうど 1 つのときだけその Element。0 か 2 つ以上なら SpeciesLookupError (候補の一覧つき)"""
-        e = self._index.find_one(z, charge)
+        Every Element must have been selected from this dataset instance. The
+        returned float64 matrix has shape ``(len(elements), len(s_values))``.
+        """
+        if quantity not in ("fx", "fe", "fe_regular"):
+            raise ValueError("quantity は 'fx', 'fe', 'fe_regular' のいずれか: %r" % (quantity,))
+        try:
+            selected = tuple(elements)
+        except TypeError as exc:
+            raise TypeError("elements は Element の sequence") from exc
+        for el in selected:
+            if not isinstance(el, _factors_reader.Element):
+                raise TypeError("elements の各要素は Element: %s" % type(el).__name__)
+            if el.source is not self.source:
+                raise MembershipError("Elements はこの FactorsDataset から選択してください")
+            try:
+                entry = self._index.lookup(el.z, el.species_tag)
+            except (KeyError, SpeciesLookupError) as exc:
+                raise MembershipError("Element がこの dataset の species 索引に無い: %r" % (el,)) from exc
+            if el.entry is not entry:
+                raise MembershipError("Element の manifest entry がこの FactorsDataset のものではない: %r" % (el,))
+
+        s_arr = as_float64_1d(s_values, "s_values", _factors_reader.Element._guard)
+        outside = np.flatnonzero((s_arr < 0.0) | (s_arr > _factors_reader.S_MAX))
+        if outside.size:
+            _factors_reader.Element._guard(float(s_arr[int(outside[0])]))
+
+        if quantity == "fe":
+            t = s_arr * s_arr
+            underflow = (s_arr > 0.0) & (t == 0.0)
+            if np.any(underflow):
+                tiny_s = float(s_arr[int(np.flatnonzero(underflow)[0])])
+                for el in selected:
+                    if el.charge != 0.0:
+                        el.fe(tiny_s)  # reproduce the scalar ZeroDivisionError before allocating the output
+
+        values = np.empty((len(selected), len(s_arr)), dtype=np.float64)
+        cache = {}  # 261001Cl: squares and spline bases shared by all species of this call (same s grid)
+        for row, el in enumerate(selected):
+            values[row, :] = el._evaluate_many(quantity, s_arr, cache)
+        species = tuple(FactorSpeciesInfo(el.z, el.species_tag, el.symbol, el.charge,
+                                          el.entry.coordination_number) for el in selected)
+        return FactorsBatchResult(values, quantity, species, self.source)
+
+    def find(self, z, charge=None, coordination_number=None):
+        """候補の索引の要素の一覧 (電荷と配位数で絞れる。正規の鍵は species_tag)。"""
+        cands = list(self._index.find(z, charge))
+        return _filter_coordination_number(cands, coordination_number)
+
+    def find_one(self, z, charge, coordination_number=None):
+        """条件に合う候補がちょうど 1 つのときだけその Element。そうでなければ候補つきの SpeciesLookupError。
+
+        `coordination_number` を省くと従来どおり (Z, charge) だけで選ぶ。配位数を渡しても、将来の一式で
+        同じ (Z, charge, CN) が複数になれば黙って 1 つを選ばずに拒む。
+        """
+        if coordination_number is None:
+            e = self._index.find_one(z, charge)
+            return self.element(_get(e, "z"), _get(e, "species_tag"))
+        cands = self.find(z, charge, coordination_number)
+        if len(cands) != 1:
+            all_charge = self.find(z, charge)
+            what = "(Z=%r, charge=%r, coordination_number=%r)" % (z, charge, coordination_number)
+            where = "%s %s" % (self.source.series, self.source.version)
+            if not cands:
+                detail = ("。同じ Z・電荷の候補: " + "; ".join(e.describe() for e in all_charge)) if all_charge else ""
+                raise SpeciesLookupError("%s に %s の表は無い%s" % (where, what, detail), candidates=())
+            raise SpeciesLookupError("%s に %s の表が %d つある — species_tag で 1 つに決める: %s"
+                                     % (where, what, len(cands), "; ".join(e.describe() for e in cands)),
+                                     candidates=tuple(cands))
+        e = cands[0]
         return self.element(_get(e, "z"), _get(e, "species_tag"))
+
+
+def _filter_coordination_number(cands, coordination_number):
+    if coordination_number is None:
+        return list(cands)
+    if isinstance(coordination_number, bool) or not isinstance(coordination_number, numbers.Integral):
+        raise TypeError("coordination_number は正の整数 (bool 不可): %r" % (coordination_number,))
+    cn = int(coordination_number)
+    if cn <= 0:
+        raise ValueError("coordination_number は正の整数: %r" % (coordination_number,))
+    return [e for e in cands if e.coordination_number == cn]
 
 
 def _content_root(dest, rel):
@@ -340,13 +454,16 @@ def open_dir(path, series, version=None, *, research=False, set_name=None, verif
 
 
 # ---------------------------------------------------------------------------------------------------------------------------
-# CLI: python -m temari_engine data {info,fetch,verify,value} …
+# CLI: python -m temari_engine data {info,fetch,verify,channels,channel-info,species,value} …
 # ---------------------------------------------------------------------------------------------------------------------------
 _CLI_USAGE = """python -m temari_engine data info [--cache-dir DIR]
-python -m temari_engine data fetch <series> [--version V] [--cache-dir DIR]
+python -m temari_engine data fetch <series> [--version V] [--cache-dir DIR] [--offline]
 python -m temari_engine data verify <series> [--version V] [--cache-dir DIR] [--offline]
-python -m temari_engine data value F <Z> <shell> <E0_keV> <s> [--offline] [--cache-dir DIR]
-python -m temari_engine data value factors|factors-ion <Z> <fx|fe|fe_regular> <s> [--species TAG] [--offline] [--cache-dir DIR]
+python -m temari_engine data channels F [Z] [--version V] [--offline] [--cache-dir DIR]
+python -m temari_engine data channel-info F <Z> <shell> [--version V] [--offline] [--cache-dir DIR]
+python -m temari_engine data species factors|factors-ion [<Z>] [--charge Q] [--coordination-number CN] [--version V] [--offline] [--cache-dir DIR]
+python -m temari_engine data value F <Z> <shell> <E0_keV> <s> [--version V] [--offline] [--cache-dir DIR]
+python -m temari_engine data value factors|factors-ion <Z> <fx|fe|fe_regular> <s> [--species TAG | --charge Q [--coordination-number CN]] [--version V] [--offline] [--cache-dir DIR]
 
 series = F / factors / factors-ion。EXIT 0 = できた / 1 = 所属・役割の検査で拒否 / 2 = 使い方・取得できない・offline で cache 無し /
 3 = 道具の欠陥。値は 1 行の JSON (来歴つき)。"""
@@ -360,7 +477,7 @@ def _cli_opts(args, flags, valued):
         if a in flags:
             opt[a] = True
         elif a in valued:
-            if i + 1 >= len(args):
+            if i + 1 >= len(args) or args[i + 1].startswith("--"):
                 raise ValueError("%s に値が要る" % a)
             opt[a] = args[i + 1]
             i += 1
@@ -372,9 +489,22 @@ def _cli_opts(args, flags, valued):
     return pos, opt
 
 
+def _require_cli_options(opt, allowed):
+    bad = sorted(set(opt) - set(allowed))
+    if bad:
+        raise ValueError("このコマンドでは使えない引数: %s" % ", ".join(bad))
+
+
 def _jsonable_source(src):
     return {"series": src.series, "set": src.set_name, "artifact_role": src.artifact_role, "version": src.version,
             "doi": src.doi, "license": src.license, "verified": src.verified, "units": src.units}
+
+
+def _jsonable_species(entry):
+    return {"z": entry.z, "symbol": entry.symbol, "charge": entry.charge,
+            "coordination_number": entry.coordination_number, "radius_A": entry.radius_A,
+            "species_tag": entry.species_tag, "n_electrons": entry.n_electrons,
+            "model_id": entry.model_id}
 
 
 def main(argv):
@@ -383,14 +513,16 @@ def main(argv):
     import sys
     from .errors import FetchError, MembershipError, OfflineError, RoleError, SpeciesLookupError, ArchiveError
     try:
-        if not argv or argv[0] not in ("info", "fetch", "verify", "value"):
+        if not argv or argv[0] not in ("info", "fetch", "verify", "channels", "channel-info", "species", "value"):
             print(_CLI_USAGE)
             return 2
         cmd, rest = argv[0], argv[1:]
-        pos, opt = _cli_opts(rest, {"--offline"}, {"--version", "--cache-dir", "--species"})
+        pos, opt = _cli_opts(rest, {"--offline"},
+                             {"--version", "--cache-dir", "--species", "--charge", "--coordination-number"})
         cache = opt.get("--cache-dir")
         offline = True if opt.get("--offline") else None
         if cmd == "info":
+            _require_cli_options(opt, {"--cache-dir"})
             root = cache_root(cache)
             for r in releases():
                 a = r["archive"]
@@ -400,6 +532,7 @@ def main(argv):
             print("cache: %s" % root)
             return 0
         if cmd in ("fetch", "verify"):
+            _require_cli_options(opt, {"--version", "--cache-dir", "--offline"})
             if len(pos) != 1:
                 print(_CLI_USAGE)
                 return 2
@@ -409,12 +542,67 @@ def main(argv):
             print(json.dumps({"ok": True, "command": cmd, "files": n, "path": ds.path,
                               "source": _jsonable_source(ds.source)}, sort_keys=True))
             return 0
+        if cmd == "channels":
+            _require_cli_options(opt, {"--version", "--cache-dir", "--offline"})
+            if not 1 <= len(pos) <= 2 or pos[0] != "F":
+                print(_CLI_USAGE)
+                return 2
+            ds = open("F", opt.get("--version"), cache_dir=cache, offline=offline)
+            channels = ds.channels()
+            if len(pos) == 2:
+                z = int(pos[1])
+                channels = [(cz, shell) for cz, shell in channels if cz == z]
+            print(json.dumps({"series": "F", "channels": [{"z": z, "shell": shell} for z, shell in channels],
+                              "source": _jsonable_source(ds.source)}, sort_keys=True, allow_nan=False))
+            return 0
+        if cmd == "channel-info":
+            _require_cli_options(opt, {"--version", "--cache-dir", "--offline"})
+            if len(pos) != 3 or pos[0] != "F":
+                print(_CLI_USAGE)
+                return 2
+            z = int(pos[1])
+            if not 1 <= z <= _f_reader._Z_MAX:
+                raise ValueError("Z は 1〜%d の整数: %r" % (_f_reader._Z_MAX, pos[1]))
+            if pos[2] not in _f_reader.SHELLS:
+                raise ValueError("shell は %s のどれか: %r" % ("・".join(_f_reader.SHELLS), pos[2]))
+            ds = open("F", opt.get("--version"), cache_dir=cache, offline=offline)
+            try:
+                ch = ds.channel(z, pos[2])
+            except KeyError as e:
+                raise ValueError(e.args[0] if e.args else str(e)) from e
+            nodes = ch.e0_nodes_keV
+            out = {"series": "F", "z": ch.z, "shell": ch.shell, "e_th_keV": ch.e_th_keV,
+                   "e0_range_keV": [nodes[0], nodes[-1]],
+                   "rows": [{"e0_keV": row.e0_keV, "s_cert_A_inv": row.s_cert_A_inv,
+                             "tail_bound": row.tail_bound} for row in ch.energy_rows],
+                   "s_grid_A_inv": list(ch.s_grid_A_inv), "model_id": ch.model_id,
+                   "source": _jsonable_source(ds.source)}
+            print(json.dumps(out, sort_keys=True, allow_nan=False))
+            return 0
+        if cmd == "species":
+            _require_cli_options(opt, {"--version", "--cache-dir", "--offline", "--charge",
+                                       "--coordination-number"})
+            if len(pos) not in (1, 2) or pos[0] not in ("factors", "factors-ion"):
+                print(_CLI_USAGE)
+                return 2
+            ds = open(pos[0], opt.get("--version"), cache_dir=cache, offline=offline)
+            charge = float(opt["--charge"]) if "--charge" in opt else None
+            cn = int(opt["--coordination-number"]) if "--coordination-number" in opt else None
+            z = int(pos[1]) if len(pos) == 2 else None
+            cands = (ds.find(z, charge=charge, coordination_number=cn) if z is not None else
+                     ds.catalog(charge=charge, coordination_number=cn))
+            cands.sort(key=lambda e: (e.z, e.charge, e.coordination_number is None,
+                                      e.coordination_number if e.coordination_number is not None else 0, e.species_tag))
+            print(json.dumps({"series": pos[0], "z": z, "species": [_jsonable_species(e) for e in cands],
+                              "source": _jsonable_source(ds.source)}, sort_keys=True, allow_nan=False))
+            return 0
         # value
         if len(pos) < 2:
             print(_CLI_USAGE)
             return 2
         series = pos[0]
         if series == "F":
+            _require_cli_options(opt, {"--version", "--cache-dir", "--offline"})
             if len(pos) != 5:
                 print(_CLI_USAGE)
                 return 2
@@ -423,13 +611,26 @@ def main(argv):
             out = {"series": "F", "z": int(pos[1]), "shell": pos[2], "E0_keV": float(pos[3]), "s": float(pos[4]),
                    "value": r.value, "region": r.region, "tail_bound": r.tail_bound}
         elif series in ("factors", "factors-ion"):
+            _require_cli_options(opt, {"--version", "--cache-dir", "--offline", "--species", "--charge",
+                                       "--coordination-number"})
             if len(pos) != 4 or pos[2] not in ("fx", "fe", "fe_regular"):
                 print(_CLI_USAGE)
                 return 2
             ds = open(series, opt.get("--version"), cache_dir=cache, offline=offline)
-            el = ds.element(int(pos[1]), opt.get("--species", ""))
+            if "--species" in opt and ("--charge" in opt or "--coordination-number" in opt):
+                raise ValueError("--species と --charge/--coordination-number は同時に使えない")
+            if "--coordination-number" in opt and "--charge" not in opt:
+                raise ValueError("--coordination-number には --charge も要る")
+            if "--charge" in opt:
+                cn = int(opt["--coordination-number"]) if "--coordination-number" in opt else None
+                el = ds.find_one(int(pos[1]), float(opt["--charge"]), coordination_number=cn)
+            else:
+                el = ds.element(int(pos[1]), opt.get("--species", ""))
             v = getattr(el, pos[2])(float(pos[3]))
-            out = {"series": series, "z": int(pos[1]), "species_tag": opt.get("--species", ""), "quantity": pos[2],
+            out = {"series": series, "z": int(pos[1]), "species_tag": el.species_tag, "quantity": pos[2],
+                   "charge": el.charge,
+                   "coordination_number": el.entry.coordination_number if el.entry is not None else None,
+                   "radius_A": el.entry.radius_A if el.entry is not None else None,
                    "s": float(pos[3]), "value": v}
         else:
             print(_CLI_USAGE)

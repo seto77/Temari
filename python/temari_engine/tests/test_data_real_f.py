@@ -1,11 +1,11 @@
-"""dataset F v7.0.0 の実物で、写した読み手 `temari_engine._f_reader` が参照実装 `tools/temari_contract.py` と**ビットで同じ**値を返すことを
+"""dataset F v7.0.0 の実物で、scalar 読み手が独立参照と**ビットで同じ**値を返し、batch 読み手が scalar・参照と **2 ULP 以内**で一致することを
 全 525 チャネルで確かめる (260927Cl、作者決定 I93、設計 §6・§8 の「実物との比較」)。
 
 どこで走るか: repo の中だけ (参照実装が tools/ に要る。無ければ名指しで SKIP)。データは次の順に探し、どちらも無ければ名指しで SKIP:
   1. 環境変数 TEMARI_V7_DIR = 展開した dataset F v7.0.0 の dir (manifest.json と F_*.json がある所。読むだけで書かない)
   2. repo の dist/temari-dataset-v7.0.0.tar.gz (書庫の sha256 を台帳と照らし、一時 dir に manifest.json と F_*.json だけを取り出す)。
-     ⚠ 重いので (約 2,000 万点、CPU 8 本で 3〜6 分)、この経路は環境変数 TEMARI_DATA_REAL_TESTS=1 のときだけ使う (260927Cl。
-     機械を共用する日常の試験では走らせない)
+     ⚠ 重いため、この経路は環境変数 TEMARI_DATA_REAL_TESTS=1 のときだけ使う (260927Cl、機械を共用する日常の試験では走らせない)。
+     2026-09-29 の scalar/reference + batch 全数試験は約 2,058 万点・8 worker で 95 秒 (環境依存)。
 TEMARI_V7_DIR を指定したのに manifest.json が無ければ SKIP でなく失敗にする。
 
 何を比べるか (チャネルの数は 525 に固定、欠けは失敗):
@@ -17,7 +17,8 @@ TEMARI_V7_DIR を指定したのに manifest.json が無ければ SKIP でなく
   - 3 つの内側のノードの ± 0.5e-9・± 2e-9 keV (eps の行の選び方の境目) で格子と 6 点の f_at
   - 下端の許容の端の近く (e0s[0] − 0.99e-9 keV) で格子と 5 点の f_at
   - 範囲の外の E0 (両端 ∓ 2e-9・半分・2 倍) は、どちらも ValueError
-比べ方: 値・上界は型まで同じで、有限は struct.pack('<d') (符号つきの 0 も区別)、NaN は両方 NaN、無限大は符号まで。region と例外の型は別に比べる。
+scalar と独立参照は値・上界を型まで比べ、有限は struct.pack('<d') (符号つきの 0 も区別)、NaN は両方 NaN、無限大は符号まで。region と例外の型は別に比べる。
+batch は有限値が scalar・参照それぞれと最大 2 ULP、region は完全一致、上界は完全一致 (NaN 同士を含む) を要求する。
 参照実装の IndexError と写しの ValueError の組だけは、文書にした違い (表の s ノードに届かない E0 で s ≤ 1e-12) のときに限って数えて通す。
 v7.0.0 でそこに当たるのは Sn K (F_K_Z50) の E0 = 30 − 0.99e-9 keV の s = 0 と 1e-13 の 2 点だけで、その数も固定して確かめる。
 
@@ -45,6 +46,8 @@ import tempfile
 import time
 import unittest
 from concurrent.futures import ProcessPoolExecutor
+
+import numpy as np
 
 import temari_engine as te
 from temari_engine import _f_reader as fr
@@ -143,6 +146,22 @@ def _same_json(a, b):
     return _same(a, b)
 
 
+def _ulp_distance(a, b):
+    """Finite binary64 distance in representable values, ordered across zero."""
+    def ordered(value):
+        bits = struct.unpack(">Q", struct.pack(">d", float(value)))[0]
+        return (~bits & ((1 << 64) - 1)) if bits >> 63 else (bits | (1 << 63))
+    return abs(ordered(a) - ordered(b))
+
+
+def _within_two_ulps(actual, expected):
+    actual, expected = float(actual), float(expected)
+    if not math.isfinite(actual) or not math.isfinite(expected):
+        return _same(actual, expected), None
+    distance = _ulp_distance(actual, expected)
+    return distance <= 2, distance
+
+
 def _call(fn, *args):
     try:
         return fn(*args), None
@@ -198,12 +217,101 @@ class _Cmp:
                 self.st["f_documented_deviation"] += 1     # _f_reader の docstring の「写し元と違うところ」の 2 つ目
             else:
                 self.fail("%s f E0=%r s=%r: 参照 %r / 写し %r" % (name, e0, s, rx, px))
-            return
+            return r, rx, p, px
         if (r[2] == p.region and _same(r[0], p.value) and _same(r[1], p.tail_bound) and _same(e0, p.e0_keV)
                 and _same(s, p.s)):
             self.st["f_" + p.region] += 1
         else:
             self.fail("%s f E0=%r s=%r: 参照 %r / 写し (%r, %r, %r)" % (name, e0, s, r, p.value, p.tail_bound, p.region))
+        return r, rx, p, px
+
+    def batch(self, name, port, e0, s_points, outcomes):
+        """Compare each scalar-success point in one vector call; probe scalar errors singly."""
+        self.st["batch_input_points"] += len(s_points)
+        good = [i for i, outcome in enumerate(outcomes) if outcome[3] is None]
+        errors = [i for i, outcome in enumerate(outcomes) if outcome[3] is not None]
+
+        # f_many is atomic: a documented scalar error at one s must not erase
+        # the valid tail points at the same E0 from this real-data audit.
+        for i in errors:
+            _, batch_error = _call(port.f_many, e0, [s_points[i]])
+            scalar_error = outcomes[i][3]
+            if batch_error is scalar_error:
+                self.st["batch_error_points"] += 1
+            else:
+                self.st["batch_error_mismatch"] += 1
+                self.fail("%s f_many E0=%r s=%r: scalar %r / batch %r"
+                          % (name, e0, s_points[i], scalar_error, batch_error))
+
+        if not good:
+            return
+        batch_s = [s_points[i] for i in good]
+        result, batch_error = _call(port.f_many, e0, batch_s)
+        if batch_error is not None:
+            self.st["batch_call_error"] += 1
+            self.fail("%s f_many E0=%r (%d scalar-success points): %r"
+                      % (name, e0, len(good), batch_error))
+            return
+        expected_shape = (len(good),)
+        if (result.values.shape != expected_shape or result.regions.shape != expected_shape
+                or result.tail_bounds.shape != expected_shape
+                or result.values.dtype != np.dtype("float64")
+                or result.tail_bounds.dtype != np.dtype("float64")):
+            self.st["batch_shape_mismatch"] += 1
+            self.fail("%s f_many E0=%r: values/regions/tails shape or dtype mismatch" % (name, e0))
+            return
+
+        for j, i in enumerate(good):
+            reference, reference_error, scalar, _ = outcomes[i]
+            value = float(result.values[j])
+            region = str(result.regions[j])
+            tail = float(result.tail_bounds[j])
+            self.st["batch_points"] += 1
+            self.st["batch_region_" + region] += 1
+
+            ok, distance = _within_two_ulps(value, scalar.value)
+            if distance is not None:
+                self.st["batch_max_ulp_scalar"] = max(self.st["batch_max_ulp_scalar"], distance)
+            if not ok:
+                self.st["batch_value_mismatch"] += 1
+                self.fail("%s f_many/scalar E0=%r s=%r: batch %.17g / scalar %.17g (%r ULP)"
+                          % (name, e0, batch_s[j], value, scalar.value, distance))
+
+            if region != scalar.region:
+                self.st["batch_region_mismatch"] += 1
+                self.fail("%s f_many/scalar region E0=%r s=%r: %r / %r"
+                          % (name, e0, batch_s[j], region, scalar.region))
+            if not _same(tail, scalar.tail_bound):
+                self.st["batch_tail_mismatch"] += 1
+                self.fail("%s f_many/scalar tail E0=%r s=%r: %r / %r"
+                          % (name, e0, batch_s[j], tail, scalar.tail_bound))
+
+            if reference_error is None:
+                ok, distance = _within_two_ulps(value, reference[0])
+                if distance is not None:
+                    self.st["batch_max_ulp_reference"] = max(self.st["batch_max_ulp_reference"], distance)
+                if not ok:
+                    self.st["batch_value_mismatch"] += 1
+                    self.fail("%s f_many/reference E0=%r s=%r: batch %.17g / reference %.17g (%r ULP)"
+                              % (name, e0, batch_s[j], value, reference[0], distance))
+                if region != reference[2]:
+                    self.st["batch_region_mismatch"] += 1
+                    self.fail("%s f_many/reference region E0=%r s=%r: %r / %r"
+                              % (name, e0, batch_s[j], region, reference[2]))
+                if not _same(tail, reference[1]):
+                    self.st["batch_tail_mismatch"] += 1
+                    self.fail("%s f_many/reference tail E0=%r s=%r: %r / %r"
+                              % (name, e0, batch_s[j], tail, reference[1]))
+
+    def batch_outside(self, name, port, e0):
+        _, scalar_error = _call(port.f, e0, 1.0)
+        _, batch_error = _call(port.f_many, e0, [1.0])
+        if scalar_error is ValueError and batch_error is scalar_error:
+            self.st["batch_e0_outside"] += 1
+        else:
+            self.st["batch_error_mismatch"] += 1
+            self.fail("%s out-of-range E0=%r: scalar %r / batch %r"
+                      % (name, e0, scalar_error, batch_error))
 
     def channel(self, name, port, ch):
         ref = self.ref
@@ -225,8 +333,9 @@ class _Cmp:
             if not (_same(fr.s_kin_A_inv(e0), s_kin) and _same(port.s_kin(e0), s_kin)
                     and _same(fr.electron_wavelength_A(e0), ref.electron_wavelength_A(e0))):
                 self.fail("%s: s_kin / 波長が違う E0=%r" % (name, e0))
-            for s in _s_points(s_grid, g[1], s_kin):
-                self.point(name, port, ch, e0, s, g[1])
+            s_points = _s_points(s_grid, g[1], s_kin)
+            outcomes = [self.point(name, port, ch, e0, s, g[1]) for s in s_points]
+            self.batch(name, port, e0, s_points, outcomes)
             self.st["e0_full"] += 1
         # 許容の端の近く (e0s[0] − 0.99e-9 keV): 最も低い行の E0 − E_th が 0.99 keV より小さいチャネルでは、x の許容では基底の外
         #   (表の s ノードに 1 つも届かない)。v7.0.0 では Sn K (F_K_Z50、0.8157 keV) だけ。s ≤ 1e-12 が文書にした違いになる
@@ -236,8 +345,9 @@ class _Cmp:
             self.fail("%s: 許容の中の E0=%r で grid が例外" % (name, e0))
         else:
             s_kin = ref.s_kin_A_inv(e0)
-            for s in (0.0, 1e-13, 2e-12, 0.5, s_kin + 2e-12):
-                self.point(name, port, ch, e0, s, g[1])
+            s_points = (0.0, 1e-13, 2e-12, 0.5, s_kin + 2e-12)
+            outcomes = [self.point(name, port, ch, e0, s, g[1]) for s in s_points]
+            self.batch(name, port, e0, s_points, outcomes)
             if g[1] == 0.0:
                 self.st["channels_below_every_basis"] += 1
         for k in sorted({1, len(e0s) // 2, len(e0s) - 2}):
@@ -248,13 +358,15 @@ class _Cmp:
                     self.fail("%s: ノードの近くの E0=%r で grid が例外" % (name, e0))
                     continue
                 s_kin = ref.s_kin_A_inv(e0)
-                for s in (0.0, 0.5 * g[1], g[1], g[1] + 2e-12, 0.5 * (g[1] + s_kin), s_kin + 2e-12):
-                    self.point(name, port, ch, e0, s, g[1])
+                s_points = (0.0, 0.5 * g[1], g[1], g[1] + 2e-12, 0.5 * (g[1] + s_kin), s_kin + 2e-12)
+                outcomes = [self.point(name, port, ch, e0, s, g[1]) for s in s_points]
+                self.batch(name, port, e0, s_points, outcomes)
                 self.st["e0_near_node"] += 1
         for e0 in (e0s[0] - 2e-9, e0s[-1] + 2e-9, 0.5 * e0s[0], 2.0 * e0s[-1]):
             if self.grid(name, port, ch, e0) is not None:
                 self.fail("%s: 範囲の外の E0=%r で grid が例外にならない" % (name, e0))
             self.point(name, port, ch, e0, 1.0, None)
+            self.batch_outside(name, port, e0)
             self.st["e0_outside"] += 1
         for x in (0.0, 0.05, 1.0, 14.3, 16.0):
             if not _same(fr.q_from_s(x), ref.q_from_s(x)):
@@ -360,7 +472,7 @@ class RealF(unittest.TestCase):
         missing = [e.file for e in index.entries if not os.path.isfile(os.path.join(self.dir, e.file))]
         self.assertEqual(missing, [])
 
-    def test_FR2_all_channels_bit_identical(self):
+    def test_FR2_all_channels_scalar_reference_and_batch(self):
         mraw = _read(os.path.join(self.dir, "manifest.json"))
         self.assertEqual(_sha(mraw), self.row["manifest_sha256"])
         names = sorted(e.file for e in fr.FIndex.from_manifest_bytes(mraw).entries)
@@ -369,28 +481,52 @@ class RealF(unittest.TestCase):
         nw = _workers()
         t0 = time.time()
         st, bad = collections.Counter(), []
+
+        def merge_counts(part):
+            for key, value in part.items():
+                if key in ("batch_max_ulp_scalar", "batch_max_ulp_reference"):
+                    st[key] = max(st[key], value)
+                else:
+                    st[key] += value
+
         if nw == 1:
             results = map(_compare_chunk, tasks)
             for s, b in results:
-                st.update(s)
+                merge_counts(s)
                 bad += b
         else:
             with ProcessPoolExecutor(max_workers=nw, mp_context=multiprocessing.get_context("spawn")) as ex:
                 for s, b in ex.map(_compare_chunk, tasks):
-                    st.update(s)
+                    merge_counts(s)
                     bad += b
         dt = time.time() - t0
         points = sum(v for k, v in st.items() if k.startswith("f_"))
-        sys.stderr.write("\n[FR2] %s: %d チャネル、f の点 %d (tabulated %d / unrecorded %d / impossible %d / 両方 ValueError %d / "
-                         "文書にした違い %d)、格子 %d (ノード %d)、memo の検算 %d 点、不一致 %d、workers %d、%.0f s\n"
+        sys.stderr.write("\n[FR2] %s: %d チャネル、scalar/reference 点 %d (tabulated %d / unrecorded %d / impossible %d / 両方 ValueError %d / "
+                         "文書にした違い %d)、batch 値 %d + 例外 %d (max ULP scalar/reference %d/%d; region T/U/I %d/%d/%d)、"
+                         "範囲外 E0 %d、格子 %d (ノード %d)、memo 検算 %d 点、不一致 %d、workers %d、%.0f s\n"
                          % (self.origin, st["channels"], points, st["f_tabulated"], st["f_unrecorded"], st["f_impossible"],
-                            st["f_raise_ValueError"], st["f_documented_deviation"], st["grids"], st["grid_nodes"],
-                            st["memo_checked"], st["mismatch"], nw, dt))
+                            st["f_raise_ValueError"], st["f_documented_deviation"], st["batch_points"], st["batch_error_points"],
+                            st["batch_max_ulp_scalar"], st["batch_max_ulp_reference"], st["batch_region_tabulated"],
+                            st["batch_region_unrecorded"], st["batch_region_impossible"], st["batch_e0_outside"],
+                            st["grids"], st["grid_nodes"], st["memo_checked"], st["mismatch"], nw, dt))
         self.assertEqual(bad, [])
         self.assertEqual(st["mismatch"], 0)
         self.assertEqual((st["channels"], st["files_verified"], st["strict_json_identical"]), (N_CHANNELS,) * 3)
         self.assertEqual(st["memo_checked"], N_CHANNELS * 8)
         self.assertEqual(st["e0_outside"], N_CHANNELS * 4)
+        self.assertEqual(st["batch_e0_outside"], N_CHANNELS * 4)
+        scalar_values = sum(st["f_" + region] for region in ("tabulated", "unrecorded", "impossible"))
+        scalar_errors = (sum(value for key, value in st.items() if key.startswith("f_raise_"))
+                         + st["f_documented_deviation"] - st["e0_outside"])
+        self.assertEqual(st["batch_points"], scalar_values)
+        self.assertEqual(st["batch_error_points"], scalar_errors)
+        self.assertEqual(st["batch_input_points"], st["batch_points"] + st["batch_error_points"])
+        for region in ("tabulated", "unrecorded", "impossible"):
+            self.assertGreater(st["batch_region_" + region], 0)
+        self.assertLessEqual(st["batch_max_ulp_scalar"], 2)
+        self.assertLessEqual(st["batch_max_ulp_reference"], 2)
+        self.assertEqual((st["batch_region_mismatch"], st["batch_tail_mismatch"], st["batch_value_mismatch"],
+                          st["batch_error_mismatch"], st["batch_call_error"], st["batch_shape_mismatch"]), (0,) * 6)
         # 文書にした違いは Sn K の E0 = 30 − 0.99e-9 keV の s = 0 と 1e-13 の 2 点だけ (ほかの点・チャネルでは例外まで同じ)
         self.assertEqual((st["channels_below_every_basis"], st["f_documented_deviation"]), (1, 2))
         for k in ("f_tabulated", "f_unrecorded", "f_impossible", "f_raise_ValueError"):

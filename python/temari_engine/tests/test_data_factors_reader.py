@@ -17,10 +17,14 @@ import struct
 import sys
 import types
 import unittest
+from unittest import mock
 from decimal import Decimal
 from fractions import Fraction
 
+import numpy as np
+
 from temari_engine import _factors_reader as fr
+from temari_engine import data as td
 from temari_engine.errors import MembershipError, SpeciesLookupError
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -63,6 +67,15 @@ def reference():
 
 def pack(v):
     return struct.pack("<d", v)
+
+
+def ordered_bits(value):
+    bits = struct.unpack(">Q", struct.pack(">d", float(value)))[0]
+    return (~bits & ((1 << 64) - 1)) if bits >> 63 else (bits | (1 << 63))
+
+
+def ulp_distance(left, right):
+    return abs(ordered_bits(left) - ordered_bits(right))
 
 
 def outcome(fn, x):
@@ -200,6 +213,42 @@ def ion_manifest():
 
 def mbytes(m):
     return json.dumps(m, indent=1).encode("utf-8")
+
+
+def memory_dataset(documents, series):
+    """Build a minimal in-memory FactorsDataset while keeping its public selector path."""
+    source = object()
+    raw_by_name, entries = {}, {}
+    for doc in documents:
+        raw = dumps(doc)
+        tag = doc.get("species_tag", "")
+        name = "SF_Z%03d%s.json" % (doc["z"], ("_" + tag) if tag else "")
+        spec = doc.get("external_field_spec")
+        entry = fr.FactorsEntry(
+            series, name, hashlib.sha256(raw).hexdigest(), len(raw), doc["z"], doc["symbol"], tag,
+            float(doc.get("charge", 0.0)), 4 if spec is not None else None,
+            spec.get("radius_A") if spec is not None else None, float(doc["n_electrons"]),
+            doc.get("configuration_sha256"), doc.get("external_field"), doc.get("model_id"),
+            doc["dataset_version"], doc["schema_version"],
+        )
+        raw_by_name[name] = raw
+        entries[(entry.z, entry.species_tag)] = entry
+
+    class MemoryIndex:
+        def lookup(self, z, species_tag=""):
+            try:
+                return entries[(z, species_tag)]
+            except KeyError:
+                raise KeyError((z, species_tag)) from None
+
+    class MemoryStore:
+        def read(self, name):
+            return raw_by_name[name]
+
+    dataset = object.__new__(td.FactorsDataset)
+    td._Dataset.__init__(dataset, source, MemoryStore(), MemoryIndex())
+    elements = [dataset.element(doc["z"], doc.get("species_tag", "")) for doc in documents]
+    return dataset, elements
 
 
 # ---------------------------------------------------------------------------------------------------------------------------
@@ -731,6 +780,132 @@ class Binding(unittest.TestCase):
             meta["z"] = 99                                                     # 写しを返す (中身を書き換えられない)
             self.assertEqual(el.meta["z"], el.z)
         self.assertEqual(fr.Element.from_bytes(ANION_BYTES).meta["external_field_spec"]["radius_A"], 1.38)
+
+
+class BatchEvaluation(unittest.TestCase):
+    def test_neutral_matrix_preserves_input_order_and_scalar_values(self):
+        copper = base_doc(29, "Cu", 0.0, 29.0, "", "2.0.0")
+        dataset, elements = memory_dataset([NEUTRAL, copper], "factors")
+        ref_by_z = None
+        if HAVE_REF:                         # 261001Cl: repo の外では参照との比較だけを名指しで飛ばす (下の skipTest)
+            ref = reference()
+            ref_by_z = {doc["z"]: ref.Element(ref._strict_json(dumps(doc), "synthetic"), check=True, expect_z=doc["z"])
+                        for doc in (NEUTRAL, copper)}
+        s_values = np.asarray([0.0, 1e-9, 0.03125, 0.5, 1.234567890123, 3.0, 5.999, 6.0], dtype=np.float64)
+        requested = [elements[1], elements[0], elements[1]]
+        for quantity in ("fx", "fe", "fe_regular"):
+            result = dataset.evaluate_many(requested, quantity, s_values)
+            self.assertEqual(result.values.shape, (3, len(s_values)))
+            self.assertEqual(result.values.dtype, np.dtype("float64"))
+            self.assertEqual([sp.z for sp in result.species], [29, 26, 29])
+            self.assertEqual(result.quantity, quantity)
+            self.assertIs(result.source, dataset.source)
+            for row, element in zip(result.values, requested):
+                expected = [getattr(element, quantity)(float(s)) for s in s_values]
+                self.assertLessEqual(max(ulp_distance(a, b) for a, b in zip(row, expected)), 2)
+                if ref_by_z is not None:
+                    reference_values = [getattr(ref_by_z[element.z], quantity)(float(s)) for s in s_values]
+                    self.assertLessEqual(max(ulp_distance(a, b) for a, b in zip(row, reference_values)), 2)
+        if ref_by_z is None:
+            self.skipTest(SKIP_REF)
+
+    def test_ion_fe_edges_and_foreign_elements(self):
+        dataset, elements = memory_dataset([ANION], "factors-ion")
+        element = elements[0]
+        s_values = np.asarray([0.0, 1e-160, 1e-150, 1e-12, 0.5, 3.25, 6.0], dtype=np.float64)
+        for quantity in ("fx", "fe", "fe_regular"):
+            result = dataset.evaluate_many(elements, quantity, s_values)
+            self.assertEqual(result.values.shape, (1, len(s_values)))
+            for actual, s in zip(result.values[0], s_values):
+                expected = getattr(element, quantity)(float(s))
+                if math.isinf(expected):
+                    self.assertEqual(float(actual), expected)
+                else:
+                    self.assertLessEqual(ulp_distance(actual, expected), 2)
+        self.assertEqual(float(dataset.evaluate_many(elements, "fe", [0.0]).values[0, 0]), -math.inf)
+        with self.assertRaises(ZeroDivisionError):
+            dataset.evaluate_many(elements, "fe", [0.0, 1e-162])
+
+        other, foreign = memory_dataset([ANION], "factors-ion")
+        self.assertEqual(other.source is dataset.source, False)
+        with self.assertRaises(MembershipError):
+            dataset.evaluate_many(foreign, "fx", [0.5])
+
+    def test_batch_is_bit_identical_to_scalar_inside_intervals(self):
+        """261001Cl: 区間の中の点 (t ≠ 0) と、荷電種の fe の符号が変わる所の近くで、batch が scalar とビットで同じ。
+        batch の 2 乗が NumPy の x*x だったとき、Windows (UCRT の pow) で fe_regular が最大 4 ULP、陰イオンの fe が零点の近くで
+        数千 ULP 違った。節点 (t = 0) の点だけではこの差は見えない"""
+        rng = np.random.default_rng(20261001)
+        s_random = rng.uniform(0.0, fr.S_MAX, 4000)
+        pow_nodes = [s for s in fr.s_nodes() if s ** 2 != s * s]
+        copper = base_doc(29, "Cu", 0.0, 29.0, "", "2.0.0")
+        # 1 回の呼び出しに 2 種を入れる (evaluate_many は 2 乗と spline の基底を種の間で使い回す)
+        for documents, series in (([NEUTRAL, copper], "factors"), ([ANION, CATION], "factors-ion")):
+            dataset, elements = memory_dataset(documents, series)
+            near_zero = []
+            for element in elements:
+                if element.charge >= 0.0:
+                    continue
+                lo, hi = 1e-3, fr.S_MAX
+                self.assertLess(element.fe(lo), 0.0)
+                self.assertGreater(element.fe(hi), 0.0)
+                for _ in range(80):
+                    mid = 0.5 * (lo + hi)
+                    lo, hi = (mid, hi) if element.fe(mid) < 0.0 else (lo, mid)
+                near_zero.append(np.linspace(lo - 1e-3, lo + 1e-3, 2001))
+            self.assertEqual(len(near_zero), 1 if series == "factors-ion" else 0)
+            s_values = np.sort(np.concatenate([s_random, pow_nodes] + near_zero))
+            for quantity in ("fx", "fe", "fe_regular"):
+                rows = dataset.evaluate_many(elements, quantity, s_values).values
+                for row, element in zip(rows, elements):
+                    method = getattr(element, quantity)
+                    bad = [(float(s), float(a), method(float(s))) for s, a in zip(s_values, row)
+                           if struct.pack("<d", float(a)) != struct.pack("<d", method(float(s)))]
+                    with self.subTest(series=series, element=str(element), quantity=quantity):
+                        self.assertEqual(bad[:3], [])
+
+    def test_batch_squares_go_through_the_scalar_power(self):
+        """261001Cl: 上のビットの一致の試験が np.power への逆戻りを捕まえるのは、試験の点の中にその機の pow(x, 2) が x*x と違う点があり、
+        その差が最終の値に残るときだけ (Windows の UCRT で約 0.05 %、glibc 2.39 で約 0.08 % の点。libm に依る)。
+        2 乗を相対 1e-6 ずらす偽物に差し替え、fx・fe・fe_regular の batch の値が変わる (= 2 乗がこの関数を通る) ことを直接見る
+        (libm に依らない。1 ULP のずれは Hermite の基底の和の丸めに吸われることが多く、門にならない)"""
+        dataset, elements = memory_dataset([ANION], "factors-ion")
+        s_values = np.linspace(0.013, 5.9, 257)
+        real = fr._square_like_scalar
+        for quantity in ("fx", "fe", "fe_regular"):
+            before = dataset.evaluate_many(elements, quantity, s_values).values
+            with mock.patch.object(fr, "_square_like_scalar", lambda v: real(v) * (1.0 + 1e-6)):
+                after = dataset.evaluate_many(elements, quantity, s_values).values
+            with self.subTest(quantity=quantity):
+                self.assertGreater(int(np.count_nonzero(before != after)), len(s_values) // 2)
+        # fe_regular は問い合わせ点の s**2 と基底の (1 - t)**2 の両方でこの関数を使う。上の偽物は両方に効くので、s**2 の側だけ
+        # np.power に戻っても通ってしまう (codex2 の 2026-10-01 の指摘、再現済み)。s の配列が来たときだけずらす偽物で、s**2 の側を見る
+        only_s = lambda v: real(v) * (1.0 + 1e-6) if np.shape(v) == s_values.shape and np.array_equal(v, s_values) else real(v)
+        before = dataset.evaluate_many(elements, "fe_regular", s_values).values
+        with mock.patch.object(fr, "_square_like_scalar", only_s):
+            after = dataset.evaluate_many(elements, "fe_regular", s_values).values
+        with self.subTest(quantity="fe_regular", path="s**2"):
+            self.assertGreater(int(np.count_nonzero(before != after)), len(s_values) // 2)
+
+    def test_square_like_scalar_is_python_power(self):
+        """261001Cl: batch の 2 乗は Python の `** 2` (C の pow) と同じビット。塊の境目を跨ぎ、形を保つ"""
+        x = np.random.default_rng(7).uniform(0.0, 36.0, 3 * fr._SQUARE_CHUNK + 5)
+        got = fr._square_like_scalar(x)
+        self.assertEqual(got.dtype, np.dtype("float64"))
+        self.assertEqual(got.shape, x.shape)
+        self.assertEqual([struct.pack("<d", v) for v in got.tolist()], [struct.pack("<d", v ** 2) for v in x.tolist()])
+        self.assertEqual(fr._square_like_scalar(np.zeros((2, 0))).shape, (2, 0))
+        self.assertEqual(fr._square_like_scalar(np.asarray([[0.5, 1.5], [-0.0, 3.0]])).tolist(), [[0.25, 2.25], [0.0, 9.0]])
+
+    def test_invalid_batch_inputs_are_rejected(self):
+        dataset, elements = memory_dataset([NEUTRAL], "factors")
+        for quantity, values, error in (("other", [0.5], ValueError), ("fx", [[0.5]], TypeError),
+                                        ("fx", [-0.1], ValueError), ("fx", [6.1], ValueError),
+                                        ("fx", [math.nan], ValueError), ("fx", [math.inf], ValueError),
+                                        ("fx", [True], TypeError), ("fx", [np.bool_(True)], TypeError),
+                                        ("fx", ["0.5"], TypeError)):
+            with self.subTest(quantity=quantity, values=values), self.assertRaises(error):
+                dataset.evaluate_many(elements, quantity, values)
 
 
 if __name__ == "__main__":
