@@ -522,6 +522,37 @@ Krieger et al. (1992) publish for the ten closed-subshell atoms they tabulate.
 $f_x$ is affected at ≤ 0.22 % for every d-block element. The curves and the
 Z sweep are on the [comparison page](comparison.md#fe-s0-deficit).
 
+#### Known inconsistency in the open-shell tables { #factors-known-issue }
+
+Found in 2026-11: in v2.0.0 the exchange coefficients of open p, d and f
+subshells did not match the fixed-electron-number configuration average. It
+affects the 61 neutral elements that have such a subshell. The relative
+changes below are (corrected − shipped) / shipped. The correction raises
+$f_e(0)$ for 60 of the 61: by +1.08 % for Al, +1.05 % for B, +1.00 % for C,
++0.99 % for Ga and +0.90 % for Si, and by more than 0.5 % for 14 elements
+(Tm changes by −0.00007 %). The change is concentrated at small $s$. The
+maximum absolute relative change of $f_e$ over all elements is 0.72 % at
+$s = 0.1$ Å⁻¹, 0.32 % at 0.2, 0.13 % at 0.3, 0.02 % at 0.5 and 0.002 % at
+1.0. For $f_x$ the maximum absolute change is 0.012 electrons (Nb,
+$s = 0.11$ Å⁻¹), and the maximum absolute relative change is 0.21 % (C, near
+$s = 0.2$ Å⁻¹).
+
+The tables of the 16 closed-shell elements and of H are identical at every
+node. For the eight elements whose only open subshell is s (Li, Na, K, Cu, Rb,
+Ag, Cs, Au), $f_e(0)$ differs by less than 2 × 10⁻⁹ in relative terms. The
+anion tables (dataset-factors-ion 1.0.0) differ by at most 5.2 × 10⁻⁹ Å.
+
+What it means in use: within the tabulated range, the absolute relative
+change of $f_e$ is at most 0.32 % for $0.2 \le s \le 6$ Å⁻¹ and at most
+0.02 % for $0.5 \le s \le 6$ Å⁻¹. Examples at individual reflections: diamond 111
+($s = 0.243$) +0.19 %, Si 111 ($s = 0.159$) +0.15 %, Al 111 ($s = 0.214$)
+−0.02 %. An $f_e(0)$ taken from the isolated-atom tables changes by up to
+about 1.1 %. These are differences between the two sets of tables, not a
+bound on the error of either with respect to a real material. The corrected
+tables go into the next release of dataset-factors; v2.0.0 is not replaced.
+How the comparison with DHF changes is on the
+[comparison page](comparison.md#fe-s0-deficit).
+
 ## Scattering factors of anions — dataset-factors-ion 1.0.0 { #factors-ion }
 
 $f_x(s)$ and $f_e(s)$ for **22 charged species**: the anions N³⁻, O²⁻, P³⁻, S²⁻,

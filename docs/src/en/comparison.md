@@ -146,7 +146,8 @@ What the figure shows:
   asymptote. Its one excursion is at $s \to 0$ for Si (+0.7 %).
 - **Temari agrees with DHF to 0.25 % from $s \approx 0.3$ Å⁻¹ and to 0.1 %
   from $s \approx 0.5$ upward, but sits below it as $s \to 0$: −0.65 % (Si)
-  and −2.0 % (Fe) at $s = 0.01$.**
+  and −2.0 % (Fe) at $s = 0.01$.** (These are the v2.0.0 tables; for Si see
+  the note at the end of the next subsection.)
   This is the one place where the $f_e$ comparison resolves something the $f_x$
   comparison cannot: a 2 % difference in $f_e$ near $s = 0$ is a 0.03 %
   difference in $f_x$, invisible in panel 1. Its origin is identified next.
@@ -190,6 +191,41 @@ what KLI drops relative to OEP — the orbital-shift terms; that these bind a
 diffuse $n$s electron slightly too tightly over a compact $(n-1)$d shell is the
 natural reading of the Zn/Cd/Cr/Cu pattern, not something separately proven
 here.
+
+!!! warning "The open-shell tables carry an inconsistency in the exchange coefficients (found 2026-11)"
+    The figures and numbers in this section are those of the dataset-factors
+    v2.0.0 tables. In v2.0.0 the exchange coefficients of the 61 elements with
+    an open p, d or f subshell did not match the fixed-electron-number
+    configuration average. With corrected tables (not released; they go into
+    the next version), the same comparison at $s = 0.02$ Å⁻¹ changes as follows.
+
+    - **Closed-subshell atoms and atoms whose only open subshell is s** (noble
+      gases; Be, Mg, Ca, Zn, Sr, Pd, Cd, Ba, Yb, Hg; alkali metals; Cu, Ag, Au):
+      unchanged at the precision of this comparison. The match with the ten
+      atoms of Krieger et al. (1992) and the dips of Zn, Cd and Cu stay as they
+      are.
+    - **d block**: the dip stays. Fe −1.97 → −1.91 %, Cr −3.90 → −3.46 %,
+      Nb −2.08 → −1.49 %; the 26 elements with an open d subshell (La, Ce, Gd
+      and Lu included) move from −3.90 … −0.74 % to −3.46 … −0.22 %.
+    - **Main-group atoms with an open p subshell (25 elements)**: the range
+      changes from −1.07 … 0.00 % to −0.39 … +0.61 %, and the mean absolute
+      difference drops from 0.45 % to 0.14 %. Si goes from −0.65 to +0.23 %,
+      Al from −0.77 to +0.25 %, Ga from −1.07 to −0.13 %. Twenty-two of them
+      move closer to DHF and three move away: B (−0.41 → +0.61 %),
+      I (−0.053 → +0.067 %) and At (+0.003 → +0.096 %). I and At stay within
+      ±0.1 % before and after.
+
+    At $s = 0.02$ Å⁻¹ the correction lowers the mean absolute relative
+    deviation from DHF of the 25 main-group elements with an open p subshell
+    by about 68 %, so the inconsistency had a large part in what the v2.0.0
+    comparison showed at small $s$ — the −0.65 % of Si above, for instance.
+    Whether OFFV1 treats open shells with the same state or average as the
+    configuration average used here has not been checked, and this comparison
+    alone cannot separate the error of the KLI approximation itself. The match
+    for the ten closed-subshell atoms stands, and the negative deviations of
+    the atoms with an open d subshell remain; their cause is, as before, an
+    inference. The size of the change in the tables is given on the
+    [Data page](data.md#factors-known-issue).
 
 **Take-away.** The consequence for the shipped tables is measured and
 localized: $f_x$ stays within 0.22 % of DHF for every d-block element (Sc 0.21 %,
